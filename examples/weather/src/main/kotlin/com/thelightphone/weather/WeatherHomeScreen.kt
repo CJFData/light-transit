@@ -111,11 +111,19 @@ class WeatherHomeScreen(sealedActivity: SealedLightActivity) :
                                 center = LightTopBarCenter.Text("Weather"),
                                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                             )
-                            LightText(
-                                text = "Loading…",
-                                variant = LightTextVariant.Copy,
-                                modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                LightText(
+                                    text = mode.message,
+                                    variant = LightTextVariant.Copy,
+                                    align = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
+                                )
+                            }
                         }
                     }
 

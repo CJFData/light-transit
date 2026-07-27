@@ -70,7 +70,8 @@ sealed interface LightServiceMethod<TRequest, TResponse> {
             val emojisAsString: String?,
             val displayVoice: Boolean,
             val enableKeyAnimation: Boolean,
-            val swipeEnabled: Boolean?
+            // optional for older sdk servers that omit this field
+            val swipeEnabled: Boolean? = null,
         )
     }
 

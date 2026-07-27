@@ -1,5 +1,7 @@
 package com.thelightphone.weather
 
+import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -66,9 +68,21 @@ data class StoredForecast(
         }
     }
 
-    fun hoursForToday(): List<HourlyForecast> =
-        hourly.filter { it.time.substringBefore('T') == today.date }
+    fun hoursForToday(now: LocalDateTime = LocalDateTime.now()): List<HourlyForecast> {
+        val todayDate = today.date
+        val fromHour = now.truncatedTo(ChronoUnit.HOURS)
+        return hourly.filter { hour ->
+            if (hour.time.substringBefore('T') != todayDate) return@filter false
+            val hourTime = parseHourlyLocalDateTime(hour.time) ?: return@filter true
+            !hourTime.isBefore(fromHour)
+        }
+    }
 }
+
+private fun parseHourlyLocalDateTime(isoDateTime: String): LocalDateTime? =
+    runCatching {
+        LocalDateTime.parse(isoDateTime.take(16))
+    }.getOrNull()
 
 private fun WeeklyDay.toDayForecast(): DayForecast = DayForecast(
     date = date,
