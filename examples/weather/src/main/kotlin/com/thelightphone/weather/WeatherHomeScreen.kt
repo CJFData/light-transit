@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import kotlinx.datetime.LocalDate
 import com.thelightphone.weather.R
 import com.thelightphone.sdk.ui.designVerticalPxToSp
 import com.thelightphone.sdk.InitialScreen
@@ -491,7 +492,7 @@ private fun WeatherBoldLine(text: String) {
 
 @Composable
 private fun HourlyForecastContent(
-    date: String,
+    date: LocalDate,
     hours: List<HourlyForecast>,
     temperatureUnit: TemperatureUnit,
     onClose: () -> Unit,

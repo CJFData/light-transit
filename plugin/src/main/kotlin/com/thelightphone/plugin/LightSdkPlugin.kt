@@ -27,6 +27,7 @@ class LightSdkPlugin : Plugin<Project> {
             "io.ktor",
             "org.jetbrains.kotlinx:kotlinx-serialization",
             "org.jetbrains.kotlinx:kotlinx-io",
+            "org.jetbrains.kotlinx:kotlinx-datetime",
             "org.unifiedpush.android:connector",
             "androidx.core:core-splashscreen",
             "com.thelightphone.lp3keyboard",

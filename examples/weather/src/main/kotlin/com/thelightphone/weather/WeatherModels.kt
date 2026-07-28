@@ -1,8 +1,12 @@
 package com.thelightphone.weather
 
-import java.time.LocalDateTime
-import java.time.temporal.ChronoUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atTime
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
+import kotlin.time.Clock
 
 @Serializable
 data class CurrentConditions(
@@ -13,7 +17,7 @@ data class CurrentConditions(
 
 @Serializable
 data class DayForecast(
-    val date: String,
+    val date: LocalDate,
     val tempMaxC: Double,
     val tempMinC: Double,
     val apparentTempMaxC: Double,
@@ -24,13 +28,13 @@ data class DayForecast(
     val windSpeedMaxKmh: Double,
     val windDirectionDominant: Int,
     val uvIndexMax: Double,
-    val sunrise: String,
-    val sunset: String,
+    val sunrise: LocalDateTime?,
+    val sunset: LocalDateTime?,
 )
 
 @Serializable
 data class HourlyForecast(
-    val time: String,
+    val time: LocalDateTime,
     val tempC: Double,
     val apparentTempC: Double,
     val precipitationMm: Double,
@@ -39,7 +43,7 @@ data class HourlyForecast(
 
 @Serializable
 data class WeeklyDay(
-    val date: String,
+    val date: LocalDate,
     val tempMaxC: Double,
     val tempMinC: Double,
     val precipitationMm: Double,
@@ -68,21 +72,13 @@ data class StoredForecast(
         }
     }
 
-    fun hoursForToday(now: LocalDateTime = LocalDateTime.now()): List<HourlyForecast> {
-        val todayDate = today.date
-        val fromHour = now.truncatedTo(ChronoUnit.HOURS)
-        return hourly.filter { hour ->
-            if (hour.time.substringBefore('T') != todayDate) return@filter false
-            val hourTime = parseHourlyLocalDateTime(hour.time) ?: return@filter true
-            !hourTime.isBefore(fromHour)
-        }
+    fun hoursForToday(
+        now: LocalDateTime = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    ): List<HourlyForecast> {
+        val fromHour = now.date.atTime(now.hour, 0)   // replaces truncatedTo(HOURS)
+        return hourly.filter { hour -> hour.time.date == today.date && hour.time >= fromHour }
     }
 }
-
-private fun parseHourlyLocalDateTime(isoDateTime: String): LocalDateTime? =
-    runCatching {
-        LocalDateTime.parse(isoDateTime.take(16))
-    }.getOrNull()
 
 private fun WeeklyDay.toDayForecast(): DayForecast = DayForecast(
     date = date,
@@ -96,8 +92,8 @@ private fun WeeklyDay.toDayForecast(): DayForecast = DayForecast(
     windSpeedMaxKmh = 0.0,
     windDirectionDominant = 0,
     uvIndexMax = 0.0,
-    sunrise = "",
-    sunset = "",
+    sunrise = null,
+    sunset = null,
 )
 
 internal fun wmoWeatherDescription(code: Int): String = when (code) {
