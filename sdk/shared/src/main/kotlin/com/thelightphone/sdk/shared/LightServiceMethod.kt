@@ -6,7 +6,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 
-val lightJson = Json { ignoreUnknownKeys = true }
+val lightJson = Json {
+    ignoreUnknownKeys = true
+    explicitNulls = false
+}
 
 /**
  * Defines a typed method that a client can call on the server's bound service.
