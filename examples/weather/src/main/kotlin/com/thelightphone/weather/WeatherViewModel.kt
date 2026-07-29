@@ -1,24 +1,17 @@
 package com.thelightphone.weather
 
-import android.os.SystemClock
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SimpleLightScreen
-import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.Json
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 sealed class WeatherScreenMode {
     data object LocationInput : WeatherScreenMode()
@@ -63,7 +56,7 @@ private enum class LocationInputSource {
 private const val NETWORK_ERROR_MESSAGE =
     "The Weather tool requires a network connection. Please insert a data sim or connect to wi-fi to view the latest conditions."
 
-private const val MIN_LOADING_DISPLAY_MS = 1_000L
+private val MIN_LOADING_DISPLAY = 1.seconds
 
 internal const val LOADING_MESSAGE = "Loading…"
 internal const val FETCHING_WEATHER_MESSAGE = "fetching weather data..."
@@ -313,19 +306,19 @@ class WeatherViewModel(
         )
     }
 
-    private suspend fun beginLoading(message: String): Long {
+    private suspend fun beginLoading(message: String): Instant {
         updateState {
             it.copy(
                 mode = WeatherScreenMode.Loading(message),
                 errorModal = null,
             )
         }
-        return SystemClock.elapsedRealtime()
+        return Clock.System.now()
     }
 
-    private suspend fun awaitMinimumLoading(startedAtMs: Long) {
-        val remaining = MIN_LOADING_DISPLAY_MS - (SystemClock.elapsedRealtime() - startedAtMs)
-        if (remaining > 0) delay(remaining)
+    private suspend fun awaitMinimumLoading(startedAt: Instant) {
+        val remaining = MIN_LOADING_DISPLAY - (Clock.System.now() - startedAt)
+        if (remaining.isPositive()) delay(remaining)
     }
 
     fun showPreviousDay() {
