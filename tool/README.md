@@ -1,6 +1,8 @@
-# 🚌 Transit — your pocket-sized transit sidekick for the Light Phone III
+# 🚌 Transit
 
-Hop on, hop off! Transit turns your Light Phone III into a tiny, delightfully un-distracting transit companion for MBTA and RIPTA. No ads, no infinite scroll — just "when's my bus" and "where the heck is it right now." 🚏✨
+Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a tiny radar screen that shows you exactly which direction your ride is coming from — no ads, no clutter, no infinite scroll. Just "when's my bus," answered nicely. 🚏✨
+
+Right now Transit knows its way around **MBTA** and **RIPTA**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
 
 ## 🗺️ What can it do?
 
