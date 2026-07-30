@@ -1,0 +1,37 @@
+package com.thelightphone.transit.gtfs
+
+/**
+ * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] are null when an agency has no realtime
+ * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
+ * URL here is the only change a screen-level caller ever needs to make.
+ *
+ * RIPTA's realtime service (realtime.ripta.com) is plain-HTTP-only with no HTTPS equivalent for
+ * either feed, which Android blocks by default. Its URLs below are only reachable because of a
+ * REMOVABLE cleartext exception — see the :netconfig module (netconfig/build.gradle.kts) for the
+ * full explanation and exact removal steps. To restore HTTPS-only enforcement everywhere, remove
+ * that module (per its own instructions) AND set RIPTA's two URLs below back to null.
+ */
+enum class GtfsAgency(
+    val id: String,
+    val displayName: String,
+    val feedUrl: String,
+    val realtimeTripUpdatesUrl: String?,
+    val realtimeVehiclePositionsUrl: String?,
+) {
+    MBTA(
+        "mbta",
+        "MBTA",
+        "https://cdn.mbta.com/MBTA_GTFS.zip",
+        "https://cdn.mbta.com/realtime/TripUpdates.pb",
+        "https://cdn.mbta.com/realtime/VehiclePositions.pb",
+    ),
+    // REMOVABLE: these two URLs only work because of the :netconfig cleartext exception (see
+    // class doc above). Set both back to null to restore HTTPS-only enforcement for RIPTA.
+    RIPTA(
+        "ripta",
+        "RIPTA",
+        "https://ripta.com/RIPTA-GTFS.zip",
+        "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
+        "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
+    ),
+}

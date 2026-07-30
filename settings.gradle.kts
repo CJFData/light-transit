@@ -41,6 +41,8 @@ include(":sdk:client")
 include(":sdk:server")
 include(":sdk:emulator")
 include(":tool")
+// REMOVABLE: see netconfig/build.gradle.kts for what this is and how to fully remove it.
+include(":netconfig")
 include(":examples:ui-demo")
 project(":examples:ui-demo").projectDir = file("examples/ui-demo")
 include(":examples:weather")
