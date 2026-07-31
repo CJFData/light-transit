@@ -1,21 +1,22 @@
 # 🚌 Pico Transit
 
-Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a tiny radar screen that shows you exactly which direction your ride is coming from — no ads, no clutter, no infinite scroll. Just "when's my bus," answered nicely. 🚏✨
+Pico Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a live map that shows exactly where your ride actually is — no ads, no clutter, no infinite scroll. Just "when's my bus," answered nicely. 🚏✨
 
-Right now Transit knows its way around **MBTA** and **RIPTA**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
+Right now Pico Transit knows its way around **MBTA** and **RIPTA**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
 
 ## 🗺️ What can it do?
 
-- 🏠 **Pick your agency** — MBTA or RIPTA — and Transit downloads their schedule right onto your phone.
+- 🏠 **Pick your agency** — MBTA or RIPTA — and Pico Transit downloads their schedule right onto your phone.
+- ⚙️ **Settings** — set a default agency once and Pico Transit skips the picker on every future launch, only re-downloading the schedule when the agency's feed has actually changed.
 - 📅 **Explore Schedules** — browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, pick a route, a direction, and a stop, and see every departure today.
 - 🔗 **Connections** — tap any stop along a trip to see what else comes through there next. Great for planning a transfer on the fly.
-- 📍 **Leave Now** — type where you are (or let Transit take a quick IP-based guess 🛰️) and get the 20 closest stops, nearest first.
+- 📍 **Leave Now** — type where you are (or let Pico Transit take a quick IP-based guess 🛰️) and get the 20 closest stops, nearest first.
 - ⏱️ **Live ETAs** — real-time predictions with On Time / Late / Early badges, whenever the agency's live feed is playing along nicely.
-- 🧭 **ETA Radar** — a little live radar screen showing exactly which direction your bus (and nearby stops!) are coming from, right now.
+- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with an emoji for their mode (🚇 subway/light rail, 🚆 commuter rail, 🚌 bus) — flip on "Nearby Vehicles" to also see what's inbound to those other stops, not just yours.
 
 ## 🛠️ Building & running it
 
-Transit lives inside the [light-sdk](../) monorepo — check the [root README](../README.md) first for one-time setup (GitHub token, Android Studio, etc). Once that's done:
+Pico Transit lives inside the [light-sdk](../) monorepo — check the [root README](../README.md) first for one-time setup (GitHub token, Android Studio, etc). Once that's done:
 
 1. Open the whole `light-sdk` project in Android Studio.
 2. Run the `:tool` module on an emulator, or better yet, [the LightOS emulator](../docs/system_app) — that's this app! 🎉
@@ -45,3 +46,4 @@ That's it — happy transit-ing! 🚏🚌🚆
 
 - **RIPTA's live feeds are HTTP-only** (no HTTPS), which Android blocks by default. There's a small, clearly-labeled `:netconfig` module that grants just that one narrow exception — see its own `build.gradle.kts` for exactly what it does and how to remove it if you'd rather stay HTTPS-only everywhere.
 - **No device GPS is used anywhere** — the SDK doesn't expose it to tools yet. Nearby-stop and location search are powered by Nominatim (OpenStreetMap) and IP-based geolocation instead. Be kind to their free APIs! 🙏
+- **Stations are deduplicated using GTFS's `parent_station`** — a big station with several platforms (subway entrances, commuter rail tracks, etc.) shows up as one marker/entry, not one per platform, while still resolving to the right platform's `stop_id` under the hood for schedule lookups.
