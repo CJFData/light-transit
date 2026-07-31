@@ -26,10 +26,10 @@ data class RouteOption(
  * light rail, e.g. MBTA's Green Line) is bucketed with Subway rather than broken out separately,
  * since that's how riders colloquially refer to it.
  */
-enum class LineType(val gtfsRouteTypes: Set<Int>, val label: String) {
-    SUBWAY(setOf(0, 1), "Subway"),
-    COMMUTER_RAIL(setOf(2), "Commuter Rail"),
-    BUS(setOf(3), "Bus");
+enum class LineType(val gtfsRouteTypes: Set<Int>, val label: String, val emoji: String) {
+    SUBWAY(setOf(0, 1), "Subway", "🚇"),
+    COMMUTER_RAIL(setOf(2), "Commuter Rail", "🚆"),
+    BUS(setOf(3), "Bus", "🚌");
 
     companion object {
         fun forGtfsRouteType(routeType: Int): LineType? = entries.find { routeType in it.gtfsRouteTypes }
@@ -51,6 +51,8 @@ data class StopWithDistance(
     val lat: Double,
     val lon: Double,
     val distanceMeters: Double,
+    /** See [StopLocation.memberStopIds]. */
+    val memberStopIds: List<String>,
 )
 
 data class Departure(
@@ -76,7 +78,19 @@ data class StopConnection(
     val direction: DirectionOption,
 )
 
-data class StopLocation(val stopId: String, val stopName: String?, val lat: Double, val lon: Double)
+data class StopLocation(
+    val stopId: String,
+    val stopName: String?,
+    val lat: Double,
+    val lon: Double,
+    /**
+     * The real, queryable stop_id(s) this location represents. For a plain standalone stop this is
+     * just its own id. For a deduplicated GTFS station (see [groupStationsByParent]) this is every
+     * child platform/entrance stop_id grouped under it -- stations themselves typically have no
+     * stop_times of their own, so schedule/arrival lookups need a real child id, not the station's.
+     */
+    val memberStopIds: List<String>,
+)
 
 data class ScheduledArrival(
     val tripId: String,
@@ -271,23 +285,33 @@ class GtfsRepository(dbFile: File) {
         }
     }
 
-    /** Every stop with valid coordinates, for nearest-stop distance ranking. */
+    /**
+     * Every stop with valid coordinates, for nearest-stop distance ranking -- deduplicated per GTFS
+     * station grouping (see [groupStationsByParent]), shared by both [rankStopsByDistance] (the
+     * stop search flow) and [getStopsWithinRadius] (Map screen markers) so a physical station with
+     * several platform-level stop_ids appears once, not once per platform.
+     */
     fun getStopsWithLocation(): List<StopLocation> =
         db.rawQuery(
-            "SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops WHERE stop_lat IS NOT NULL AND stop_lon IS NOT NULL",
+            "SELECT stop_id, stop_name, stop_lat, stop_lon, parent_station FROM stops " +
+                "WHERE stop_lat IS NOT NULL AND stop_lon IS NOT NULL",
             null,
         ).use { cursor ->
-            cursor.mapRows {
-                StopLocation(
+            val rows = cursor.mapRows {
+                RawStopRow(
                     stopId = getString(0),
                     stopName = getStringOrNull(1),
                     lat = getDouble(2),
                     lon = getDouble(3),
+                    parentStation = getStringOrNull(4),
                 )
             }
+            groupStationsByParent(rows)
         }
 
-    /** A single stop's coordinates, for the ETA radar screen's bearing/distance math. */
+    /** A single stop's coordinates, for the ETA radar screen's bearing/distance math. Looked up
+     * directly by id -- not deduplicated, since callers already have a specific, resolved stop_id
+     * in hand (e.g. the one a schedule/arrival was actually looked up for). */
     fun getStopLocation(stopId: String): StopLocation? =
         db.rawQuery(
             "SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops WHERE stop_id = ? AND stop_lat IS NOT NULL AND stop_lon IS NOT NULL",
@@ -299,6 +323,7 @@ class GtfsRepository(dbFile: File) {
                     stopName = getStringOrNull(1),
                     lat = getDouble(2),
                     lon = getDouble(3),
+                    memberStopIds = listOf(getString(0)),
                 )
             }.firstOrNull()
         }
@@ -348,38 +373,9 @@ class GtfsRepository(dbFile: File) {
     }
 
     /**
-     * The stop immediately before [beforeStopSequence] in [tripId]'s stop_sequence, if any. Used
-     * to approximate a scheduled (non-live) bus's approach bearing when no VehiclePosition exists
-     * for it — see EtaRadarScreen. Returns null for a trip's first stop (nothing precedes it).
-     */
-    fun getPreviousStopLocation(tripId: String, beforeStopSequence: Int): StopLocation? =
-        db.rawQuery(
-            """
-            SELECT s.stop_id, s.stop_name, s.stop_lat, s.stop_lon
-            FROM stop_times st
-            JOIN stops s ON s.stop_id = st.stop_id
-            WHERE st.trip_id = ? AND st.stop_sequence < ?
-              AND s.stop_lat IS NOT NULL AND s.stop_lon IS NOT NULL
-            ORDER BY st.stop_sequence DESC
-            LIMIT 1
-            """,
-            arrayOf(tripId, beforeStopSequence.toString()),
-        ).use { cursor ->
-            cursor.mapRows {
-                StopLocation(
-                    stopId = getString(0),
-                    stopName = getStringOrNull(1),
-                    lat = getDouble(2),
-                    lon = getDouble(3),
-                )
-            }.firstOrNull()
-        }
-
-    /**
      * Every stop with coordinates, ranked by distance from ([anchorLat], [anchorLon]), nearest
-     * first, capped at [limit]. Shared by the "Leave Now" nearby-stops flow (anchored at a
-     * geocoded search point) and the ETA radar's nearby-stops overlay (anchored at the selected
-     * stop), so both draw from the same ranking logic rather than duplicating it.
+     * first, capped at [limit]. Used by the "Leave Now" nearby-stops flow, anchored at a geocoded
+     * search point.
      */
     fun rankStopsByDistance(
         anchorLat: Double,
@@ -389,7 +385,7 @@ class GtfsRepository(dbFile: File) {
     ): List<StopWithDistance> =
         getStopsWithLocation()
             .asSequence()
-            .filter { it.stopId != excludeStopId }
+            .filter { excludeStopId == null || excludeStopId !in it.memberStopIds }
             .map { stop ->
                 StopWithDistance(
                     stopId = stop.stopId,
@@ -397,15 +393,105 @@ class GtfsRepository(dbFile: File) {
                     lat = stop.lat,
                     lon = stop.lon,
                     distanceMeters = haversineMeters(anchorLat, anchorLon, stop.lat, stop.lon),
+                    memberStopIds = stop.memberStopIds,
                 )
             }
             .sortedBy { it.distanceMeters }
             .take(limit)
             .toList()
 
+    /**
+     * Every stop with coordinates that's actually within [radiusMeters] of ([anchorLat],
+     * [anchorLon]) — true geographic containment, not a "nearest N" ranking, so what's returned
+     * matches exactly what's visible on the map rather than an arbitrary top-K cutoff. Used by
+     * MapScreen to plot nearby stops at their real positions. [maxResults] is only a safety cap for
+     * unusually stop-dense areas, not the intended selection method.
+     */
+    fun getStopsWithinRadius(
+        anchorLat: Double,
+        anchorLon: Double,
+        radiusMeters: Double,
+        excludeStopId: String? = null,
+        maxResults: Int = 60,
+    ): List<StopWithDistance> =
+        getStopsWithLocation()
+            .asSequence()
+            .filter { excludeStopId == null || excludeStopId !in it.memberStopIds }
+            .map { stop ->
+                StopWithDistance(
+                    stopId = stop.stopId,
+                    stopName = stop.stopName,
+                    lat = stop.lat,
+                    lon = stop.lon,
+                    distanceMeters = haversineMeters(anchorLat, anchorLon, stop.lat, stop.lon),
+                    memberStopIds = stop.memberStopIds,
+                )
+            }
+            .filter { it.distanceMeters <= radiusMeters }
+            .sortedBy { it.distanceMeters }
+            .take(maxResults)
+            .toList()
+
     fun close() {
         db.close()
     }
+}
+
+/** One `stops` row, exactly as needed for [groupStationsByParent]. Internal rather than private
+ * so the grouping logic (pure data transformation, no Android/SQLite dependency) is unit-testable
+ * without needing a real database. */
+internal data class RawStopRow(
+    val stopId: String,
+    val stopName: String?,
+    val lat: Double,
+    val lon: Double,
+    val parentStation: String?,
+)
+
+/**
+ * Groups GTFS child platforms/entrances (`location_type=0` rows with a populated `parent_station`)
+ * under their parent station (`location_type=1`) record, per the GTFS spec, so a single physical
+ * station with several platform-level stop_ids is represented once instead of once per platform.
+ * Only the `parent_station` linkage matters here, not `location_type` itself -- a row with no
+ * `parent_station` is its own representative regardless of whether it's a true station or a simple
+ * standalone stop, and either way any rows pointing at it via `parent_station` get folded into it.
+ *
+ * If a `parent_station` value doesn't resolve to any row with coordinates (a missing station record,
+ * or one without lat/lon), the first child (by stop_id, for determinism) is promoted to represent
+ * the group instead of silently dropping those stops from the results.
+ */
+internal fun groupStationsByParent(rows: List<RawStopRow>): List<StopLocation> {
+    val (withParent, withoutParent) = rows.partition { !it.parentStation.isNullOrBlank() }
+    val childrenByParent = withParent.groupBy { it.parentStation!! }
+
+    val result = mutableListOf<StopLocation>()
+    val claimedParentIds = mutableSetOf<String>()
+
+    withoutParent.forEach { row ->
+        val childIds = childrenByParent[row.stopId]?.map { it.stopId }?.sorted()
+        result += StopLocation(
+            stopId = row.stopId,
+            stopName = row.stopName,
+            lat = row.lat,
+            lon = row.lon,
+            memberStopIds = childIds ?: listOf(row.stopId),
+        )
+        claimedParentIds += row.stopId
+    }
+
+    childrenByParent.forEach { (parentId, children) ->
+        if (parentId in claimedParentIds) return@forEach
+        val representative = children.minBy { it.stopId }
+        result += StopLocation(
+            stopId = representative.stopId,
+            stopName = representative.stopName,
+            lat = representative.lat,
+            lon = representative.lon,
+            memberStopIds = children.map { it.stopId }.sorted(),
+        )
+    }
+
+    return result
 }
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0

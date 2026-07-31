@@ -58,20 +58,47 @@ object GtfsRtVehicleStatus {
     const val IN_TRANSIT_TO = 2
 }
 
+/**
+ * Field numbers here were re-verified by hand-decoding real live bytes from *both* MBTA and RIPTA
+ * (not just assumed from the public spec, which turned out to be wrong for field 4): 3 and 4 were
+ * confirmed as genuinely distinct fields by finding MBTA messages where both appear at once with
+ * clearly different value ranges (3 = larger, sequence-like numbers; 4 = a small 0-2 enum-like
+ * range). Neither agency's live feed ever sends a `stop_id` string at the top level — the field the
+ * public spec places at 4 — so that property doesn't exist here at all; declaring it as a String
+ * there is what caused every previous crash (a real varint on the wire, decoded as a string).
+ * Fields 7/8 (a bare vehicle-number string and a [GtfsRtVehicleDescriptor]) are unused by this app
+ * but still declared, since an undeclared field previously faulted the whole decode instead of
+ * being skipped.
+ */
 @Serializable
 data class GtfsRtVehiclePosition(
     @ProtoNumber(1) val trip: GtfsRtTripDescriptor = GtfsRtTripDescriptor(),
     @ProtoNumber(2) val position: GtfsRtPosition? = null,
     @ProtoNumber(3) val currentStopSequence: Int? = null,
-    @ProtoNumber(4) val stopId: String? = null,
-    @ProtoNumber(5) val currentStatus: Int? = null,
+    @ProtoNumber(4) val currentStatus: Int? = null,
+    @ProtoNumber(5) val timestamp: Long? = null,
+    @ProtoNumber(7) val vehicleNumber: String? = null,
+    @ProtoNumber(8) val vehicle: GtfsRtVehicleDescriptor? = null,
 )
 
-/** lat/lon are proto `float` (4-byte), not `double` — verified against MBTA's live feed bytes. */
+@Serializable
+data class GtfsRtVehicleDescriptor(
+    @ProtoNumber(1) val id: String? = null,
+    @ProtoNumber(2) val label: String? = null,
+    @ProtoNumber(3) val licensePlate: String? = null,
+)
+
+/**
+ * lat/lon are proto `float` (4-byte), not `double` — verified against MBTA's live feed bytes.
+ * bearing/speed declared for the same reason as [GtfsRtVehiclePosition]'s trailing fields — RIPTA's
+ * feed includes them, and an undeclared field faulted the whole decode instead of being skipped.
+ */
 @Serializable
 data class GtfsRtPosition(
     @ProtoNumber(1) val latitude: Float = 0f,
     @ProtoNumber(2) val longitude: Float = 0f,
+    @ProtoNumber(3) val bearing: Float? = null,
+    @ProtoNumber(5) val speed: Float? = null,
 )
 
 @Serializable
@@ -85,9 +112,18 @@ data class GtfsRtTripUpdate(
             ?: stopTimeUpdate.find { it.stopSequence == stopSequence }
 }
 
+/**
+ * RIPTA's feed also sends start_time/start_date/route_id here (verified by hand-decoding RIPTA's
+ * real feed bytes) — declared even though unused, since an undeclared field in a *nested* message
+ * desynced the decoder's byte position for everything decoded after it, corrupting the rest of the
+ * enclosing VehiclePosition/TripUpdate rather than just being harmlessly skipped.
+ */
 @Serializable
 data class GtfsRtTripDescriptor(
     @ProtoNumber(1) val tripId: String = "",
+    @ProtoNumber(2) val startTime: String? = null,
+    @ProtoNumber(3) val startDate: String? = null,
+    @ProtoNumber(5) val routeId: String? = null,
 )
 
 @Serializable

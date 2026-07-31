@@ -1,17 +1,19 @@
 package com.thelightphone.transit.gtfs
 
 import android.database.sqlite.SQLiteDatabase
+import android.util.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
+import io.ktor.client.request.head
 import io.ktor.http.HttpHeaders
 import java.io.BufferedReader
 import java.io.File
 import java.util.zip.ZipInputStream
 
 enum class GtfsIngestStatus {
-    Downloading, Parsing, Ready
+    CheckingForUpdates, Downloading, Parsing, Ready
 }
 
 class GtfsIngestException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -22,19 +24,50 @@ private const val MAX_REDIRECTS = 5
 fun gtfsDbFile(filesDir: File, agency: GtfsAgency): File =
     File(filesDir, "gtfs/${agency.id}/transit.db")
 
+/** ETag/Last-Modified as last seen for a successfully-downloaded feed -- either may be blank if the
+ * server didn't send that particular header. */
+private data class FeedMeta(val etag: String, val lastModified: String) {
+    fun isEmpty() = etag.isBlank() && lastModified.isBlank()
+}
+
 /** Downloads, unzips, and bulk-loads an agency's GTFS static feed into a local SQLite database. */
 class GtfsIngestor(private val filesDir: File) {
 
+    /**
+     * Re-downloads only when the feed has actually changed: a HEAD request's ETag/Last-Modified is
+     * compared against what was stored alongside the cached database from the last successful
+     * download. Unchanged -> the existing SQLite database is used as-is, no network transfer beyond
+     * the HEAD request. Changed, or nothing cached yet, or the check itself is inconclusive -> falls
+     * back to a full re-download, since that's always safe (just not always necessary).
+     */
     suspend fun ingest(agency: GtfsAgency, onStatus: (GtfsIngestStatus) -> Unit) {
         val agencyDir = File(filesDir, "gtfs/${agency.id}")
         agencyDir.mkdirs()
         val zipFile = File(agencyDir, "gtfs.zip")
         val dbFile = gtfsDbFile(filesDir, agency)
+        val metaFile = File(agencyDir, "feed_meta.txt")
+
+        onStatus(GtfsIngestStatus.CheckingForUpdates)
+        val cachedMeta = readFeedMeta(metaFile)
+        val remoteMeta = try {
+            checkForUpdate(agency.feedUrl)
+        } catch (e: Exception) {
+            Log.e("GtfsIngestor", "Feed update check failed for ${agency.displayName}, redownloading to be safe", e)
+            null
+        }
+
+        val upToDate = dbFile.exists() && cachedMeta != null && remoteMeta != null &&
+            !cachedMeta.isEmpty() && cachedMeta == remoteMeta
+        if (upToDate) {
+            onStatus(GtfsIngestStatus.Ready)
+            return
+        }
 
         onStatus(GtfsIngestStatus.Downloading)
         downloadZip(agency.feedUrl, zipFile)
 
         onStatus(GtfsIngestStatus.Parsing)
+        dbFile.delete()
         val db = openGtfsDatabase(dbFile)
         try {
             parseAndLoad(zipFile, db)
@@ -42,7 +75,55 @@ class GtfsIngestor(private val filesDir: File) {
             db.close()
         }
 
+        remoteMeta?.let { writeFeedMeta(metaFile, it) }
         onStatus(GtfsIngestStatus.Ready)
+    }
+
+    /** A HEAD request's ETag/Last-Modified, or null if the check couldn't be completed -- follows
+     * the same manual redirect handling as [downloadZip], since a HEAD to the same URL can hit the
+     * same http hop. */
+    private suspend fun checkForUpdate(url: String): FeedMeta? {
+        val client = HttpClient(OkHttp) {
+            followRedirects = false
+        }
+        try {
+            var currentUrl = url
+            repeat(MAX_REDIRECTS + 1) {
+                val response = client.head(currentUrl)
+                val status = response.status.value
+                when {
+                    status in 200..299 -> {
+                        return FeedMeta(
+                            etag = response.headers[HttpHeaders.ETag].orEmpty(),
+                            lastModified = response.headers[HttpHeaders.LastModified].orEmpty(),
+                        )
+                    }
+                    status in 300..399 -> {
+                        val location = response.headers[HttpHeaders.Location] ?: return null
+                        currentUrl = if (location.startsWith("http://")) {
+                            "https://" + location.removePrefix("http://")
+                        } else {
+                            location
+                        }
+                    }
+                    else -> return null
+                }
+            }
+            return null
+        } finally {
+            client.close()
+        }
+    }
+
+    private fun readFeedMeta(file: File): FeedMeta? {
+        if (!file.exists()) return null
+        val lines = file.readLines()
+        if (lines.size < 2) return null
+        return FeedMeta(etag = lines[0], lastModified = lines[1])
+    }
+
+    private fun writeFeedMeta(file: File, meta: FeedMeta) {
+        file.writeText("${meta.etag}\n${meta.lastModified}\n")
     }
 
     /**

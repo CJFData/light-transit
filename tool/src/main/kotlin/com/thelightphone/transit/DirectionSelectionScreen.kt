@@ -20,11 +20,15 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
+import com.thelightphone.sdk.ui.LightTopBar
+import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,8 +42,16 @@ sealed class DirectionSelectionState {
     data class Error(val message: String) : DirectionSelectionState()
 }
 
+/** Matches MBTA-style headsigns like "Hospital District via CCRI Lincoln" -- the via-clause is
+ * routing detail, not part of the destination riders actually look for. */
+private val viaClauseRegex = Regex(""" via .*""", RegexOption.IGNORE_CASE)
+
 fun DirectionOption.displayLabel(): String =
-    headsign?.takeIf { it.isNotBlank() }?.let { "Toward $it" } ?: "Direction $directionId"
+    headsign?.takeIf { it.isNotBlank() }
+        ?.replace(viaClauseRegex, "")
+        ?.trim()
+        ?.let { "Toward $it" }
+        ?: "Direction $directionId"
 
 class DirectionSelectionViewModel(dbFile: File, private val routeId: String) : LightViewModel<Unit>() {
 
@@ -88,13 +100,12 @@ class DirectionSelectionScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
-                    .padding(32.dp)
             ) {
-                LightText(
-                    text = "Choose Direction",
-                    variant = LightTextVariant.Heading,
-                    modifier = Modifier.padding(bottom = 8.dp),
+                LightTopBar(
+                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                    center = LightTopBarCenter.Text("Choose Direction"),
                 )
+                Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(
                     text = routeLabel,
                     variant = LightTextVariant.Detail,
@@ -146,6 +157,7 @@ class DirectionSelectionScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }
