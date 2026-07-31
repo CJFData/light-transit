@@ -1,5 +1,7 @@
 package com.thelightphone.transit.gtfs
 
+import java.io.File
+
 /**
  * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] are null when an agency has no realtime
  * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
@@ -34,4 +36,16 @@ enum class GtfsAgency(
         "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
         "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
     ),
+    ;
+
+    companion object {
+        /**
+         * Recovers which agency a screen's [dbFile] belongs to, from the same "gtfs/{id}/transit.db"
+         * path convention [gtfsDbFile] builds it with — so a screen only needs to carry [dbFile] (which
+         * it already does, to run any query at all) to know which agency's live feeds to poll, rather
+         * than needing `agency` threaded through as a second, separate parameter everywhere. Driven
+         * entirely by [id], so it stays correct with no changes needed if a third agency is added later.
+         */
+        fun forDbFile(dbFile: File): GtfsAgency? = entries.find { it.id == dbFile.parentFile?.name }
+    }
 }

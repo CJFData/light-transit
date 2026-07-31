@@ -13,11 +13,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.AgencyPreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
+import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
@@ -30,15 +32,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-class SettingsViewModel(private val preferences: AgencyPreferences) : LightViewModel<Unit>() {
+class SettingsViewModel(
+    private val agencyPreferences: AgencyPreferences,
+    private val mapPreferences: MapPreferences,
+) : LightViewModel<Unit>() {
 
     val defaultAgency: StateFlow<GtfsAgency?>
         get() = _defaultAgency
     private val _defaultAgency = MutableStateFlow<GtfsAgency?>(null)
 
+    val darkMapEnabled: StateFlow<Boolean>
+        get() = _darkMapEnabled
+    private val _darkMapEnabled = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
-            preferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
+            agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
+        }
+        viewModelScope.launch {
+            mapPreferences.darkMapEnabledFlow.collect { _darkMapEnabled.value = it }
         }
     }
 
@@ -46,8 +58,12 @@ class SettingsViewModel(private val preferences: AgencyPreferences) : LightViewM
      * turn the auto-skip back off, not just switch which agency it points at. */
     fun toggleDefaultAgency(agency: GtfsAgency) {
         viewModelScope.launch {
-            preferences.setDefaultAgency(if (defaultAgency.value == agency) null else agency)
+            agencyPreferences.setDefaultAgency(if (defaultAgency.value == agency) null else agency)
         }
+    }
+
+    fun setDarkMapEnabled(enabled: Boolean) {
+        viewModelScope.launch { mapPreferences.setDarkMapEnabled(enabled) }
     }
 }
 
@@ -59,11 +75,12 @@ class SettingsScreen(
         get() = SettingsViewModel::class.java
 
     override fun createViewModel(): SettingsViewModel =
-        SettingsViewModel(AgencyPreferences(lightContext.dataStore))
+        SettingsViewModel(AgencyPreferences(lightContext.dataStore), MapPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
         val defaultAgency by viewModel.defaultAgency.collectAsState()
+        val darkMapEnabled by viewModel.darkMapEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -76,7 +93,7 @@ class SettingsScreen(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text("Settings"),
                 )
-                Column(modifier = Modifier.weight(1f).padding(32.dp)) {
+                LightScrollView(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(
                     text = "Default agency",
                     variant = LightTextVariant.Copy,
@@ -102,6 +119,39 @@ class SettingsScreen(
                                 .padding(vertical = 12.dp),
                         )
                     }
+                }
+
+                LightText(
+                    text = "Map style",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "Choose which map tiles the Map screen uses.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                Column {
+                    LightText(
+                        text = if (!darkMapEnabled) "Light (current)" else "Light",
+                        variant = LightTextVariant.Copy,
+                        lighten = darkMapEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable { viewModel.setDarkMapEnabled(false) }
+                            .padding(vertical = 12.dp),
+                    )
+                    LightText(
+                        text = if (darkMapEnabled) "Dark (current)" else "Dark",
+                        variant = LightTextVariant.Copy,
+                        lighten = !darkMapEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable { viewModel.setDarkMapEnabled(true) }
+                            .padding(vertical = 12.dp),
+                    )
                 }
                 }
             }

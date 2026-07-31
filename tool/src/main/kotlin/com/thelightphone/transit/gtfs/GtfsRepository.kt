@@ -214,6 +214,16 @@ class GtfsRepository(dbFile: File) {
         }
     }
 
+    /** A trip's route_type, for picking its live-vehicle emoji (see [LineType]) on the Trip Detail
+     * screen -- a trip belongs to exactly one route, so this is a single-value lookup, not a list. */
+    fun getRouteTypeForTrip(tripId: String): Int? =
+        db.rawQuery(
+            "SELECT r.route_type FROM trips t JOIN routes r ON r.route_id = t.route_id WHERE t.trip_id = ?",
+            arrayOf(tripId),
+        ).use { cursor ->
+            cursor.mapRows { getInt(0) }.firstOrNull()
+        }
+
     fun getTripStops(tripId: String, fromStopSequence: Int): List<TripStopRow> =
         db.rawQuery(
             """

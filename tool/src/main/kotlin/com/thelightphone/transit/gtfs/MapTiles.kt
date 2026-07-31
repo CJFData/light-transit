@@ -149,16 +149,20 @@ private object TileCache {
 }
 
 /**
- * Fetches individual raster tiles from CARTO's free Dark Matter basemap (built on OpenStreetMap
- * data), caching decoded bitmaps in [TileCache]. A real, descriptive User-Agent is sent on every
- * request, and on-screen "© OpenStreetMap contributors © CARTO" attribution is required wherever
- * these tiles are displayed — see MapScreen's Content().
+ * Fetches individual raster tiles from one of CARTO's free basemaps (built on OpenStreetMap data),
+ * caching decoded bitmaps in [TileCache]. Voyager is the default -- chosen specifically for
+ * street-name legibility, since its labels and road contours stay readable at the small sizes this
+ * screen renders at, which the darker "Dark Matter" style didn't -- but Dark Matter remains
+ * available as an opt-in (see MapPreferences) for anyone who prefers it. A real, descriptive
+ * User-Agent is sent on every request, and on-screen "© OpenStreetMap contributors © CARTO"
+ * attribution is required wherever these tiles are displayed — see MapScreen's Content().
  */
 class MapTileClient {
     private val client = HttpClient(OkHttp)
 
     companion object {
-        private const val TILE_BASE_URL = "https://a.basemaps.cartocdn.com/dark_all"
+        private const val VOYAGER_BASE_URL = "https://a.basemaps.cartocdn.com/rastertiles/voyager"
+        private const val DARK_BASE_URL = "https://a.basemaps.cartocdn.com/dark_all"
         private const val USER_AGENT = "LightTransitTool/1.0 (+https://github.com/lightphone)"
         // Fetched area is this much larger than the target radius, so the real device canvas (whose
         // exact size isn't known yet when tiles are requested) ends up comfortably inside the
@@ -169,9 +173,17 @@ class MapTileClient {
     /**
      * Every tile needed to cover a [targetRadiusMeters] circle around (lat, lon) at [zoom], fetched
      * concurrently. Individual tile failures are logged and simply omitted from the result — never
-     * fail the whole map for one bad tile.
+     * fail the whole map for one bad tile. [darkMode] selects Dark Matter over the default Voyager
+     * style; both are cached independently (see [fetchTile]) so switching styles never serves a
+     * stale tile from the other one.
      */
-    suspend fun fetchTilesAround(lat: Double, lon: Double, zoom: Int, targetRadiusMeters: Double): MapTiles = coroutineScope {
+    suspend fun fetchTilesAround(
+        lat: Double,
+        lon: Double,
+        zoom: Int,
+        targetRadiusMeters: Double,
+        darkMode: Boolean = false,
+    ): MapTiles = coroutineScope {
         val (centerFracX, centerFracY) = lonLatToTileFraction(lat, lon, zoom)
         val radiusPixels = targetRadiusMeters / metersPerPixel(lat, zoom) * COVERAGE_MARGIN
         val radiusTiles = ceil(radiusPixels / TILE_SIZE).toInt().coerceAtLeast(1)
@@ -186,18 +198,20 @@ class MapTileClient {
             }
         }
         val tiles = tileCoords
-            .map { (tileX, tileY) -> async { fetchTile(tileX, tileY, zoom)?.let { FetchedTile(tileX, tileY, it) } } }
+            .map { (tileX, tileY) -> async { fetchTile(tileX, tileY, zoom, darkMode)?.let { FetchedTile(tileX, tileY, it) } } }
             .mapNotNull { it.await() }
 
         MapTiles(zoom, centerFracX, centerFracY, tiles)
     }
 
-    private suspend fun fetchTile(x: Int, y: Int, zoom: Int): Bitmap? {
-        val key = "$zoom/$x/$y"
+    private suspend fun fetchTile(x: Int, y: Int, zoom: Int, darkMode: Boolean): Bitmap? {
+        val style = if (darkMode) "dark" else "voyager"
+        val key = "$style/$zoom/$x/$y"
         TileCache.get(key)?.let { return it }
 
+        val baseUrl = if (darkMode) DARK_BASE_URL else VOYAGER_BASE_URL
         return try {
-            val response = client.get("$TILE_BASE_URL/$zoom/$x/$y.png") {
+            val response = client.get("$baseUrl/$zoom/$x/$y.png") {
                 header("User-Agent", USER_AGENT)
             }
             if (!response.status.isSuccess()) return null

@@ -61,6 +61,8 @@ class FirstStopSelectionViewModel(
     dbFile: File,
     private val routeId: String,
     private val directionId: Int,
+    private val userLat: Double,
+    private val userLon: Double,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -72,7 +74,14 @@ class FirstStopSelectionViewModel(
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
-                FirstStopSelectionState.Loaded(repository.getStops(routeId, directionId))
+                // Nearest-to-you first, not route/stop_sequence order -- the distance already shown
+                // per row (see distanceFeetLabel) should match what the list order implies.
+                val stops = repository.getStops(routeId, directionId).sortedBy { stop ->
+                    val lat = stop.lat
+                    val lon = stop.lon
+                    if (lat != null && lon != null) haversineMeters(userLat, userLon, lat, lon) else Double.MAX_VALUE
+                }
+                FirstStopSelectionState.Loaded(stops)
             } catch (e: Exception) {
                 Log.e("FirstStopSelectionScreen", "Failed to load first stops for route $routeId", e)
                 FirstStopSelectionState.Error("Unable to load stops.")
@@ -101,7 +110,7 @@ class FirstStopSelectionScreen(
         get() = FirstStopSelectionViewModel::class.java
 
     override fun createViewModel(): FirstStopSelectionViewModel =
-        FirstStopSelectionViewModel(dbFile, routeId, directionId)
+        FirstStopSelectionViewModel(dbFile, routeId, directionId, userLat, userLon)
 
     @Composable
     override fun Content() {

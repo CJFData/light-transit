@@ -41,11 +41,32 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** 100 feet -- close enough to be "the same corner", not a separate trip to walk to. */
+private const val NEARBY_STOP_RADIUS_METERS = 30.48
+/** Enough to show real variety at each nearby stop without turning this into a second full
+ * schedule dump for every one of them. */
+private const val NEARBY_STOP_CONNECTIONS_LIMIT = 3
+private const val FEET_PER_METER = 3.28084
+
 sealed class StopConnectionsState {
     object Loading : StopConnectionsState()
-    data class Loaded(val connections: List<StopConnection>) : StopConnectionsState()
+    data class Loaded(
+        val connections: List<StopConnection>,
+        val nearbyStops: List<NearbyStopConnections>,
+    ) : StopConnectionsState()
     data class Error(val message: String) : StopConnectionsState()
 }
+
+/** A nearby stop's next few departures, already filtered to exclude any route+direction the
+ * current stop itself already offers -- these are meant to surface options you wouldn't otherwise
+ * see from here, not duplicate what's already on screen. */
+data class NearbyStopConnections(
+    val stopName: String,
+    val distanceMeters: Double,
+    val connections: List<StopConnection>,
+)
+
+fun NearbyStopConnections.distanceFeetLabel(): String = "%.0f ft".format(distanceMeters * FEET_PER_METER)
 
 fun StopConnection.displayLabel(): String {
     val lineLabel = LineType.forGtfsRouteType(route.routeType)?.label
@@ -70,9 +91,31 @@ class StopConnectionsViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
                 val today = todayForGtfs()
-                StopConnectionsState.Loaded(
-                    repository.getNextConnections(stopId, afterTime, excludeTripId, today)
-                )
+                val connections = repository.getNextConnections(stopId, afterTime, excludeTripId, today)
+                // What's already offered right here -- a nearby stop repeating one of these isn't
+                // telling you anything new, so it's left out of that stop's list entirely.
+                val servedHere = connections.mapTo(mutableSetOf()) { it.route.routeId to it.direction.directionId }
+
+                val here = repository.getStopLocation(stopId)
+                val nearbyStops = if (here == null) {
+                    emptyList()
+                } else {
+                    repository.getStopsWithinRadius(here.lat, here.lon, NEARBY_STOP_RADIUS_METERS, excludeStopId = stopId)
+                        .mapNotNull { nearby ->
+                            val nearbyConnections = nearby.memberStopIds
+                                .flatMap { repository.getNextConnections(it, afterTime, excludeTripId, today) }
+                                .filter { (it.route.routeId to it.direction.directionId) !in servedHere }
+                                .sortedBy { it.departureTime }
+                                .take(NEARBY_STOP_CONNECTIONS_LIMIT)
+                            if (nearbyConnections.isEmpty()) return@mapNotNull null
+                            NearbyStopConnections(
+                                stopName = nearby.stopName ?: "Stop ${nearby.stopId}",
+                                distanceMeters = nearby.distanceMeters,
+                                connections = nearbyConnections,
+                            )
+                        }
+                }
+                StopConnectionsState.Loaded(connections, nearbyStops)
             } catch (e: Exception) {
                 Log.e("StopConnectionsScreen", "Failed to load connections for stop $stopId", e)
                 StopConnectionsState.Error("Unable to load connections.")
@@ -100,6 +143,41 @@ class StopConnectionsScreen(
 
     override fun createViewModel(): StopConnectionsViewModel =
         StopConnectionsViewModel(dbFile, stopId, afterTime, excludeTripId)
+
+    @Composable
+    private fun ConnectionRow(connection: StopConnection) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .lightClickable {
+                    navigateTo(screenFactory = { activity ->
+                        TripDetailScreen(
+                            activity,
+                            dbFile,
+                            connection.tripId,
+                            connection.stopSequence,
+                            connection.route.displayName,
+                            connection.direction.displayLabel(),
+                        )
+                    })
+                }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            LightText(
+                text = connection.displayLabel(),
+                variant = LightTextVariant.Copy,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 16.dp),
+            )
+            LightText(
+                text = formatGtfsTime(connection.departureTime),
+                variant = LightTextVariant.Copy,
+                lighten = true,
+            )
+        }
+    }
 
     @Composable
     override fun Content() {
@@ -137,7 +215,7 @@ class StopConnectionsScreen(
                         lighten = true,
                     )
 
-                    is StopConnectionsState.Loaded -> if (s.connections.isEmpty()) {
+                    is StopConnectionsState.Loaded -> if (s.connections.isEmpty() && s.nearbyStops.isEmpty()) {
                         LightText(
                             text = "No more connections today.",
                             variant = LightTextVariant.Copy,
@@ -146,36 +224,19 @@ class StopConnectionsScreen(
                     } else {
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.connections) { connection ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .lightClickable {
-                                            navigateTo(screenFactory = { activity ->
-                                                TripDetailScreen(
-                                                    activity,
-                                                    dbFile,
-                                                    connection.tripId,
-                                                    connection.stopSequence,
-                                                    connection.route.displayName,
-                                                    connection.direction.displayLabel(),
-                                                )
-                                            })
-                                        }
-                                        .padding(vertical = 12.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
+                                ConnectionRow(connection)
+                            }
+                            s.nearbyStops.forEach { nearby ->
+                                item {
                                     LightText(
-                                        text = connection.displayLabel(),
-                                        variant = LightTextVariant.Copy,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(end = 16.dp),
-                                    )
-                                    LightText(
-                                        text = formatGtfsTime(connection.departureTime),
-                                        variant = LightTextVariant.Copy,
+                                        text = "${nearby.stopName} - ${nearby.distanceFeetLabel()}",
+                                        variant = LightTextVariant.Detail,
                                         lighten = true,
+                                        modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
                                     )
+                                }
+                                items(nearby.connections) { connection ->
+                                    ConnectionRow(connection)
                                 }
                             }
                         }

@@ -16,7 +16,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.transit.gtfs.GtfsAgency
+import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.TripStopRow
 import com.thelightphone.transit.gtfs.formatGtfsTime
 import com.thelightphone.sdk.LightScreen
@@ -34,14 +37,34 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
+// Matches MapScreen's own polling cadence -- see its own comment on this same constant.
+private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
+
 sealed class TripDetailState {
     object Loading : TripDetailState()
-    data class Loaded(val stops: List<TripStopRow>) : TripDetailState()
+
+    /**
+     * [liveEmoji]/[liveAtStopSequence] are null together whenever there's no live position to show
+     * (no realtime feed for this agency, this trip isn't currently reporting one, or the vehicle's
+     * current_stop_sequence doesn't match any row still in [stops]). Per the GTFS-realtime spec,
+     * current_stop_sequence means "at, arriving at, or en route to" that stop regardless of
+     * current_status -- so matching it against a row's stopSequence alone is enough to place the
+     * emoji at the stop the vehicle is closest to, including while it's between stops.
+     */
+    data class Loaded(
+        val stops: List<TripStopRow>,
+        val liveEmoji: String?,
+        val liveAtStopSequence: Int?,
+    ) : TripDetailState()
+
     data class Error(val message: String) : TripDetailState()
 }
 
@@ -52,20 +75,54 @@ class TripDetailViewModel(
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
+    // See GtfsAgency.forDbFile -- recovered from the db path rather than threaded through every
+    // screen between here and wherever the agency was originally selected.
+    private val agency = GtfsAgency.forDbFile(dbFile)
 
     private val _state = MutableStateFlow<TripDetailState>(TripDetailState.Loading)
     val state: StateFlow<TripDetailState> = _state
 
+    private var pollJob: Job? = null
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
-        viewModelScope.launch(Dispatchers.IO) {
-            _state.value = try {
-                TripDetailState.Loaded(repository.getTripStops(tripId, fromStopSequence))
+        pollJob?.cancel()
+        pollJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val stops = repository.getTripStops(tripId, fromStopSequence)
+                val emoji = repository.getRouteTypeForTrip(tripId)?.let { LineType.forGtfsRouteType(it)?.emoji } ?: "🚌"
+                val vehiclePositionsUrl = agency?.realtimeVehiclePositionsUrl
+                if (stops.isEmpty() || vehiclePositionsUrl == null) {
+                    _state.value = TripDetailState.Loaded(stops, liveEmoji = null, liveAtStopSequence = null)
+                    return@launch
+                }
+
+                while (isActive) {
+                    val liveStopSequence = try {
+                        GtfsRealtimeClient.fetchFeed(vehiclePositionsUrl)
+                            .vehiclePositionsByTripId[tripId]?.currentStopSequence
+                    } catch (e: Exception) {
+                        Log.e("TripDetailScreen", "VehiclePositions fetch failed for trip $tripId", e)
+                        null
+                    }
+                    _state.value = TripDetailState.Loaded(
+                        stops,
+                        liveEmoji = emoji,
+                        liveAtStopSequence = liveStopSequence,
+                    )
+                    delay(LIVE_VEHICLE_POLL_INTERVAL_MS)
+                }
             } catch (e: Exception) {
                 Log.e("TripDetailScreen", "Failed to load stop times for trip $tripId", e)
-                TripDetailState.Error("Unable to load trip detail.")
+                _state.value = TripDetailState.Error("Unable to load trip detail.")
             }
         }
+    }
+
+    override fun onScreenHide(screen: SimpleLightScreen<Unit>) {
+        super.onScreenHide(screen)
+        pollJob?.cancel()
+        pollJob = null
     }
 
     override fun onCleared() {
@@ -154,6 +211,13 @@ class TripDetailScreen(
                                         .padding(vertical = 8.dp),
                                     verticalAlignment = Alignment.Top,
                                 ) {
+                                    if (s.liveEmoji != null && stop.stopSequence == s.liveAtStopSequence) {
+                                        LightText(
+                                            text = s.liveEmoji,
+                                            variant = LightTextVariant.Copy,
+                                            modifier = Modifier.padding(end = 8.dp),
+                                        )
+                                    }
                                     LightText(
                                         text = stop.stopName ?: "Unknown stop",
                                         variant = LightTextVariant.Copy,

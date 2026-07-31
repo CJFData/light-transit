@@ -28,6 +28,7 @@ import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
 import com.thelightphone.transit.gtfs.LineType
+import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.MapTiles
 import com.thelightphone.transit.gtfs.NominatimGeocoder
 import com.thelightphone.transit.gtfs.MapTileClient
@@ -59,6 +60,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -67,9 +69,10 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlin.math.sqrt
 
-// Tunable; a 15-20s floor roughly matched to typical agency GTFS-RT update cadence, not a
-// continuous/unbounded poll.
-private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 17_000L
+// Tunable. Faster than agencies typically refresh their own feed (~15-20s), so some polls just
+// re-fetch the same data -- a deliberate trade of a few extra requests for lower latency once a
+// feed does update, not a continuous/unbounded poll.
+private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
 // Per active stop, not a shared total -- turning on "Nearby Vehicles" and selecting more stops
 // should show more buses, not compete with the primary stop for the same fixed slots.
 private const val MAX_DISPLAYED_BUSES_PER_STOP = 4
@@ -193,6 +196,7 @@ class MapViewModel(
     dbFile: File,
     private val agency: GtfsAgency,
     private val stopId: String,
+    private val mapPreferences: MapPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -224,6 +228,9 @@ class MapViewModel(
                     _state.value = MapState.Error("Stop location not found.")
                     return@launch
                 }
+                // Read once at screen-open, same as HomeScreen's default-agency read -- Settings
+                // isn't shown at the same time as this screen, so there's no need to react live.
+                val darkMode = mapPreferences.darkMapEnabledFlow.first()
                 // Snapshot once: which trips are scheduled for this stop from now on. Live polling
                 // below only checks these same trips for a live position match — a trip that wasn't
                 // scheduled at screen-open time won't appear mid-session.
@@ -259,7 +266,7 @@ class MapViewModel(
                 // radius for exactly the same reason -- what's plotted should match what's visible.
                 val fetchRadiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(stop.lat, zoom)
                 val mapTiles = try {
-                    tileClient.fetchTilesAround(stop.lat, stop.lon, zoom, fetchRadiusMeters)
+                    tileClient.fetchTilesAround(stop.lat, stop.lon, zoom, fetchRadiusMeters, darkMode)
                 } catch (e: Exception) {
                     Log.e("MapScreen", "Map tile fetch failed for stop $stopId", e)
                     null
@@ -422,7 +429,8 @@ class MapScreen(
     override val viewModelClass: Class<MapViewModel>
         get() = MapViewModel::class.java
 
-    override fun createViewModel(): MapViewModel = MapViewModel(dbFile, agency, stopId)
+    override fun createViewModel(): MapViewModel =
+        MapViewModel(dbFile, agency, stopId, MapPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
@@ -545,7 +553,6 @@ private fun MapCanvas(
     onToggleNearbyVehicles: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val contentColor = LightThemeTokens.colors.content.toArgb()
 
     Canvas(
         modifier = modifier
@@ -596,15 +603,27 @@ private fun MapCanvas(
             textAlign = Paint.Align.CENTER
             isAntiAlias = true
         }
+        // Always white fill + black outline, independent of theme -- Voyager's imagery ranges from
+        // near-white streets to colored parks/water, so any single fixed color would go illegible
+        // over some patch of the map. Same treatment nearbyStopLabelPaint below already used.
         val labelPaint = Paint().apply {
             textSize = 26f
             textAlign = Paint.Align.CENTER
             isAntiAlias = true
-            color = contentColor
+            color = android.graphics.Color.WHITE
+        }
+        val labelOutlinePaint = Paint(labelPaint).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
+            color = android.graphics.Color.BLACK
         }
         val smallLabelPaint = Paint(labelPaint).apply {
             textSize = 22f
             alpha = 180
+        }
+        val smallLabelOutlinePaint = Paint(labelOutlinePaint).apply {
+            textSize = 22f
+            strokeWidth = 4f
         }
         val nearbyStopEmojiPaint = Paint().apply {
             textSize = 34f
@@ -666,10 +685,15 @@ private fun MapCanvas(
         // bottom of the solid top bar so it never sits under it; S/E/W use that same margin value
         // from their own edge for consistent spacing on all four sides.
         val compassEdgeMarginPx = SCRIM_HEIGHT_PX + COMPASS_SCRIM_MARGIN_PX
-        nativeCanvas.drawText("N", center.x, compassEdgeMarginPx, labelPaint)
-        nativeCanvas.drawText("S", center.x, size.height - compassEdgeMarginPx, labelPaint)
-        nativeCanvas.drawText("E", size.width - compassEdgeMarginPx, center.y, labelPaint)
-        nativeCanvas.drawText("W", compassEdgeMarginPx, center.y, labelPaint)
+        listOf(
+            "N" to Offset(center.x, compassEdgeMarginPx),
+            "S" to Offset(center.x, size.height - compassEdgeMarginPx),
+            "E" to Offset(size.width - compassEdgeMarginPx, center.y),
+            "W" to Offset(compassEdgeMarginPx, center.y),
+        ).forEach { (letter, point) ->
+            nativeCanvas.drawText(letter, point.x, point.y, labelOutlinePaint)
+            nativeCanvas.drawText(letter, point.x, point.y, labelPaint)
+        }
 
         // Nearby Vehicles toggle -- bottom-left corner, clear of the mid-edge compass letters.
         val toggleText = if (nearbyVehiclesEnabled) "🚌 Nearby Vehicles: On" else "🚌 Nearby Vehicles: Off"
@@ -717,8 +741,10 @@ private fun MapCanvas(
 
         // Center stop pin, name, and street context — always pinned dead center.
         nativeCanvas.drawText("📍", center.x, center.y, emojiPaint)
+        nativeCanvas.drawText(stopLabel, center.x, center.y + 64f, labelOutlinePaint)
         nativeCanvas.drawText(stopLabel, center.x, center.y + 64f, labelPaint)
         streetContext?.let {
+            nativeCanvas.drawText(it, center.x, center.y + 92f, smallLabelOutlinePaint)
             nativeCanvas.drawText(it, center.x, center.y + 92f, smallLabelPaint)
         }
 
@@ -731,7 +757,7 @@ private fun MapCanvas(
             val xOffset = (index - (arrivedAtPrimary.size - 1) / 2f) * 110f
             val x = center.x + xOffset
             val y = center.y - maxRadius * 0.45f
-            drawBusMarker(nativeCanvas, emojiPaint, labelPaint, smallLabelPaint, bus, x, y)
+            drawBusMarker(nativeCanvas, emojiPaint, labelPaint, labelOutlinePaint, smallLabelPaint, smallLabelOutlinePaint, bus, x, y)
         }
 
         // Every other bus drawn individually at its true projected position — clipped to the
@@ -740,7 +766,7 @@ private fun MapCanvas(
         everythingElse.forEach { bus ->
             val rel = projectRelativeToCenter(centerLat, centerLon, bus.lat, bus.lon, zoom)
             val clipped = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
-            drawBusMarker(nativeCanvas, emojiPaint, labelPaint, smallLabelPaint, bus, clipped.x, clipped.y)
+            drawBusMarker(nativeCanvas, emojiPaint, labelPaint, labelOutlinePaint, smallLabelPaint, smallLabelOutlinePaint, bus, clipped.x, clipped.y)
         }
     }
 }
@@ -810,17 +836,23 @@ private fun drawBusMarker(
     canvas: android.graphics.Canvas,
     emojiPaint: Paint,
     labelPaint: Paint,
+    labelOutlinePaint: Paint,
     smallLabelPaint: Paint,
+    smallLabelOutlinePaint: Paint,
     bus: BusMarker,
     x: Float,
     y: Float,
 ) {
     canvas.drawText(bus.emoji, x, y, emojiPaint)
     val routeText = bus.lineLabel?.let { "$it - ${bus.routeLabel}" } ?: bus.routeLabel
+    canvas.drawText(routeText, x, y + 30f, smallLabelOutlinePaint)
     canvas.drawText(routeText, x, y + 30f, smallLabelPaint)
+    canvas.drawText(bus.directionLabel, x, y + 54f, smallLabelOutlinePaint)
     canvas.drawText(bus.directionLabel, x, y + 54f, smallLabelPaint)
+    canvas.drawText(bus.etaDisplay(), x, y + 78f, labelOutlinePaint)
     canvas.drawText(bus.etaDisplay(), x, y + 78f, labelPaint)
     bus.statusLabel()?.let {
+        canvas.drawText(it, x, y + 102f, smallLabelOutlinePaint)
         canvas.drawText(it, x, y + 102f, smallLabelPaint)
     }
 }
