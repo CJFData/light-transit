@@ -1,4 +1,4 @@
-# 🚌 Transit
+# 🚌 Pico Transit
 
 Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a tiny radar screen that shows you exactly which direction your ride is coming from — no ads, no clutter, no infinite scroll. Just "when's my bus," answered nicely. 🚏✨
 
