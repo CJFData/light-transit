@@ -31,6 +31,7 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -54,7 +55,9 @@ data class ArrivalRow(
     val stopSequence: Int,
     val routeLabel: String,
     val directionLabel: String,
-    val lineLabel: String?,
+    /** Mode icon shown in place of the old "Bus -"/"Subway -"/"Commuter Rail -" text prefix -- see
+     * [toVehicleIcon] (MapScreen.kt), the single source of truth for this mapping. */
+    val lineType: LineType?,
     val etaEpochSeconds: Long,
     val isLive: Boolean,
     val status: ArrivalStatus?,
@@ -126,7 +129,7 @@ class UpcomingArrivalsViewModel(
                         stopSequence = arrival.stopSequence,
                         routeLabel = arrival.route.displayName,
                         directionLabel = arrival.direction.displayLabel(),
-                        lineLabel = LineType.forGtfsRouteType(arrival.route.routeType)?.label,
+                        lineType = LineType.forGtfsRouteType(arrival.route.routeType),
                         etaEpochSeconds = eta.etaEpochSeconds,
                         isLive = eta.isLive,
                         status = eta.status,
@@ -183,14 +186,13 @@ class UpcomingArrivalsScreen(
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(
-                    text = stopLabel,
+                    text = "Selected stop",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                LightText(
-                    text = "Map",
-                    variant = LightTextVariant.Copy,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .lightClickable {
                             navigateTo(screenFactory = { activity ->
@@ -198,7 +200,10 @@ class UpcomingArrivalsScreen(
                             })
                         }
                         .padding(bottom = 16.dp),
-                )
+                ) {
+                    LightIcon(icon = LightIcons.MAP, size = 1.4f, modifier = Modifier.padding(end = 8.dp))
+                    LightText(text = stopLabel, variant = LightTextVariant.Copy)
+                }
 
                 when (val s = state) {
                     is UpcomingArrivalsState.Loading -> LightText(
@@ -260,9 +265,13 @@ class UpcomingArrivalsScreen(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.Top,
                                         ) {
+                                            LightIcon(
+                                                icon = arrival.lineType.toVehicleIcon(),
+                                                size = 1.2f,
+                                                modifier = Modifier.padding(end = 8.dp),
+                                            )
                                             LightText(
-                                                text = arrival.lineLabel?.let { "$it - ${arrival.routeLabel} - ${arrival.directionLabel}" }
-                                                    ?: "${arrival.routeLabel} - ${arrival.directionLabel}",
+                                                text = "${arrival.routeLabel} - ${arrival.directionLabel}",
                                                 variant = LightTextVariant.Copy,
                                                 modifier = Modifier
                                                     .weight(1f)

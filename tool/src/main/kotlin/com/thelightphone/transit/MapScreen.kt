@@ -1,5 +1,6 @@
 package com.thelightphone.transit
 
+import android.graphics.Bitmap
 import android.graphics.Paint
 import android.util.Log
 import androidx.compose.foundation.Canvas
@@ -7,20 +8,30 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Canvas as ComposeCanvas
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.GtfsAgency
@@ -46,15 +57,14 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIconConfiguration
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
-import com.thelightphone.sdk.ui.LightThemeColors
 import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
-import com.thelightphone.sdk.ui.gridUnitsAsDp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -63,6 +73,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.Instant
 import java.time.LocalDateTime
@@ -81,9 +92,6 @@ private const val MAX_DISPLAYED_BUSES_PER_STOP = 4
 // always near that cap in any reasonably dense area, collapsing the fit to look like a fixed zoom
 // regardless of true local density (verified empirically against real MBTA stop data).
 private const val ZOOM_FIT_NEAREST_STOP_COUNT = 8
-// Matches LightTopBar's own (private) TOPBAR_HEIGHT_UNITS -- the overlaid back button lives at this
-// height, so Loading/Error text below it needs the same clearance to avoid sitting behind the icon.
-private const val TOPBAR_CLEARANCE_UNITS = 3f
 
 // The LP3's screen is 1080x1240px at 3x density (see the @Preview(widthDp = 1080 / 3, heightDp =
 // 1240 / 3) calls elsewhere in the SDK) — used as the "available half-extent" nearby stops are fit
@@ -93,26 +101,51 @@ private const val TOPBAR_CLEARANCE_UNITS = 3f
 // intended (tiles are fetched with their own margin on top of this for exactly that reason — see
 // MapTileClient).
 private const val MAP_TARGET_RADIUS_PIXELS = 420f
-// Floor: even an isolated stop with no nearby neighbors stays reasonably close-in, never "a tiny dot
-// in a huge area". Ceiling: matches what CARTO/standard XYZ tile pyramids reliably serve -- higher
-// risks missing tiles in less-mapped areas. Fallback: used only when there's nothing to fit bounds
-// to at all (no other stops exist anywhere nearby).
-private const val MIN_ZOOM = 14
-private const val MAX_ZOOM = 19
-private const val FALLBACK_ZOOM = 17
+// Floor: even a sparse/isolated area never zooms out past this, so nearby stops don't visually
+// collapse into an unreadable cluster. Ceiling: never zooms in tighter than this either, so there's
+// always at least a block or two of surrounding streets left for orientation. Fallback: used only
+// when there's nothing to fit bounds to at all (no other stops exist anywhere nearby) -- rarely
+// reached in practice since MIN_BOUNDING_BOX_MILES below already keeps the box away from zero-size.
+private const val MIN_ZOOM = 17
+private const val MAX_ZOOM = 20
+private const val FALLBACK_ZOOM = 20
+// Treat the nearby-stop cluster's bounding box as at least this wide in each dimension before
+// computing zoom, so a real-world-tiny cluster (e.g. two platforms 30ft apart) doesn't zoom in
+// absurdly tight just because the points themselves happen to be that close together.
+private const val MIN_BOUNDING_BOX_MILES = 0.15
 private const val STOP_HIT_RADIUS_PX = 44f
 private const val LABEL_LINE_HEIGHT_PX = 22f
-private const val LABEL_OFFSET_PX = 24f
+// Gap between a tapped stop's marker and its expanded name label, which renders to the marker's
+// right (anchored at the marker's own base) rather than centered under it, so the label text never
+// overlaps the icon itself.
+private const val LABEL_GAP_PX = 12f
 
-// Title/legend render as an overlay bar on top of the map itself (matching how the compass letters
+// Vector icon sizes (real pixels, matching this Canvas's own coordinate space -- not dp/grid units).
+// Nearby-stop markers must stay visibly smaller than the center marker despite sharing the same
+// icon shape (see LightIcons.DIRECTIONS_ARRIVAL usage below), since size is the only thing distinguishing them.
+private const val CENTER_MARKER_ICON_PX = 64
+private const val NEARBY_MARKER_ICON_PX = 40
+// Close to NEARBY_MARKER_ICON_PX rather than matching CENTER_MARKER_ICON_PX -- vehicles are
+// transient/moving, not a fixed place to orient by, so they shouldn't visually compete with the
+// selected stop's own pin, but still read as slightly more prominent than a plain nearby stop.
+private const val VEHICLE_MARKER_ICON_PX = 46
+// Matches the on-canvas size of the "No live vehicles..."-style status message (LightTextVariant
+// .Detail, rendered outside the canvas by Content()) -- measured against a real render of that text
+// so the toggle reads at the same size as the status line right above it, rather than notably smaller.
+private const val TOGGLE_ICON_PX = 60
+private const val TOGGLE_TEXT_SIZE_PX = 40f
+private const val TOGGLE_TEXT_GAP_PX = 12f
+private const val TOGGLE_TEXT = "Track Tapped Stops"
+
+// Attribution renders as an overlay bar on top of the map itself (matching how the compass letters
 // already render directly on the map), rather than in a separate section above it. Solid, not
 // translucent, and flush with the top of the screen -- the compass's "N" label is pushed below it
-// (see COMPASS_SCRIM_MARGIN_PX) so the two never overlap.
-private const val SCRIM_HEIGHT_PX = 180f
+// (see COMPASS_SCRIM_MARGIN_PX) so the two never overlap. The real LightTopBar (back button) sits
+// above this in normal layout flow, and any live-feed status message renders above the canvas too
+// (see Content()), so this scrim only needs to cover the attribution line itself.
+private const val SCRIM_HEIGHT_PX = 40f
 private const val OVERLAY_INSET_X = 28f
-private const val TITLE_Y = 60f
-private const val LEGEND_Y = 104f
-private const val ATTRIBUTION_Y = 134f
+private const val ATTRIBUTION_Y = 26f
 private const val COMPASS_SCRIM_MARGIN_PX = 24f
 private const val TOGGLE_BOTTOM_MARGIN_PX = 24f
 
@@ -123,12 +156,14 @@ data class BusMarker(
      * special "arrived" row above the center pin; everything else always draws at its true
      * position, since that row visually means "arrived at the center pin" specifically. */
     val targetStopId: String,
+    /** Short route identifier only (e.g. "R"), not the full "shortName - longName" combo -- the
+     * marker icon already conveys the mode (bus/subway/rail), so the label just needs enough to
+     * tell same-mode routes apart. See [tripDescription]. */
     val routeLabel: String,
     val directionLabel: String,
-    val lineLabel: String?,
-    /** Mode-specific: 🚇 subway/light rail, 🚆 commuter rail, 🚌 bus (also the fallback for any
-     * unmapped route_type) -- see LineType.emoji, the single source of truth for this mapping. */
-    val emoji: String,
+    /** Mode-specific: subway/light rail, commuter rail, bus (also the fallback for any unmapped
+     * route_type) -- see [vehicleIconFor], the single source of truth for this mapping. */
+    val vehicleIcon: LightIconConfiguration,
     val etaEpochSeconds: Long,
     /** Null just means "no delay/prediction info yet" — a marker only ever exists for a trip with a
      * live VehiclePosition match, so this is never a stand-in for stale/non-live data. */
@@ -137,6 +172,18 @@ data class BusMarker(
     val lat: Double,
     val lon: Double,
 )
+
+/** Maps a route's [LineType] to the SDK icon for its vehicle marker -- BUS is also the fallback
+ * for a null (unmapped route_type) LineType, same as the emoji fallback this replaced. */
+fun LineType?.toVehicleIcon(): LightIconConfiguration = when (this) {
+    LineType.SUBWAY -> LightIcons.DIRECTIONS_SUBWAY
+    LineType.COMMUTER_RAIL -> LightIcons.DIRECTIONS_TRAIN
+    LineType.BUS, null -> LightIcons.DIRECTIONS_BUS
+}
+
+/** e.g. "R · Toward Pawtucket-Central Falls Transit Center" -- no mode prefix (the icon already
+ * shows bus/subway/rail) and no long route name, just enough to tell same-mode routes apart. */
+fun BusMarker.tripDescription(): String = "$routeLabel · $directionLabel"
 
 fun BusMarker.etaDisplay(): String {
     val time = LocalDateTime.ofInstant(Instant.ofEpochSecond(etaEpochSeconds), ZoneId.systemDefault())
@@ -178,6 +225,10 @@ sealed class MapState {
         val buses: List<BusMarker>,
         val nearbyStops: List<NearbyStopMarker>,
         val liveFeedStatus: LiveFeedStatus,
+        /** Settings screen toggle (off by default) -- see MapPreferences.tapHoldArrivalsEnabledFlow. */
+        val tapHoldArrivalsEnabled: Boolean,
+        /** Settings screen's Map style toggle -- see MapPreferences.darkMapEnabledFlow. */
+        val darkMapEnabled: Boolean,
     ) : MapState()
     data class Error(val message: String) : MapState()
 }
@@ -190,6 +241,8 @@ private data class LoadedMapContext(
     val zoom: Int,
     val mapTiles: MapTiles?,
     val nearbyStops: List<NearbyStopMarker>,
+    val tapHoldArrivalsEnabled: Boolean,
+    val darkMapEnabled: Boolean,
 )
 
 class MapViewModel(
@@ -231,6 +284,7 @@ class MapViewModel(
                 // Read once at screen-open, same as HomeScreen's default-agency read -- Settings
                 // isn't shown at the same time as this screen, so there's no need to react live.
                 val darkMode = mapPreferences.darkMapEnabledFlow.first()
+                val tapHoldArrivalsEnabled = mapPreferences.tapHoldArrivalsEnabledFlow.first()
                 // Snapshot once: which trips are scheduled for this stop from now on. Live polling
                 // below only checks these same trips for a live position match — a trip that wasn't
                 // scheduled at screen-open time won't appear mid-session.
@@ -255,6 +309,7 @@ class MapViewModel(
                     minZoom = MIN_ZOOM,
                     maxZoom = MAX_ZOOM,
                     fallbackZoom = FALLBACK_ZOOM,
+                    minBoundingBoxMiles = MIN_BOUNDING_BOX_MILES,
                 )
 
                 // The map background is a set of still tiles, fetched once — it doesn't need to
@@ -275,7 +330,7 @@ class MapViewModel(
                     stop.lat, stop.lon, fetchRadiusMeters, excludeStopId = stopId,
                 ).map { nearby -> NearbyStopMarker(nearby.stopId, nearby.stopName, nearby.lat, nearby.lon) }
 
-                loadedContext = LoadedMapContext(stop, streetContext, zoom, mapTiles, nearbyStops)
+                loadedContext = LoadedMapContext(stop, streetContext, zoom, mapTiles, nearbyStops, tapHoldArrivalsEnabled, darkMode)
 
                 while (isActive) {
                     refresh()
@@ -334,6 +389,7 @@ class MapViewModel(
             _state.value = MapState.Loaded(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.NOT_SUPPORTED,
+                context.tapHoldArrivalsEnabled, context.darkMapEnabled,
             )
             return
         }
@@ -348,6 +404,7 @@ class MapViewModel(
             _state.value = MapState.Loaded(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.UNAVAILABLE,
+                context.tapHoldArrivalsEnabled, context.darkMapEnabled,
             )
             return
         }
@@ -388,10 +445,9 @@ class MapViewModel(
                 BusMarker(
                     tripId = arrival.tripId,
                     targetStopId = activeStopId,
-                    routeLabel = arrival.route.displayName,
+                    routeLabel = arrival.route.shortName?.takeIf { it.isNotBlank() } ?: arrival.route.displayName,
                     directionLabel = arrival.direction.displayLabel(),
-                    lineLabel = lineType?.label,
-                    emoji = lineType?.emoji ?: "🚌",
+                    vehicleIcon = lineType.toVehicleIcon(),
                     etaEpochSeconds = eta.etaEpochSeconds,
                     status = eta.status,
                     isArrived = isArrived,
@@ -407,6 +463,7 @@ class MapViewModel(
         _state.value = MapState.Loaded(
             context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
             dedupedBuses, context.nearbyStops, LiveFeedStatus.OK,
+            context.tapHoldArrivalsEnabled, context.darkMapEnabled,
         )
     }
 
@@ -440,29 +497,34 @@ class MapScreen(
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                // Loading/Error render below the overlaid back button's row (see the LightTopBar
-                // further down, drawn on top of this Column) rather than at the very top edge,
-                // so the text never sits behind the icon.
-                val aboveOverlayPadding = Modifier.padding(top = TOPBAR_CLEARANCE_UNITS.gridUnitsAsDp() + 16.dp, start = 16.dp, end = 16.dp)
+                // A real LightTopBar in normal layout flow -- same pattern LightQrCodeScanner uses
+                // for a back button over full-bleed content, rather than absolutely overlaying one
+                // on top of the Canvas. That approach only ever colliding-by-luck depended on the
+                // Canvas's own title text staying clear of wherever the icon happened to sit; this
+                // way there's nothing else placed in the icon's row for it to collide with, by
+                // construction. No title text here -- the Map screen doesn't need to say "Map".
+                LightTopBar(
+                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                )
+                Column(modifier = Modifier.weight(1f)) {
                 when (val s = state) {
                     is MapState.Loading -> LightText(
                         text = "Loading...",
                         variant = LightTextVariant.Copy,
                         lighten = true,
-                        modifier = aboveOverlayPadding,
+                        modifier = Modifier.padding(16.dp),
                     )
 
                     is MapState.Error -> LightText(
                         text = s.message,
                         variant = LightTextVariant.Copy,
                         lighten = true,
-                        modifier = aboveOverlayPadding,
+                        modifier = Modifier.padding(16.dp),
                     )
 
                     is MapState.Loaded -> {
@@ -497,26 +559,51 @@ class MapScreen(
                             nearbyStops = s.nearbyStops,
                             expandedStopIds = expandedStopIds,
                             nearbyVehiclesEnabled = nearbyVehiclesEnabled,
+                            tapHoldArrivalsEnabled = s.tapHoldArrivalsEnabled,
+                            darkMapEnabled = s.darkMapEnabled,
                             onToggleStop = viewModel::toggleStopExpanded,
                             onToggleNearbyVehicles = viewModel::toggleNearbyVehicles,
+                            onStopLongPressed = { longPressStopId, longPressStopLabel ->
+                                navigateTo(screenFactory = { activity ->
+                                    UpcomingArrivalsScreen(activity, dbFile, agency, longPressStopId, longPressStopLabel)
+                                })
+                            },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
                 }
-
-                // Always white, independent of the app's light/dark theme -- forced into the Dark
-                // palette so the icon reads against the canvas's own always-solid-black top scrim
-                // (see SCRIM_HEIGHT_PX), the same theme-independent treatment as the rest of that
-                // overlay (title, legend, compass letters).
-                LightTheme(colors = LightThemeColors.Dark) {
-                    LightTopBar(
-                        leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                        modifier = Modifier.align(Alignment.TopStart),
-                    )
-                }
             }
         }
+    }
+}
+
+/**
+ * Rasterizes an SDK vector icon to a plain [Bitmap] once (cached for this icon+size+tint for as
+ * long as this composable stays alive), for drawing directly via the native Canvas -- which draws
+ * bitmaps, not Compose vector assets. Built entirely from Compose's own resource/drawing APIs
+ * ([painterResource], [CanvasDrawScope]) rather than a raw [android.content.Context] lookup, since
+ * tool code can't hold one directly (see the SDK's own build-time source restrictions). Every icon
+ * in [LightIcons] ships solid white in its own resource (see the "_white" drawable naming) -- [tint]
+ * recolors it via [ColorFilter.tint] since there's no separate dark-mode drawable to fall back on,
+ * needed so these solid (non-outlined) glyphs stay legible against Light map tiles the same way the
+ * white-fill/black-outline label text already is against either tile style.
+ */
+@Composable
+private fun rememberIconBitmap(icon: LightIconConfiguration, sizePx: Int, tint: Color): Bitmap {
+    val painter = painterResource(icon.drawableResource)
+    val colorFilter = remember(tint) { ColorFilter.tint(tint) }
+    return remember(painter, sizePx, tint) {
+        val imageBitmap = ImageBitmap(sizePx, sizePx)
+        CanvasDrawScope().draw(
+            density = Density(1f),
+            layoutDirection = LayoutDirection.Ltr,
+            canvas = ComposeCanvas(imageBitmap),
+            size = Size(sizePx.toFloat(), sizePx.toFloat()),
+        ) {
+            with(painter) { draw(size = size, colorFilter = colorFilter) }
+        }
+        imageBitmap.asAndroidBitmap()
     }
 }
 
@@ -549,14 +636,32 @@ private fun MapCanvas(
     nearbyStops: List<NearbyStopMarker>,
     expandedStopIds: Set<String>,
     nearbyVehiclesEnabled: Boolean,
+    tapHoldArrivalsEnabled: Boolean,
+    /** Settings screen's Map style toggle -- Light tiles are bright, so solid icon glyphs need to
+     * render dark (black) to stay legible over them; Dark tiles keep the original white glyphs. */
+    darkMapEnabled: Boolean,
     onToggleStop: (String) -> Unit,
     onToggleNearbyVehicles: () -> Unit,
+    /** Fires for a long press on a stop marker (the center stop or any nearby one) when
+     * [tapHoldArrivalsEnabled] is on -- see the Settings screen's "Tap and hold a stop" toggle. */
+    onStopLongPressed: (stopId: String, stopLabel: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Loaded once per icon+size+tint (remember only works at composition time, not inside the
+    // Canvas draw-phase lambda below), then just referenced as a plain Bitmap during drawing.
+    val iconTint = if (darkMapEnabled) Color.White else Color.Black
+    val centerMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_ARRIVAL, CENTER_MARKER_ICON_PX, iconTint)
+    val nearbyMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_ARRIVAL, NEARBY_MARKER_ICON_PX, iconTint)
+    val busIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_BUS, VEHICLE_MARKER_ICON_PX, iconTint)
+    val subwayIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_SUBWAY, VEHICLE_MARKER_ICON_PX, iconTint)
+    val trainIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_TRAIN, VEHICLE_MARKER_ICON_PX, iconTint)
+    val toggleOffBitmap = rememberIconBitmap(LightIcons.TOGGLE_STATE_OFF, TOGGLE_ICON_PX, iconTint)
+    val toggleOnBitmap = rememberIconBitmap(LightIcons.TOGGLE_STATE_ON, TOGGLE_ICON_PX, iconTint)
 
     Canvas(
         modifier = modifier
-            .pointerInput(nearbyStops, centerLat, centerLon, zoom, nearbyVehiclesEnabled) {
+            .clipToBounds()
+            .pointerInput(nearbyStops, centerLat, centerLon, zoom, nearbyVehiclesEnabled, tapHoldArrivalsEnabled) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val center = Offset(size.width / 2f, size.height / 2f)
@@ -569,15 +674,41 @@ private fun MapCanvas(
                         val dy = down.position.y - point.y
                         sqrt(dx * dx + dy * dy) < STOP_HIT_RADIUS_PX
                     }
+                    val hitCenter = run {
+                        val dx = down.position.x - center.x
+                        val dy = down.position.y - center.y
+                        sqrt(dx * dx + dy * dy) < STOP_HIT_RADIUS_PX
+                    }
                     val toggleBounds = toggleHitRect(size.height.toFloat())
                     val hitToggle = toggleBounds.contains(down.position)
 
-                    if (hitStop == null && !hitToggle) {
+                    if (hitStop == null && !hitCenter && !hitToggle) {
                         // Not on anything we handle -- leave the event completely untouched so
                         // ancestor/system gestures (like edge-swipe back) still see it normally.
                         return@awaitEachGesture
                     }
                     down.consume()
+
+                    // Tap-and-hold on a stop marker (the center stop or any nearby one) jumps to its
+                    // upcoming arrivals -- opt-in via Settings ("Tap and hold a stop"), since it's an
+                    // extra gesture layered on top of the tap-to-toggle behavior below. Fires as soon
+                    // as the hold threshold is reached rather than waiting for release, matching how
+                    // a long press reads everywhere else on Android.
+                    if (tapHoldArrivalsEnabled && (hitStop != null || hitCenter)) {
+                        val shortTapUp = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
+                        if (shortTapUp == null) {
+                            if (hitStop != null) {
+                                onStopLongPressed(hitStop.stopId, hitStop.stopName ?: "Stop ${hitStop.stopId}")
+                            } else {
+                                onStopLongPressed(stopId, stopLabel)
+                            }
+                        } else {
+                            shortTapUp.consume()
+                            hitStop?.let { onToggleStop(it.stopId) }
+                        }
+                        return@awaitEachGesture
+                    }
+
                     val up = waitForUpOrCancellation()
                     if (up != null) {
                         up.consume()
@@ -598,11 +729,6 @@ private fun MapCanvas(
             nativeCanvas.drawBitmap(tile.bitmap, center.x + offset.x, center.y + offset.y, null)
         }
 
-        val emojiPaint = Paint().apply {
-            textSize = 56f
-            textAlign = Paint.Align.CENTER
-            isAntiAlias = true
-        }
         // Always white fill + black outline, independent of theme -- Voyager's imagery ranges from
         // near-white streets to colored parks/water, so any single fixed color would go illegible
         // over some patch of the map. Same treatment nearbyStopLabelPaint below already used.
@@ -625,16 +751,19 @@ private fun MapCanvas(
             textSize = 22f
             strokeWidth = 4f
         }
-        val nearbyStopEmojiPaint = Paint().apply {
-            textSize = 34f
-            textAlign = Paint.Align.CENTER
-            isAntiAlias = true
-        }
+        // Left-aligned copies for vehicle marker text, which -- like tapped stop labels -- renders
+        // to the right of its icon rather than centered under it (see drawBusMarker).
+        val vehicleLabelPaint = Paint(labelPaint).apply { textAlign = Paint.Align.LEFT }
+        val vehicleLabelOutlinePaint = Paint(labelOutlinePaint).apply { textAlign = Paint.Align.LEFT }
+        val vehicleSmallLabelPaint = Paint(smallLabelPaint).apply { textAlign = Paint.Align.LEFT }
+        val vehicleSmallLabelOutlinePaint = Paint(smallLabelOutlinePaint).apply { textAlign = Paint.Align.LEFT }
         // Always-white fill + black outline, independent of theme -- legible against both dark and
         // light patches of map, rather than the theme-dependent (and previously too-small) styling.
+        // Left-aligned (rather than centered) since expanded stop labels now render to the right of
+        // their marker -- see the expandedLabels block below.
         val nearbyStopLabelPaint = Paint().apply {
             textSize = 26f
-            textAlign = Paint.Align.CENTER
+            textAlign = Paint.Align.LEFT
             isAntiAlias = true
             color = android.graphics.Color.WHITE
         }
@@ -644,39 +773,22 @@ private fun MapCanvas(
             color = android.graphics.Color.BLACK
         }
 
-        // Title/legend/attribution render as an overlay directly on the map -- a solid (not
-        // translucent) black bar flush with the top of the screen, so the text stays legible
-        // regardless of what's underneath, same idea as the compass letters already drawing
-        // straight onto the map. Text here is always light, independent of the app's light/dark
-        // theme, since the bar itself is always solid black.
+        // Attribution renders as an overlay directly on the map -- a solid (not translucent) black
+        // bar flush with the top of the screen, so the text stays legible regardless of what's
+        // underneath, same idea as the compass letters already drawing straight onto the map. Text
+        // here is always light, independent of the app's light/dark theme, since the bar itself is
+        // always solid black.
         val scrimPaint = Paint().apply {
             color = android.graphics.Color.BLACK
         }
         nativeCanvas.drawRect(0f, 0f, size.width, SCRIM_HEIGHT_PX, scrimPaint)
-        val overlayTitlePaint = Paint().apply {
-            textSize = 34f
+        val overlayAttributionPaint = Paint().apply {
+            textSize = 16f
             textAlign = Paint.Align.LEFT
             isAntiAlias = true
             color = android.graphics.Color.WHITE
-        }
-        val overlayLegendPaint = Paint(overlayTitlePaint).apply {
-            textSize = 22f
-            alpha = 220
-        }
-        val overlayAttributionPaint = Paint(overlayTitlePaint).apply {
-            textSize = 16f
             alpha = 160
         }
-        nativeCanvas.drawText("🗺️ Map", OVERLAY_INSET_X, TITLE_Y, overlayTitlePaint)
-        val legendText = "📍 Selected stop · 🚏 Nearby stop · 🚌 Bus · 🚇 Subway/Light Rail · 🚆 Commuter Rail"
-        val maxLegendWidthPx = size.width - 2 * OVERLAY_INSET_X
-        val legendWidthPx = overlayLegendPaint.measureText(legendText)
-        // Five items is a lot to fit on one line at a fixed size -- shrink just enough to fit
-        // rather than risk it running off the edge of the bar.
-        if (legendWidthPx > maxLegendWidthPx) {
-            overlayLegendPaint.textSize *= maxLegendWidthPx / legendWidthPx
-        }
-        nativeCanvas.drawText(legendText, OVERLAY_INSET_X, LEGEND_Y, overlayLegendPaint)
         nativeCanvas.drawText("© OpenStreetMap contributors © CARTO", OVERLAY_INSET_X, ATTRIBUTION_Y, overlayAttributionPaint)
 
         // Fixed north-up compass letters, each anchored a matching margin from its own screen edge
@@ -695,19 +807,23 @@ private fun MapCanvas(
             nativeCanvas.drawText(letter, point.x, point.y, labelPaint)
         }
 
-        // Nearby Vehicles toggle -- bottom-left corner, clear of the mid-edge compass letters.
-        val toggleText = if (nearbyVehiclesEnabled) "🚌 Nearby Vehicles: On" else "🚌 Nearby Vehicles: Off"
+        // "Track Tapped Stops" toggle -- bottom-left corner, clear of the mid-edge compass letters.
+        // Icon shows the on/off state; the label alongside it stays since the icon alone (a thin
+        // slider-knob glyph) is too subtle at this size to read unambiguously on its own. Sized to
+        // match the on-canvas "No live vehicles..."-style status message rather than the much
+        // smaller size this used previously.
         val toggleY = size.height - TOGGLE_BOTTOM_MARGIN_PX
         val toggleOutlinePaint = Paint(nearbyStopLabelOutlinePaint).apply {
-            textSize = 22f
-            textAlign = Paint.Align.LEFT
+            textSize = TOGGLE_TEXT_SIZE_PX
         }
         val togglePaint = Paint(nearbyStopLabelPaint).apply {
-            textSize = 22f
-            textAlign = Paint.Align.LEFT
+            textSize = TOGGLE_TEXT_SIZE_PX
         }
-        nativeCanvas.drawText(toggleText, OVERLAY_INSET_X, toggleY, toggleOutlinePaint)
-        nativeCanvas.drawText(toggleText, OVERLAY_INSET_X, toggleY, togglePaint)
+        val toggleIconBitmap = if (nearbyVehiclesEnabled) toggleOnBitmap else toggleOffBitmap
+        val toggleTextX = OVERLAY_INSET_X + TOGGLE_ICON_PX + TOGGLE_TEXT_GAP_PX
+        nativeCanvas.drawBitmap(toggleIconBitmap, OVERLAY_INSET_X, toggleY - TOGGLE_ICON_PX / 2f - 6f, null)
+        nativeCanvas.drawText(TOGGLE_TEXT, toggleTextX, toggleY, toggleOutlinePaint)
+        nativeCanvas.drawText(TOGGLE_TEXT, toggleTextX, toggleY, togglePaint)
 
         // Nearby stops: icon-only by default, drawn as a background layer so bus markers stay
         // legible on top; a tap on a stop toggles its own name label on/off, independent per stop
@@ -719,28 +835,49 @@ private fun MapCanvas(
             val point = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
             stop to point
         }
-        stopPoints.forEach { (_, point) -> nativeCanvas.drawText("🚏", point.x, point.y, nearbyStopEmojiPaint) }
+        stopPoints.forEach { (_, point) ->
+            nativeCanvas.drawBitmap(
+                nearbyMarkerBitmap,
+                point.x - NEARBY_MARKER_ICON_PX / 2f,
+                point.y - NEARBY_MARKER_ICON_PX / 2f,
+                null,
+            )
+        }
 
+        // Anchored to the right of the marker's own base (its bottom edge, where the pin visually
+        // touches the map) rather than centered underneath it, so the label text never overlaps the
+        // icon itself -- flips to the marker's left instead when the label would otherwise clip off
+        // the canvas's right edge (see resolveLabelSide).
         val expandedLabels = stopPoints
             .filter { (stop, _) -> stop.stopId in expandedStopIds }
             .map { (stop, point) ->
                 val text = stop.stopName ?: "Stop ${stop.stopId}"
+                val width = nearbyStopLabelPaint.measureText(text)
+                val side = resolveLabelSide(point.x, NEARBY_MARKER_ICON_PX.toFloat(), width, size.width)
                 LabelBox(
                     key = stop.stopId,
                     text = text,
-                    centerX = point.x,
-                    initialY = point.y + LABEL_OFFSET_PX,
-                    width = nearbyStopLabelPaint.measureText(text),
+                    anchorX = side.anchorX(point.x, NEARBY_MARKER_ICON_PX.toFloat()),
+                    align = side.paintAlign(),
+                    initialY = point.y + NEARBY_MARKER_ICON_PX / 2f,
+                    width = width,
                 )
             }
         resolveLabelPositions(expandedLabels).forEach { (key, y) ->
             val box = expandedLabels.first { it.key == key }
-            nativeCanvas.drawText(box.text, box.centerX, y, nearbyStopLabelOutlinePaint)
-            nativeCanvas.drawText(box.text, box.centerX, y, nearbyStopLabelPaint)
+            nearbyStopLabelOutlinePaint.textAlign = box.align
+            nearbyStopLabelPaint.textAlign = box.align
+            nativeCanvas.drawText(box.text, box.anchorX, y, nearbyStopLabelOutlinePaint)
+            nativeCanvas.drawText(box.text, box.anchorX, y, nearbyStopLabelPaint)
         }
 
         // Center stop pin, name, and street context — always pinned dead center.
-        nativeCanvas.drawText("📍", center.x, center.y, emojiPaint)
+        nativeCanvas.drawBitmap(
+            centerMarkerBitmap,
+            center.x - CENTER_MARKER_ICON_PX / 2f,
+            center.y - CENTER_MARKER_ICON_PX / 2f,
+            null,
+        )
         nativeCanvas.drawText(stopLabel, center.x, center.y + 64f, labelOutlinePaint)
         nativeCanvas.drawText(stopLabel, center.x, center.y + 64f, labelPaint)
         streetContext?.let {
@@ -753,11 +890,17 @@ private fun MapCanvas(
         val arrivedAtPrimary = buses.filter { it.isArrived && it.targetStopId == stopId }
         val everythingElse = buses.filterNot { it.isArrived && it.targetStopId == stopId }
 
+        fun vehicleIconBitmapFor(bus: BusMarker): Bitmap = when (bus.vehicleIcon) {
+            LightIcons.DIRECTIONS_SUBWAY -> subwayIconBitmap
+            LightIcons.DIRECTIONS_TRAIN -> trainIconBitmap
+            else -> busIconBitmap
+        }
+
         arrivedAtPrimary.forEachIndexed { index, bus ->
             val xOffset = (index - (arrivedAtPrimary.size - 1) / 2f) * 110f
             val x = center.x + xOffset
             val y = center.y - maxRadius * 0.45f
-            drawBusMarker(nativeCanvas, emojiPaint, labelPaint, labelOutlinePaint, smallLabelPaint, smallLabelOutlinePaint, bus, x, y)
+            drawBusMarker(nativeCanvas, vehicleIconBitmapFor(bus), vehicleLabelPaint, vehicleLabelOutlinePaint, vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, x, y, size.width)
         }
 
         // Every other bus drawn individually at its true projected position — clipped to the
@@ -766,20 +909,23 @@ private fun MapCanvas(
         everythingElse.forEach { bus ->
             val rel = projectRelativeToCenter(centerLat, centerLon, bus.lat, bus.lon, zoom)
             val clipped = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
-            drawBusMarker(nativeCanvas, emojiPaint, labelPaint, labelOutlinePaint, smallLabelPaint, smallLabelOutlinePaint, bus, clipped.x, clipped.y)
+            drawBusMarker(nativeCanvas, vehicleIconBitmapFor(bus), vehicleLabelPaint, vehicleLabelOutlinePaint, vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, clipped.x, clipped.y, size.width)
         }
     }
 }
 
-/** Hit-test bounds for the Nearby Vehicles toggle text, matching where it's drawn. Rough but
- * generous -- a fixed-width box wide enough for either "On"/"Off" state of the label. */
+/** Hit-test bounds for the "Track Tapped Stops" toggle, matching where it's drawn -- measured
+ * against the real label text and current text size rather than a guessed fixed width, so this
+ * can't quietly drift out of sync with the toggle's own size again. */
 private fun toggleHitRect(canvasHeight: Float): androidx.compose.ui.geometry.Rect {
     val toggleY = canvasHeight - TOGGLE_BOTTOM_MARGIN_PX
+    val textWidth = Paint().apply { textSize = TOGGLE_TEXT_SIZE_PX }.measureText(TOGGLE_TEXT)
+    val textStartX = OVERLAY_INSET_X + TOGGLE_ICON_PX + TOGGLE_TEXT_GAP_PX
     return androidx.compose.ui.geometry.Rect(
         left = OVERLAY_INSET_X - 12f,
-        top = toggleY - 32f,
-        right = OVERLAY_INSET_X + 320f,
-        bottom = toggleY + 12f,
+        top = toggleY - TOGGLE_TEXT_SIZE_PX,
+        right = textStartX + textWidth + 12f,
+        bottom = toggleY + 16f,
     )
 }
 
@@ -794,8 +940,38 @@ private fun clipToRadius(point: Offset, center: Offset, maxRadius: Float): Offse
     return Offset(center.x + dx * scale, center.y + dy * scale)
 }
 
-/** A tapped-open stop label's intended (pre-collision) position and measured size. */
-private data class LabelBox(val key: String, val text: String, val centerX: Float, val initialY: Float, val width: Float)
+/** Which side of its icon a label renders on. */
+private enum class LabelSide { RIGHT, LEFT }
+
+/**
+ * Right-of-icon is the default anchor for every label on this map (offset from the icon's own
+ * right edge by LABEL_GAP_PX) -- but flips to the icon's left when the label would otherwise run
+ * past the canvas's right edge (e.g. a vehicle marker near the map's right side). Shared by both
+ * tapped-stop labels and vehicle labels so this edge-avoidance logic isn't duplicated (and can't
+ * drift out of sync) between the two call sites.
+ */
+private fun resolveLabelSide(iconCenterX: Float, iconSizePx: Float, textWidth: Float, canvasWidth: Float): LabelSide {
+    val rightAnchorX = iconCenterX + iconSizePx / 2f + LABEL_GAP_PX
+    val wouldClipRight = rightAnchorX + textWidth > canvasWidth - OVERLAY_INSET_X
+    return if (wouldClipRight) LabelSide.LEFT else LabelSide.RIGHT
+}
+
+/** The x to pass to [android.graphics.Canvas.drawText], paired with the [Paint.Align] it must be
+ * drawn with -- RIGHT-side labels are left-aligned starting at the icon's right edge; LEFT-side
+ * (flipped) labels are right-aligned ending at the icon's left edge. */
+private fun LabelSide.anchorX(iconCenterX: Float, iconSizePx: Float): Float = when (this) {
+    LabelSide.RIGHT -> iconCenterX + iconSizePx / 2f + LABEL_GAP_PX
+    LabelSide.LEFT -> iconCenterX - iconSizePx / 2f - LABEL_GAP_PX
+}
+
+private fun LabelSide.paintAlign(): Paint.Align = when (this) {
+    LabelSide.RIGHT -> Paint.Align.LEFT
+    LabelSide.LEFT -> Paint.Align.RIGHT
+}
+
+/** A tapped-open stop label's intended (pre-collision) position and measured size. [anchorX]/[align]
+ * together fully describe where the text draws -- see [LabelSide.anchorX]/[LabelSide.paintAlign]. */
+private data class LabelBox(val key: String, val text: String, val anchorX: Float, val align: Paint.Align, val initialY: Float, val width: Float)
 
 /**
  * Basic collision handling for the (usually few) simultaneously-expanded stop labels: placed
@@ -810,8 +986,8 @@ private fun resolveLabelPositions(labels: List<LabelBox>): Map<String, Float> {
     val placed = mutableListOf<PlacedBox>()
     for (label in labels.sortedBy { it.initialY }) {
         var y = label.initialY
-        val left = label.centerX - label.width / 2f
-        val right = label.centerX + label.width / 2f
+        val left = if (label.align == Paint.Align.LEFT) label.anchorX else label.anchorX - label.width
+        val right = if (label.align == Paint.Align.LEFT) label.anchorX + label.width else label.anchorX
         var moved = true
         while (moved) {
             moved = false
@@ -834,7 +1010,7 @@ private fun resolveLabelPositions(labels: List<LabelBox>): Map<String, Float> {
 
 private fun drawBusMarker(
     canvas: android.graphics.Canvas,
-    emojiPaint: Paint,
+    vehicleIconBitmap: Bitmap,
     labelPaint: Paint,
     labelOutlinePaint: Paint,
     smallLabelPaint: Paint,
@@ -842,17 +1018,36 @@ private fun drawBusMarker(
     bus: BusMarker,
     x: Float,
     y: Float,
+    canvasWidth: Float,
 ) {
-    canvas.drawText(bus.emoji, x, y, emojiPaint)
-    val routeText = bus.lineLabel?.let { "$it - ${bus.routeLabel}" } ?: bus.routeLabel
-    canvas.drawText(routeText, x, y + 30f, smallLabelOutlinePaint)
-    canvas.drawText(routeText, x, y + 30f, smallLabelPaint)
-    canvas.drawText(bus.directionLabel, x, y + 54f, smallLabelOutlinePaint)
-    canvas.drawText(bus.directionLabel, x, y + 54f, smallLabelPaint)
-    canvas.drawText(bus.etaDisplay(), x, y + 78f, labelOutlinePaint)
-    canvas.drawText(bus.etaDisplay(), x, y + 78f, labelPaint)
-    bus.statusLabel()?.let {
-        canvas.drawText(it, x, y + 102f, smallLabelOutlinePaint)
-        canvas.drawText(it, x, y + 102f, smallLabelPaint)
+    canvas.drawBitmap(vehicleIconBitmap, x - VEHICLE_MARKER_ICON_PX / 2f, y - VEHICLE_MARKER_ICON_PX / 2f, null)
+    // Anchored to the right of the icon's own base, the same offset-from-icon approach used for
+    // tapped stop labels (see the expandedLabels block above) -- flips to the icon's left instead
+    // when the label would otherwise clip off the canvas's right edge (see resolveLabelSide). All
+    // three lines share one side decision (based on the widest of them) so they stay aligned with
+    // each other rather than each flipping independently.
+    val tripText = bus.tripDescription()
+    val etaText = bus.etaDisplay()
+    val statusText = bus.statusLabel()
+    val widestTextPx = maxOf(
+        smallLabelPaint.measureText(tripText),
+        labelPaint.measureText(etaText),
+        statusText?.let { smallLabelPaint.measureText(it) } ?: 0f,
+    )
+    val side = resolveLabelSide(x, VEHICLE_MARKER_ICON_PX.toFloat(), widestTextPx, canvasWidth)
+    val anchorX = side.anchorX(x, VEHICLE_MARKER_ICON_PX.toFloat())
+    val align = side.paintAlign()
+    labelPaint.textAlign = align
+    labelOutlinePaint.textAlign = align
+    smallLabelPaint.textAlign = align
+    smallLabelOutlinePaint.textAlign = align
+    val baseY = y + VEHICLE_MARKER_ICON_PX / 2f
+    canvas.drawText(tripText, anchorX, baseY, smallLabelOutlinePaint)
+    canvas.drawText(tripText, anchorX, baseY, smallLabelPaint)
+    canvas.drawText(etaText, anchorX, baseY + 24f, labelOutlinePaint)
+    canvas.drawText(etaText, anchorX, baseY + 24f, labelPaint)
+    statusText?.let {
+        canvas.drawText(it, anchorX, baseY + 48f, smallLabelOutlinePaint)
+        canvas.drawText(it, anchorX, baseY + 48f, smallLabelPaint)
     }
 }

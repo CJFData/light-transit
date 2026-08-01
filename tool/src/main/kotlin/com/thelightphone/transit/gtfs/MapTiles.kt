@@ -29,6 +29,7 @@ import kotlin.math.tan
  */
 private const val TILE_SIZE = 256.0
 private const val EARTH_CIRCUMFERENCE_METERS = 40_075_016.686
+private const val METERS_PER_MILE = 1609.344
 
 /** Fractional (x, y) tile coordinates for (lat, lon) at the given integer zoom. */
 fun lonLatToTileFraction(lat: Double, lon: Double, zoom: Int): Pair<Double, Double> {
@@ -55,7 +56,13 @@ fun metersPerPixel(lat: Double, zoom: Int): Double {
  * naturally yields a low one — no per-agency density special-casing needed.
  *
  * Falls back to [fallbackZoom] when [points] is empty or every point is ~coincident with the
- * center, since the fit-to-bounds formula is undefined for a zero-size box.
+ * center, since the fit-to-bounds formula is undefined for a zero-size box -- though in practice
+ * that branch is now rarely reached once [minBoundingBoxMiles] is positive, since the floor below
+ * already keeps the box away from zero-size on its own.
+ *
+ * [minBoundingBoxMiles] treats the bounding box as at least this wide in each dimension before
+ * computing zoom, so a real-world-tiny cluster (e.g. two platforms 30ft apart) doesn't compute an
+ * absurdly tight zoom just because the *points* happen to be that close together.
  */
 fun fitBoundsZoom(
     centerLat: Double,
@@ -65,6 +72,7 @@ fun fitBoundsZoom(
     minZoom: Int,
     maxZoom: Int,
     fallbackZoom: Int,
+    minBoundingBoxMiles: Double = 0.0,
 ): Int {
     // Computed at zoom 0 (n = 1) as a zoom-independent baseline -- offsets at any real zoom z are
     // this baseline scaled by 2^z, since both x and the Mercator-projected y are linear in n.
@@ -75,6 +83,16 @@ fun fitBoundsZoom(
         val (fracX, fracY) = lonLatToTileFraction(lat, lon, 0)
         maxDx = max(maxDx, abs(fracX - centerFracX))
         maxDy = max(maxDy, abs(fracY - centerFracY))
+    }
+
+    // 1 unit of this function's zoom-0 tile-fraction is EARTH_CIRCUMFERENCE_METERS*cos(lat) real
+    // meters at ANY zoom (the zoom cancels out of that ratio, the same relationship metersPerPixel
+    // uses) -- so a real-world minimum can be converted into this same unit and floored in directly.
+    if (minBoundingBoxMiles > 0.0) {
+        val minHalfExtentMeters = (minBoundingBoxMiles * METERS_PER_MILE) / 2.0
+        val minHalfExtentFraction = minHalfExtentMeters / (EARTH_CIRCUMFERENCE_METERS * cos(Math.toRadians(centerLat)))
+        maxDx = max(maxDx, minHalfExtentFraction)
+        maxDy = max(maxDy, minHalfExtentFraction)
     }
 
     val epsilon = 1e-9

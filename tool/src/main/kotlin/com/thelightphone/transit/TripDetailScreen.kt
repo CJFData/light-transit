@@ -16,12 +16,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.TripStopRow
+import com.thelightphone.transit.gtfs.computeArrivalEta
 import com.thelightphone.transit.gtfs.formatGtfsTime
+import com.thelightphone.transit.gtfs.todayForGtfs
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -58,14 +61,26 @@ sealed class TripDetailState {
      * current_stop_sequence means "at, arriving at, or en route to" that stop regardless of
      * current_status -- so matching it against a row's stopSequence alone is enough to place the
      * emoji at the stop the vehicle is closest to, including while it's between stops.
+     *
+     * [liveStatus] is the same On Time/Late/Early comparison the other live screens show, computed
+     * against the matched stop's own scheduled time -- null whenever there's no TripUpdates
+     * prediction for it yet (a live position with no matching prediction is a real, normal case,
+     * not an error).
      */
     data class Loaded(
         val stops: List<TripStopRow>,
         val liveEmoji: String?,
         val liveAtStopSequence: Int?,
+        val liveStatus: ArrivalStatus?,
     ) : TripDetailState()
 
     data class Error(val message: String) : TripDetailState()
+}
+
+fun ArrivalStatus.label(): String = when (this) {
+    ArrivalStatus.OnTime -> "On time"
+    is ArrivalStatus.Late -> "Late by ${(seconds / 60).coerceAtLeast(1)}m"
+    is ArrivalStatus.Early -> "Early by ${(seconds / 60).coerceAtLeast(1)}m"
 }
 
 class TripDetailViewModel(
@@ -93,9 +108,11 @@ class TripDetailViewModel(
                 val emoji = repository.getRouteTypeForTrip(tripId)?.let { LineType.forGtfsRouteType(it)?.emoji } ?: "🚌"
                 val vehiclePositionsUrl = agency?.realtimeVehiclePositionsUrl
                 if (stops.isEmpty() || vehiclePositionsUrl == null) {
-                    _state.value = TripDetailState.Loaded(stops, liveEmoji = null, liveAtStopSequence = null)
+                    _state.value = TripDetailState.Loaded(stops, liveEmoji = null, liveAtStopSequence = null, liveStatus = null)
                     return@launch
                 }
+                val tripUpdatesUrl = agency.realtimeTripUpdatesUrl
+                val today = todayForGtfs()
 
                 while (isActive) {
                     val liveStopSequence = try {
@@ -105,10 +122,29 @@ class TripDetailViewModel(
                         Log.e("TripDetailScreen", "VehiclePositions fetch failed for trip $tripId", e)
                         null
                     }
+
+                    // Only worth fetching TripUpdates at all once we actually have a stop to check
+                    // a prediction against.
+                    val matchedStop = liveStopSequence?.let { seq -> stops.find { it.stopSequence == seq } }
+                    val liveStatus = matchedStop?.let { stop ->
+                        val scheduledTime = stop.departureTime ?: stop.arrivalTime ?: return@let null
+                        val rtStopUpdate = tripUpdatesUrl?.let { url ->
+                            try {
+                                GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId]
+                                    ?.updateFor(stop.stopId, stop.stopSequence)
+                            } catch (e: Exception) {
+                                Log.e("TripDetailScreen", "TripUpdates fetch failed for trip $tripId", e)
+                                null
+                            }
+                        }
+                        computeArrivalEta(scheduledTime, today, rtStopUpdate)?.status
+                    }
+
                     _state.value = TripDetailState.Loaded(
                         stops,
                         liveEmoji = emoji,
                         liveAtStopSequence = liveStopSequence,
+                        liveStatus = liveStatus,
                     )
                     delay(LIVE_VEHICLE_POLL_INTERVAL_MS)
                 }
@@ -190,7 +226,8 @@ class TripDetailScreen(
                     } else {
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.stops) { stop ->
-                                Row(
+                                val isLive = s.liveEmoji != null && stop.stopSequence == s.liveAtStopSequence
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .lightClickable {
@@ -209,27 +246,38 @@ class TripDetailScreen(
                                             }
                                         }
                                         .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.Top,
                                 ) {
-                                    if (s.liveEmoji != null && stop.stopSequence == s.liveAtStopSequence) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top,
+                                    ) {
+                                        if (isLive) {
+                                            LightText(
+                                                text = s.liveEmoji,
+                                                variant = LightTextVariant.Copy,
+                                                modifier = Modifier.padding(end = 8.dp),
+                                            )
+                                        }
                                         LightText(
-                                            text = s.liveEmoji,
+                                            text = stop.stopName ?: "Unknown stop",
                                             variant = LightTextVariant.Copy,
-                                            modifier = Modifier.padding(end = 8.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(end = 16.dp),
+                                        )
+                                        LightText(
+                                            text = formatGtfsTime(stop.arrivalTime ?: stop.departureTime),
+                                            variant = LightTextVariant.Copy,
+                                            lighten = true,
                                         )
                                     }
-                                    LightText(
-                                        text = stop.stopName ?: "Unknown stop",
-                                        variant = LightTextVariant.Copy,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(end = 16.dp),
-                                    )
-                                    LightText(
-                                        text = formatGtfsTime(stop.arrivalTime ?: stop.departureTime),
-                                        variant = LightTextVariant.Copy,
-                                        lighten = true,
-                                    )
+                                    if (isLive) {
+                                        LightText(
+                                            text = s.liveStatus?.label() ?: "Live",
+                                            variant = LightTextVariant.Detail,
+                                            lighten = true,
+                                        )
+                                    }
                                 }
                             }
                         }

@@ -45,12 +45,19 @@ class SettingsViewModel(
         get() = _darkMapEnabled
     private val _darkMapEnabled = MutableStateFlow(false)
 
+    val tapHoldArrivalsEnabled: StateFlow<Boolean>
+        get() = _tapHoldArrivalsEnabled
+    private val _tapHoldArrivalsEnabled = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
             agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
         }
         viewModelScope.launch {
             mapPreferences.darkMapEnabledFlow.collect { _darkMapEnabled.value = it }
+        }
+        viewModelScope.launch {
+            mapPreferences.tapHoldArrivalsEnabledFlow.collect { _tapHoldArrivalsEnabled.value = it }
         }
     }
 
@@ -64,6 +71,10 @@ class SettingsViewModel(
 
     fun setDarkMapEnabled(enabled: Boolean) {
         viewModelScope.launch { mapPreferences.setDarkMapEnabled(enabled) }
+    }
+
+    fun setTapHoldArrivalsEnabled(enabled: Boolean) {
+        viewModelScope.launch { mapPreferences.setTapHoldArrivalsEnabled(enabled) }
     }
 }
 
@@ -81,6 +92,7 @@ class SettingsScreen(
     override fun Content() {
         val defaultAgency by viewModel.defaultAgency.collectAsState()
         val darkMapEnabled by viewModel.darkMapEnabled.collectAsState()
+        val tapHoldArrivalsEnabled by viewModel.tapHoldArrivalsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -150,6 +162,39 @@ class SettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .lightClickable { viewModel.setDarkMapEnabled(true) }
+                            .padding(vertical = 12.dp),
+                    )
+                }
+
+                LightText(
+                    text = "Tap and hold a stop",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, tap and hold any stop on the Map screen to jump straight to its upcoming arrivals.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                Column {
+                    LightText(
+                        text = if (tapHoldArrivalsEnabled) "On (current)" else "On",
+                        variant = LightTextVariant.Copy,
+                        lighten = !tapHoldArrivalsEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable { viewModel.setTapHoldArrivalsEnabled(true) }
+                            .padding(vertical = 12.dp),
+                    )
+                    LightText(
+                        text = if (!tapHoldArrivalsEnabled) "Off (current)" else "Off",
+                        variant = LightTextVariant.Copy,
+                        lighten = tapHoldArrivalsEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable { viewModel.setTapHoldArrivalsEnabled(false) }
                             .padding(vertical = 12.dp),
                     )
                 }
