@@ -1,4 +1,4 @@
-# 🚌 Pico Transit (Public Transit for the Light Phone III)
+# 🚌 Pico Transit-Public Transit for the Light Phone III
 
 Pico Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a live map that shows exactly where your ride actually is — no ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
