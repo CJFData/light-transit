@@ -36,6 +36,48 @@ class GtfsRepositoryDedupTest {
     }
 
     @Test
+    fun excludesEntrancesAndPathwayNodesFromMemberStopIdsButKeepsBoardingAreas() {
+        // Real shape from MBTA's South Station: real platforms (location_type=0), a boarding area
+        // (location_type=4, e.g. a specific bus bay), a door that happens to be an elevator
+        // (location_type=2, "door-sstat-deweyelev" in the real feed), and an escalator pathway node
+        // (location_type=3, "node-382-lobby" in the real feed). Only the platform and boarding area
+        // should end up as members -- the door and escalator node are not places a rider boards.
+        val rows = listOf(
+            RawStopRow("place-sstat", "South Station", 42.352271, -71.055242, parentStation = null, locationType = 1),
+            RawStopRow("70079", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
+            RawStopRow("70080", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
+            RawStopRow("bus-bay-b1", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 4),
+            RawStopRow("door-sstat-deweyelev", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 2),
+            RawStopRow("node-382-lobby", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 3),
+        )
+
+        val result = groupStationsByParent(rows)
+
+        assertEquals(1, result.size)
+        assertEquals(
+            listOf("70079", "70080", "bus-bay-b1"),
+            result.single().memberStopIds,
+            "entrances/elevators (location_type=2) and pathway nodes (location_type=3) must not be treated as boardable platforms",
+        )
+    }
+
+    @Test
+    fun fallsBackToAllChildrenWhenNoneAreRealPlatforms() {
+        // A degenerate feed where every child under a parent is an entrance/pathway node -- rather
+        // than produce a station with zero member stops (breaking every schedule lookup for it), fall
+        // back to the unfiltered list so the station still resolves to something.
+        val rows = listOf(
+            RawStopRow("place-onlydoors", "Doors Only Station", 42.0, -71.0, parentStation = null, locationType = 1),
+            RawStopRow("door-a", "Doors Only Station", 42.0, -71.0, parentStation = "place-onlydoors", locationType = 2),
+            RawStopRow("node-b", "Doors Only Station", 42.0, -71.0, parentStation = "place-onlydoors", locationType = 3),
+        )
+
+        val result = groupStationsByParent(rows)
+
+        assertEquals(listOf("door-a", "node-b"), result.single().memberStopIds)
+    }
+
+    @Test
     fun stopWithManyConvergingRoutesButNoStationRecordIsNotAStation() {
         // A stop many routes happen to converge at, but with no location_type=1 parent record
         // backing it -- per the Station sub-map rule, this must never qualify, no matter how many

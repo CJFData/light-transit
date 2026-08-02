@@ -11,6 +11,11 @@ private val darkMapKey = booleanPreferencesKey("DARK_MAP_ENABLED")
 private val tapHoldArrivalsKey = booleanPreferencesKey("MAP_TAP_HOLD_ARRIVALS_ENABLED")
 private val doubleTapStationKey = booleanPreferencesKey("MAP_DOUBLE_TAP_STATION_ENABLED")
 private val trackTappedStopsKey = booleanPreferencesKey("MAP_TRACK_TAPPED_STOPS_ENABLED")
+private val seeEverythingKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_ENABLED")
+private val filterByStopKey = booleanPreferencesKey("MAP_FILTER_BY_STOP_ENABLED")
+private val seeEverythingShowBusKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_SHOW_BUS")
+private val seeEverythingShowSubwayKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_SHOW_SUBWAY")
+private val seeEverythingShowCommuterRailKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_SHOW_COMMUTER_RAIL")
 
 /**
  * The user's Map screen tile style (Settings screen), persisted the same way [AgencyPreferences]
@@ -52,5 +57,49 @@ class MapPreferences(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setTrackTappedStopsEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[trackTappedStopsKey] = enabled }
+    }
+
+    /** Off by default -- when on, the Map screen and Station sub-map drop the usual schedule-
+     * anchored vehicle matching entirely and instead plot EVERY live vehicle (any route, any
+     * agency feed) whose position falls within the map's own rendered radius, labeled with just
+     * its route short name until tapped (see BusMarker.shortLabel/tripDescription). A materially
+     * different, much broader view than the default "vehicles actually relevant to this stop" one. */
+    val seeEverythingEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[seeEverythingKey] ?: false }
+
+    suspend fun setSeeEverythingEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[seeEverythingKey] = enabled }
+    }
+
+    /** Off by default, and only meaningful while [seeEverythingEnabledFlow] is also on (Settings
+     * only shows this row then) -- narrows the "see everything" vehicle set down to just vehicles
+     * whose own trip visits one of the currently tap-selected stops (the same selection
+     * [trackTappedStopsEnabledFlow] already uses), tagged TO/FROM/AT that stop instead of a bare
+     * route label. */
+    val filterByStopEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[filterByStopKey] ?: false }
+
+    suspend fun setFilterByStopEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[filterByStopKey] = enabled }
+    }
+
+    /** On by default (all three of these) -- "See Everything" starts out showing every mode, same
+     * as before these existed; each is its own per-mode opt-OUT, only meaningful while
+     * [seeEverythingEnabledFlow] is also on (Settings only shows these rows then). */
+    val seeEverythingShowBusFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[seeEverythingShowBusKey] ?: true }
+
+    suspend fun setSeeEverythingShowBus(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[seeEverythingShowBusKey] = enabled }
+    }
+
+    val seeEverythingShowSubwayFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[seeEverythingShowSubwayKey] ?: true }
+
+    suspend fun setSeeEverythingShowSubway(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[seeEverythingShowSubwayKey] = enabled }
+    }
+
+    val seeEverythingShowCommuterRailFlow: Flow<Boolean> =
+        dataStore.data.map { prefs -> prefs[seeEverythingShowCommuterRailKey] ?: true }
+
+    suspend fun setSeeEverythingShowCommuterRail(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[seeEverythingShowCommuterRailKey] = enabled }
     }
 }

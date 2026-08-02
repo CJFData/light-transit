@@ -59,9 +59,10 @@ private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.CIRCLE, "Home -- every other screen's own footer button; jumps back to HomeScreen"),
 )
 
-/** Settings screen's own on/off toggles -- all four (Tap and hold a stop, Double-tap to open a
- * station, Track tapped stops, Trip progress bar) render as one of these two icons next to their
- * label, per SettingsScreen's own ToggleRow. */
+/** Settings screen's own on/off toggles -- every one of them (Tap and hold a stop, Double-tap to
+ * open a station, Track tapped stops, See everything, Filter by stop, Modes shown's three per-mode
+ * toggles, Trip progress bar, Daily message) renders as one of these two icons next to their label,
+ * per SettingsScreen's own ToggleRow. */
 private val TOGGLE_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "Setting is on -- tap the row to turn it off"),
     IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Setting is off -- tap the row to turn it on"),
@@ -140,7 +141,8 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     ModeEntry(
                         name = "Station",
                         description = "View a zoomed-in map of a multi-platform station's individual " +
-                            "platforms.",
+                            "real platforms and gates. For MBTA commuter rail, a vehicle shows up on " +
+                            "its assigned track once MBTA decides one.",
                     )
 
                     LightText(
@@ -201,7 +203,12 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     LightText(
                         text = "\"Track tapped stops\" (a tapped-open stop on the Map screen also " +
                             "contributes its own live vehicles) lives here now, alongside \"Tap and " +
-                            "hold a stop\", \"Double-tap to open a station\", and \"Trip progress bar\".",
+                            "hold a stop\", \"Double-tap to open a station\", \"Trip progress bar\", " +
+                            "and \"Daily message\" (the small rotating message near the bottom of " +
+                            "the home screen). \"See everything\" shows every live vehicle in view on " +
+                            "the Map/Station map, each labeled with just its route until tapped; " +
+                            "\"Filter by stop\" and per-mode \"Modes shown\" toggles refine it further " +
+                            "and only appear once it's on.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 8.dp),

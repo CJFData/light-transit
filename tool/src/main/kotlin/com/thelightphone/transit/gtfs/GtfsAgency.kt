@@ -19,6 +19,9 @@ enum class GtfsAgency(
     val feedUrl: String,
     val realtimeTripUpdatesUrl: String?,
     val realtimeVehiclePositionsUrl: String?,
+    /** Optional extra data sources beyond the four feed URLs above -- see [AgencyComponent]. Empty
+     * for any agency that doesn't have one (e.g. RIPTA, today). */
+    val components: List<AgencyComponent> = emptyList(),
 ) {
     MBTA(
         "mbta",
@@ -26,6 +29,7 @@ enum class GtfsAgency(
         "https://cdn.mbta.com/MBTA_GTFS.zip",
         "https://cdn.mbta.com/realtime/TripUpdates.pb",
         "https://cdn.mbta.com/realtime/VehiclePositions.pb",
+        components = listOf(MbtaV3VehicleSource),
     ),
     // REMOVABLE: these two URLs only work because of the :netconfig cleartext exception (see
     // class doc above). Set both back to null to restore HTTPS-only enforcement for RIPTA.
@@ -37,6 +41,11 @@ enum class GtfsAgency(
         "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
     ),
     ;
+
+    /** Fetches this agency's own instance of a given [AgencyComponent] type, if it has one -- e.g.
+     * `agency.component<PlatformAssignmentSource>()`. Null for any agency/type combination that
+     * isn't declared in [components], including every non-MBTA agency today. */
+    inline fun <reified T : AgencyComponent> component(): T? = components.filterIsInstance<T>().firstOrNull()
 
     companion object {
         /**

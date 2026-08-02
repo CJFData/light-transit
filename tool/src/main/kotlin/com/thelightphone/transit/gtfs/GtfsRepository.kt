@@ -125,6 +125,12 @@ data class ScheduledArrival(
     val platformLabel: String? = null,
 )
 
+/** See [GtfsRepository.getRoutesForTrips]. */
+data class TripRouteInfo(
+    val route: RouteOption,
+    val direction: DirectionOption,
+)
+
 /**
  * Read-only access to one agency's ingested GTFS SQLite database. Every method issues a single
  * targeted query and returns a small result list — never a full table — so screens query
@@ -527,6 +533,88 @@ class GtfsRepository(dbFile: File) {
     }
 
     /**
+     * Same per-platform [ScheduledArrival] shape as [getScheduledArrivals], but keyed directly by
+     * [tripIds] instead of a stop_id + time window, and with NO time filter at all -- for a trip
+     * GTFS-RT/an agency's own live API already confirms is running and heading to/at one of
+     * [stopIds] right now, but which fell outside an earlier-fetched schedule snapshot (an added
+     * trip, or the snapshot simply outliving its own grace window -- see MapScreen's own "loosened"
+     * live-vehicle matching, which merges this into the same cache [getScheduledArrivals] populates
+     * so downstream matching logic doesn't need to know the difference). A trip already confirmed
+     * live is definitionally relevant regardless of its originally-scheduled time, hence no filter.
+     */
+    fun getScheduledArrivalsForTrips(tripIds: Set<String>, stopIds: List<String>): List<ScheduledArrival> {
+        if (tripIds.isEmpty() || stopIds.isEmpty()) return emptyList()
+        val tripPlaceholders = tripIds.joinToString(",") { "?" }
+        val stopPlaceholders = stopIds.joinToString(",") { "?" }
+        val isGrouped = stopIds.size > 1
+
+        val sql = """
+            SELECT st.departure_time, t.trip_id, st.stop_sequence, st.stop_id, s.stop_desc,
+                   r.route_id, r.route_short_name, r.route_long_name, r.route_type,
+                   t.direction_id, t.trip_headsign
+            FROM trips t
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            JOIN routes r ON r.route_id = t.route_id
+            JOIN stops s ON s.stop_id = st.stop_id
+            WHERE t.trip_id IN ($tripPlaceholders) AND st.stop_id IN ($stopPlaceholders)
+        """.trimIndent()
+
+        return db.rawQuery(sql, (tripIds.toList() + stopIds).toTypedArray()).use { cursor ->
+            cursor.mapRowsNotNull {
+                val directionId = getIntOrNull(9) ?: return@mapRowsNotNull null
+                ScheduledArrival(
+                    departureTime = getString(0),
+                    tripId = getString(1),
+                    stopId = getString(3),
+                    stopSequence = getInt(2),
+                    platformLabel = if (isGrouped) platformLabelFromStopDesc(getStringOrNull(4)) else null,
+                    route = RouteOption(
+                        routeId = getString(5),
+                        shortName = getStringOrNull(6),
+                        longName = getStringOrNull(7),
+                        routeType = getInt(8),
+                    ),
+                    direction = DirectionOption(directionId, getStringOrNull(10)),
+                )
+            }
+        }
+    }
+
+    /**
+     * A trip's own route + direction, independent of any particular stop -- for "See Everything"
+     * map mode (see MapScreen's own MapViewModel), whose vehicles aren't matched against a specific
+     * stop_time row at all: every live vehicle in view gets plotted regardless of whether its trip
+     * serves any stop this screen cares about, so there's no stop_id to join against here, unlike
+     * [getScheduledArrivalsForTrips].
+     */
+    fun getRoutesForTrips(tripIds: Set<String>): Map<String, TripRouteInfo> {
+        if (tripIds.isEmpty()) return emptyMap()
+        val placeholders = tripIds.joinToString(",") { "?" }
+        val sql = """
+            SELECT t.trip_id, r.route_id, r.route_short_name, r.route_long_name, r.route_type,
+                   t.direction_id, t.trip_headsign
+            FROM trips t
+            JOIN routes r ON r.route_id = t.route_id
+            WHERE t.trip_id IN ($placeholders)
+        """.trimIndent()
+
+        return db.rawQuery(sql, tripIds.toTypedArray()).use { cursor ->
+            cursor.mapRowsNotNull {
+                val directionId = getIntOrNull(5) ?: return@mapRowsNotNull null
+                getString(0) to TripRouteInfo(
+                    route = RouteOption(
+                        routeId = getString(1),
+                        shortName = getStringOrNull(2),
+                        longName = getStringOrNull(3),
+                        routeType = getInt(4),
+                    ),
+                    direction = DirectionOption(directionId, getStringOrNull(6)),
+                )
+            }.toMap()
+        }
+    }
+
+    /**
      * Every stop with coordinates, ranked by distance from ([anchorLat], [anchorLon]), nearest
      * first, capped at [limit]. Used by the "Leave Now" nearby-stops flow, anchored at a geocoded
      * search point.
@@ -614,7 +702,8 @@ internal data class RawStopRow(
  * Grouping itself only depends on the `parent_station` linkage -- a row with no `parent_station` is
  * its own representative regardless of its own `location_type`, and either way any rows pointing at
  * it via `parent_station` get folded into it. `location_type` only matters separately for
- * [StopLocation.isStation] (see below).
+ * [StopLocation.isStation] (see below) and for [isRealPlatform] filtering, which decides which
+ * children actually make it into [StopLocation.memberStopIds].
  *
  * If a `parent_station` value doesn't resolve to any row with coordinates (a missing station record,
  * or one without lat/lon), the first child (by stop_id, for determinism) is promoted to represent
@@ -631,33 +720,49 @@ internal fun groupStationsByParent(rows: List<RawStopRow>): List<StopLocation> {
 
     withoutParent.forEach { row ->
         val children = childrenByParent[row.stopId]
-        val childIds = children?.map { it.stopId }?.sorted()
+        val platformChildren = children?.filter { isRealPlatform(it) }
+        val effectiveChildren = platformChildren?.takeIf { it.isNotEmpty() } ?: children
+        val childIds = effectiveChildren?.map { it.stopId }?.sorted()
         result += StopLocation(
             stopId = row.stopId,
             stopName = row.stopName,
             lat = row.lat,
             lon = row.lon,
             memberStopIds = childIds ?: listOf(row.stopId),
-            isStation = row.locationType == 1 && (children?.size ?: 0) >= 2,
+            isStation = row.locationType == 1 && (platformChildren?.size ?: 0) >= 2,
         )
         claimedParentIds += row.stopId
     }
 
     childrenByParent.forEach { (parentId, children) ->
         if (parentId in claimedParentIds) return@forEach
-        val representative = children.minBy { it.stopId }
+        val platformChildren = children.filter { isRealPlatform(it) }
+        val effectiveChildren = platformChildren.ifEmpty { children }
+        val representative = effectiveChildren.minBy { it.stopId }
         result += StopLocation(
             stopId = representative.stopId,
             stopName = representative.stopName,
             lat = representative.lat,
             lon = representative.lon,
-            memberStopIds = children.map { it.stopId }.sorted(),
+            memberStopIds = effectiveChildren.map { it.stopId }.sorted(),
             isStation = false,
         )
     }
 
     return result
 }
+
+/**
+ * A child row a rider could actually board/alight at -- GTFS `location_type` 0 (platform/stop) or 4
+ * (boarding area, e.g. a bus bay within a larger platform). Excludes 2 (station entrance/exit, which
+ * includes elevators -- verified against real MBTA data, e.g. South Station's "door-sstat-deweyelev")
+ * and 3 (generic pathway node, e.g. the top/bottom of an escalator -- South Station alone has well
+ * over a hundred of these). Unset (`null`) is treated as a platform per the GTFS spec's own default.
+ * Falls back to the unfiltered child list if filtering would leave zero members, so a station's own
+ * schedule lookups never go empty just because its feed is missing usable `location_type` data.
+ */
+private fun isRealPlatform(row: RawStopRow): Boolean =
+    row.locationType == null || row.locationType == 0 || row.locationType == 4
 
 /**
  * A child platform's own identifying label within a multi-platform GTFS station, derived from its

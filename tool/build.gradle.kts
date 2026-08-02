@@ -69,6 +69,10 @@ dependencies {
     // allow-listed, hence hand-rolling the small subset of the GTFS-RT schema needed (see
     // GtfsRealtime.kt) rather than pulling one in.
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.8.1")
+    // Same allow-list prefix as the protobuf artifact above -- used to decode MBTA's V3 API
+    // (JSON:API) responses by hand, the same minimal-subset approach as GtfsRealtime.kt's protobuf
+    // decoding (see MbtaV3Api.kt).
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     testImplementation(libs.kotlin.test)
     ksp(libs.androidx.room.compiler)
 }

@@ -342,7 +342,10 @@ class TripDetailScreen(
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
 
-                if (isBoardedHere) {
+                // Once an alight stop is actually picked, the underlined stop below already shows
+                // it -- this instruction has done its job and would just be stale clutter from
+                // here on (tap-and-hold still works for connections, just no longer called out).
+                if (isBoardedHere && alightStopId == null) {
                     LightText(
                         text = "Tap a stop below to mark where you're getting off. Tap and hold a " +
                             "stop to see its connections.",

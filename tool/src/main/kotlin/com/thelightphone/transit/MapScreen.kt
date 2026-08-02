@@ -39,13 +39,16 @@ import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.GtfsRtFeedMessage
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.MapTiles
 import com.thelightphone.transit.gtfs.NominatimGeocoder
 import com.thelightphone.transit.gtfs.MapTileClient
+import com.thelightphone.transit.gtfs.LiveVehicleSource
 import com.thelightphone.transit.gtfs.ScheduledArrival
+import com.thelightphone.transit.gtfs.platformLabelFromStopDesc
 import com.thelightphone.transit.gtfs.StopLocation
 import com.thelightphone.transit.gtfs.computeArrivalEta
 import com.thelightphone.transit.gtfs.currentGtfsTimeOfDay
@@ -79,6 +82,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlin.math.sqrt
@@ -147,6 +151,19 @@ private const val NEARBY_MARKER_ICON_PX = 40
 // selected stop's own pin, but still read as slightly more prominent than a plain nearby stop.
 private const val VEHICLE_MARKER_ICON_PX = 46
 
+// LightIcons.DIRECTIONS_ARRIVAL (see ic_directions_arrival_white.xml) is a map-pin shape whose
+// actual "point" -- the spot that should sit exactly on the marker's real projected coordinate --
+// sits near the BOTTOM of its square bounding box, not at its center. Computed directly from that
+// vector drawable's own path data: the pin's tip is the cubic bezier endpoint at (13.7, 27.3)
+// within its 27.6x27.6 viewport. Drawing this bitmap centered on a coordinate (as if it had no
+// "point" the way a plain icon does) previously placed the tip about half the icon's own height
+// below where it should be -- every draw call below offsets by this fraction instead of by half
+// the icon size, so the tip (not the bounding box's center) is what lands on the coordinate.
+// Vehicle icons (bus/subway/train) are roughly symmetric glyphs with no equivalent point, so their
+// own bounding-box-center anchoring is already correct and untouched.
+private const val PIN_TIP_FRACTION_X = 13.7f / 27.6f
+private const val PIN_TIP_FRACTION_Y = 27.3f / 27.6f
+
 // Attribution renders as an overlay bar on top of the map itself (matching how the compass letters
 // already render directly on the map), rather than in a separate section above it. Solid, not
 // translucent, and flush with the top of the screen -- the compass's "N" label is pushed below it
@@ -188,7 +205,28 @@ data class BusMarker(
     val isArrived: Boolean,
     val lat: Double,
     val lon: Double,
+    /** Which platform/gate/track within a multi-platform station this vehicle is inbound to or
+     * arrived at, e.g. "Track 1" -- see [platformLabelFromStopDesc]. Null for a single-platform stop,
+     * where there's nothing more specific to name (same "only when actually grouped" rule
+     * [StopConnection.platformLabel] and [ArrivalRow.platformLabel] already follow). */
+    val platformLabel: String? = null,
+    /** Only set for a "See Everything" + "Filter by stop" match (see MapPreferences.
+     * filterByStopEnabledFlow) -- TO/FROM/AT relative to whichever tap-selected stop this vehicle's
+     * trip was found to visit. Used as the short label's suffix instead of the route alone, e.g.
+     * "SL1-TO" -- see [shortLabel]. */
+    val stopRelation: StopRelation? = null,
+    /** Live current_status text (e.g. "In transit", "Stopped") for a "See Everything" vehicle with
+     * no specific stop to measure an ETA against -- shown in the expanded label in place of the
+     * usual ETA/status badge (see [drawBusMarker]). Null for an ordinary schedule-matched vehicle,
+     * or a "Filter by stop" match, both of which already have a real ETA/status. [etaEpochSeconds]
+     * is an unused placeholder on a marker with this set, since it has no target stop to be an ETA
+     * "to" at all. */
+    val liveStatusText: String? = null,
 )
+
+/** A "See Everything" + "Filter by stop" vehicle's relationship to the selected stop it matched --
+ * see [BusMarker.stopRelation]. */
+enum class StopRelation { TO, AT, FROM }
 
 /** Maps a route's [LineType] to the SDK icon for its vehicle marker -- BUS is also the fallback
  * for a null (unmapped route_type) LineType, same as the emoji fallback this replaced. */
@@ -198,9 +236,13 @@ fun LineType?.toVehicleIcon(): LightIconConfiguration = when (this) {
     LineType.BUS, null -> LightIcons.DIRECTIONS_BUS
 }
 
-/** e.g. "R · Toward Pawtucket-Central Falls Transit Center" -- no mode prefix (the icon already
- * shows bus/subway/rail) and no long route name, just enough to tell same-mode routes apart. */
-fun BusMarker.tripDescription(): String = "$routeLabel · $directionLabel"
+/** e.g. "R · Toward Pawtucket-Central Falls Transit Center · Track 1" -- no mode prefix (the icon
+ * already shows bus/subway/rail) and no long route name, just enough to tell same-mode routes apart,
+ * plus which platform/gate/track when [BusMarker.platformLabel] names one. */
+fun BusMarker.tripDescription(): String {
+    val base = "$routeLabel · $directionLabel"
+    return platformLabel?.let { "$base · $it" } ?: base
+}
 
 fun BusMarker.etaDisplay(): String {
     val time = LocalDateTime.ofInstant(Instant.ofEpochSecond(etaEpochSeconds), ZoneId.systemDefault())
@@ -212,6 +254,22 @@ fun BusMarker.statusLabel(): String? = when (val s = status) {
     ArrivalStatus.OnTime -> "On time"
     is ArrivalStatus.Late -> "Late ${(s.seconds / 60).coerceAtLeast(1)}m"
     is ArrivalStatus.Early -> "Early ${(s.seconds / 60).coerceAtLeast(1)}m"
+}
+
+/** "See Everything" map mode's compact default label -- just the route, or route-TO/FROM/AT when
+ * also narrowed down by "Filter by stop" (e.g. "SL1-TO"). Expanded to the full
+ * [tripDescription]/[etaDisplay]/[statusLabel] stack on tap -- see [drawBusMarker] and MapCanvas's
+ * own vehicle-tap handling. */
+fun BusMarker.shortLabel(): String = stopRelation?.let { "$routeLabel-${it.name}" } ?: routeLabel
+
+/** V3/GTFS-RT's current_status text, human-readable, for a "See Everything" vehicle's expanded
+ * label in place of an ETA it has no target stop to measure against -- see
+ * [BusMarker.liveStatusText]. */
+fun currentStatusText(status: Int?): String? = when (status) {
+    GtfsRtVehicleStatus.INCOMING_AT -> "Approaching"
+    GtfsRtVehicleStatus.STOPPED_AT -> "Stopped"
+    GtfsRtVehicleStatus.IN_TRANSIT_TO -> "In transit"
+    else -> null
 }
 
 data class NearbyStopMarker(
@@ -258,6 +316,8 @@ sealed class MapState {
          * station (see [StopLocation.isStation]) -- gates double-tap-to-open-Station for the center
          * pin the same way [NearbyStopMarker.isStation] does for a nearby one. */
         val centerStation: StopLocation?,
+        /** Settings screen toggle (off by default) -- see MapPreferences.seeEverythingEnabledFlow. */
+        val seeEverythingEnabled: Boolean,
     ) : MapState()
     data class Error(val message: String) : MapState()
 }
@@ -274,6 +334,11 @@ private data class LoadedMapContext(
     val darkMapEnabled: Boolean,
     val doubleTapStationEnabled: Boolean,
     val centerStation: StopLocation?,
+    val seeEverythingEnabled: Boolean,
+    val filterByStopEnabled: Boolean,
+    val seeEverythingShowBus: Boolean,
+    val seeEverythingShowSubway: Boolean,
+    val seeEverythingShowCommuterRail: Boolean,
 )
 
 class MapViewModel(
@@ -293,8 +358,15 @@ class MapViewModel(
     val nearbyVehiclesEnabled = MutableStateFlow(false)
     /** Nearby stops the user has tapped open -- always reveals that stop's name label; when
      * [nearbyVehiclesEnabled] is also on, an expanded stop additionally contributes its own inbound
-     * vehicles to the map. */
+     * vehicles to the map. Also doubles as "See Everything" + "Filter by stop"'s own stop selection
+     * (see MapPreferences.filterByStopEnabledFlow) -- the same tap-a-stop gesture, reused rather
+     * than a second, separate selection mechanism. */
     val expandedStopIds = MutableStateFlow<Set<String>>(emptySet())
+
+    /** "See Everything" mode's own tap-to-expand state for vehicle markers (mirrors
+     * [expandedStopIds]'s role for stops) -- a tripId in here shows that vehicle's full
+     * [tripDescription]/[etaDisplay]/[statusLabel] label instead of [BusMarker.shortLabel]. */
+    val expandedVehicleTripIds = MutableStateFlow<Set<String>>(emptySet())
 
     private var pollJob: Job? = null
     private var loadedContext: LoadedMapContext? = null
@@ -327,6 +399,11 @@ class MapViewModel(
                 // MapPreferences.trackTappedStopsEnabledFlow) rather than a toggle drawn on this
                 // canvas, so it's just another one-shot Settings read like the three above it.
                 nearbyVehiclesEnabled.value = mapPreferences.trackTappedStopsEnabledFlow.first()
+                val seeEverythingEnabled = mapPreferences.seeEverythingEnabledFlow.first()
+                val filterByStopEnabled = mapPreferences.filterByStopEnabledFlow.first()
+                val seeEverythingShowBus = mapPreferences.seeEverythingShowBusFlow.first()
+                val seeEverythingShowSubway = mapPreferences.seeEverythingShowSubwayFlow.first()
+                val seeEverythingShowCommuterRail = mapPreferences.seeEverythingShowCommuterRailFlow.first()
                 // Reuses the exact same station-detection query every other screen does (search
                 // results, trip detail) -- non-null only if the selected stop is itself a real,
                 // qualifying multi-platform station.
@@ -394,6 +471,8 @@ class MapViewModel(
                 loadedContext = LoadedMapContext(
                     stop, streetContext, zoom, mapTiles, nearbyStops,
                     tapHoldArrivalsEnabled, darkMode, doubleTapStationEnabled, centerStation,
+                    seeEverythingEnabled, filterByStopEnabled,
+                    seeEverythingShowBus, seeEverythingShowSubway, seeEverythingShowCommuterRail,
                 )
 
                 while (isActive) {
@@ -421,7 +500,13 @@ class MapViewModel(
      * next scheduled poll, so the extra vehicles (or their removal) show up right away. */
     fun toggleStopExpanded(stopId: String) {
         expandedStopIds.value = expandedStopIds.value.let { if (stopId in it) it - stopId else it + stopId }
-        if (nearbyVehiclesEnabled.value) refreshNow()
+        if (nearbyVehiclesEnabled.value || loadedContext?.filterByStopEnabled == true) refreshNow()
+    }
+
+    /** "See Everything" mode's own tap-to-expand for a vehicle marker -- purely a display toggle
+     * (unlike [toggleStopExpanded], nothing to refetch), so no [refreshNow] call needed. */
+    fun toggleVehicleExpanded(tripId: String) {
+        expandedVehicleTripIds.value = expandedVehicleTripIds.value.let { if (tripId in it) it - tripId else it + tripId }
     }
 
     /** Wakes the single poll loop in [onScreenShow] early rather than running its own separate
@@ -459,6 +544,7 @@ class MapViewModel(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.NOT_SUPPORTED,
                 context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
+                context.seeEverythingEnabled,
             )
             return
         }
@@ -474,6 +560,7 @@ class MapViewModel(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.UNAVAILABLE,
                 context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
+                context.seeEverythingEnabled,
             )
             return
         }
@@ -499,19 +586,102 @@ class MapViewModel(
             context.nearbyStops.forEach { put(it.stopId, it.lat to it.lon) }
         }
 
+        // Only the primary station's own member platforms ever get a platform label -- same "only
+        // when actually grouped" rule getScheduledArrivals/getNextConnections already follow, so a
+        // plain single-platform stop's vehicle never shows a misleading label pulled from unrelated
+        // stop_desc content. Fetched once per refresh rather than per-candidate.
+        val groupedStopIds = context.centerStation?.memberStopIds?.takeIf { it.size > 1 }?.toSet() ?: emptySet()
+        val platformLabelByStopId = if (groupedStopIds.isEmpty()) {
+            emptyMap()
+        } else {
+            repository.getStopDescriptions(groupedStopIds.toList()).mapValues { (_, desc) -> platformLabelFromStopDesc(desc) }
+        }
+
+        // Commuter rail's track assignment isn't in GTFS-RT at all, and isn't fixed like subway/
+        // Silver Line platforms -- MBTA typically doesn't decide (or publish) it until roughly
+        // 10-15 minutes before departure (see MbtaV3VehicleSource's own doc), so most of the time
+        // there's simply no assignment yet. That's the normal case, not an error: a trip missing
+        // from this map (fetch failure, or genuinely no live V3 report yet) just falls back to its
+        // ordinary GTFS-RT match below, same as every other mode -- never blocked on this lookup
+        // succeeding. Scoped by ROUTE (every commuter rail route already known to serve the primary
+        // station, from whatever's in scheduledArrivalsByStopId so far) rather than by a fixed trip
+        // list -- a station's routes are stable even when its exact trip snapshot isn't, and
+        // filtering by route is also the only option V3 actually supports here (see
+        // LiveVehicleSource's own doc).
+        val primaryStopIds = context.centerStation?.memberStopIds ?: listOf(stopId)
+        val commuterRailRouteIds = primaryStopIds.flatMapTo(mutableSetOf()) { id ->
+            scheduledArrivalsByStopId[id].orEmpty()
+                .filter { LineType.forGtfsRouteType(it.route.routeType) == LineType.COMMUTER_RAIL }
+                .map { it.route.routeId }
+        }
+        val mbtaV3VehiclesByTripId = agency.component<LiveVehicleSource>()
+            ?.takeIf { commuterRailRouteIds.isNotEmpty() }
+            ?.let { source ->
+                try {
+                    source.vehiclesByRoute(commuterRailRouteIds)
+                } catch (e: Exception) {
+                    Log.e("MapScreen", "Live vehicle fetch failed", e)
+                    emptyMap()
+                }
+            } ?: emptyMap()
+
+        // A trip only ever becomes a candidate if it's in scheduledArrivalsByStopId, which is a
+        // SNAPSHOT taken once per stop (see the activeStopIds loop above) -- a trip added since, or
+        // one whose only scheduled time fell outside SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS's
+        // window, would otherwise never show up even though it's genuinely live and heading to/at
+        // this station right now. This backfills exactly that gap for the PRIMARY station's own
+        // stops (not nearby-expanded ones, which keep their existing snapshot-only behavior): any
+        // trip GTFS-RT or V3 already reports as live but that isn't in the snapshot yet gets looked
+        // up directly by trip_id and merged into the very same cache candidatesFor reads from below,
+        // so no other code path needs to know the difference.
+        val knownPrimaryTripIds = primaryStopIds.flatMapTo(mutableSetOf()) { id ->
+            scheduledArrivalsByStopId[id].orEmpty().map { it.tripId }
+        }
+        val missingLiveTripIds = (vehiclePositionsFeed.vehiclePositionsByTripId.keys + mbtaV3VehiclesByTripId.keys) - knownPrimaryTripIds
+        if (missingLiveTripIds.isNotEmpty()) {
+            repository.getScheduledArrivalsForTrips(missingLiveTripIds, primaryStopIds).forEach { arrival ->
+                val existing = scheduledArrivalsByStopId[arrival.stopId].orEmpty()
+                if (existing.none { it.tripId == arrival.tripId }) {
+                    scheduledArrivalsByStopId[arrival.stopId] = existing + arrival
+                }
+            }
+        }
+
         fun candidatesFor(activeStopId: String): List<BusMarker> {
             val scheduledArrivals = scheduledArrivalsByStopId[activeStopId] ?: return emptyList()
             return scheduledArrivals.mapNotNull { arrival ->
-                val vehicle = vehiclePositionsFeed.vehiclePositionsByTripId[arrival.tripId] ?: return@mapNotNull null
-                val position = vehicle.position ?: return@mapNotNull null
+                val lineType = LineType.forGtfsRouteType(arrival.route.routeType)
+                // Commuter rail prefers MBTA's V3 API for position AND status/sequence together --
+                // never mixing sources for one vehicle, so "is it arrived" can't disagree with
+                // itself across two feeds with different update cadences (see MbtaV3VehicleSource's
+                // own doc). Falls back to the ordinary GTFS-RT match below when V3 has nothing for
+                // this trip. Every other mode always uses GTFS-RT, unchanged.
+                val v3Vehicle = if (lineType == LineType.COMMUTER_RAIL) mbtaV3VehiclesByTripId[arrival.tripId] else null
+
+                val lat: Double
+                val lon: Double
+                val currentStatus: Int?
+                val currentSeq: Int?
+                if (v3Vehicle != null) {
+                    lat = v3Vehicle.latitude
+                    lon = v3Vehicle.longitude
+                    currentStatus = v3Vehicle.currentStatus
+                    currentSeq = v3Vehicle.currentStopSequence
+                } else {
+                    val vehicle = vehiclePositionsFeed.vehiclePositionsByTripId[arrival.tripId] ?: return@mapNotNull null
+                    val position = vehicle.position ?: return@mapNotNull null
+                    lat = position.latitude.toDouble()
+                    lon = position.longitude.toDouble()
+                    currentStatus = vehicle.currentStatus
+                    currentSeq = vehicle.currentStopSequence
+                }
 
                 // No real stop_id is ever present on live vehicle data (see GtfsRtVehiclePosition's
                 // doc) -- current_stop_sequence matching the target stop is the only signal
                 // available. Takes priority over both departed checks below -- a vehicle can report
                 // STOPPED_AT here even after its predicted departure time has technically ticked
                 // past (real-world dwell time is naturally a bit fuzzy).
-                val currentSeq = vehicle.currentStopSequence
-                val isArrived = vehicle.currentStatus == GtfsRtVehicleStatus.STOPPED_AT && currentSeq == arrival.stopSequence
+                val isArrived = currentStatus == GtfsRtVehicleStatus.STOPPED_AT && currentSeq == arrival.stopSequence
 
                 val rtStopUpdate = tripUpdatesFeed?.tripUpdatesByTripId?.get(arrival.tripId)
                     ?.updateFor(activeStopId, arrival.stopSequence)
@@ -534,22 +704,37 @@ class MapViewModel(
                 // display slot was open (see DWELLING_FAR_ETA_THRESHOLD_SECONDS). A vehicle that's
                 // actually moving, however far away, is untouched by this check -- and one already
                 // confirmed AT this stop above never reaches here regardless of its predicted time.
-                val isDwellingFar = vehicle.currentStatus == GtfsRtVehicleStatus.STOPPED_AT && !isArrived &&
+                val isDwellingFar = currentStatus == GtfsRtVehicleStatus.STOPPED_AT && !isArrived &&
                     eta.etaEpochSeconds - nowEpochSeconds > DWELLING_FAR_ETA_THRESHOLD_SECONDS
                 if (isDwellingFar) return@mapNotNull null
 
-                val lineType = LineType.forGtfsRouteType(arrival.route.routeType)
+                // Commuter rail only ever trusts a CONFIRMED V3 assignment for its platform label
+                // -- its own scheduled stop_id is often a station's generic per-route placeholder
+                // (e.g. South Station's "NEC-2287"), whose stop_desc would otherwise resolve to a
+                // misleading label like "Commuter Rail" via platformLabelByStopId, not a real track
+                // name. Subway/Silver Line's scheduled stop_id is always already the real, distinct
+                // platform, so they keep using it exactly as before. Either way, with no resolved
+                // platform this vehicle still renders fine -- just at its own true GPS position with
+                // no platform label, the same catch-all every other unresolved vehicle already falls
+                // back to.
+                val assignedStopId = v3Vehicle?.assignedStopId
+                val platformLabel = if (lineType == LineType.COMMUTER_RAIL) {
+                    assignedStopId?.let { platformLabelByStopId[it] }
+                } else {
+                    platformLabelByStopId[activeStopId]
+                }
                 BusMarker(
                     tripId = arrival.tripId,
-                    targetStopId = activeStopId,
+                    targetStopId = assignedStopId ?: activeStopId,
                     routeLabel = arrival.route.shortName?.takeIf { it.isNotBlank() } ?: arrival.route.displayName,
                     directionLabel = arrival.direction.displayLabel(),
                     vehicleIcon = lineType.toVehicleIcon(),
                     etaEpochSeconds = eta.etaEpochSeconds,
                     status = eta.status,
                     isArrived = isArrived,
-                    lat = position.latitude.toDouble(),
-                    lon = position.longitude.toDouble(),
+                    lat = lat,
+                    lon = lon,
+                    platformLabel = platformLabel,
                 )
             }
         }
@@ -571,7 +756,6 @@ class MapViewModel(
         // expanded NEARBY stop still gets its own independent allotment -- that's the existing,
         // deliberate "select more stops to show more buses" behavior MAX_DISPLAYED_BUSES_PER_STOP's
         // own doc comment describes for Nearby Vehicles.
-        val primaryStopIds = context.centerStation?.memberStopIds?.toSet() ?: setOf(stopId)
         val primaryBuses = activeStopIds.filter { it in primaryStopIds }
             .flatMap { candidatesFor(it) }
             .sortedWith(busComparator)
@@ -583,10 +767,25 @@ class MapViewModel(
         // -- keep only its earliest-ETA entry rather than showing it twice.
         val dedupedBuses = buses.groupBy { it.tripId }.values.map { group -> group.minBy { it.etaEpochSeconds } }
 
+        // "See Everything" drops the schedule-anchored pipeline above entirely (its whole point is
+        // showing vehicles regardless of whether they're relevant to any stop this screen cares
+        // about) and replaces it wholesale -- see buildSeeEverythingBuses's own doc.
+        val displayedBuses = if (context.seeEverythingEnabled) {
+            buildSeeEverythingBuses(
+                repository, context.stop.lat, context.stop.lon, context.zoom,
+                vehiclePositionsFeed, tripUpdatesFeed, today, nowEpochSeconds,
+                expandedStopIds.value.toList(), context.filterByStopEnabled, stopId,
+                context.seeEverythingShowBus, context.seeEverythingShowSubway, context.seeEverythingShowCommuterRail,
+            )
+        } else {
+            dedupedBuses
+        }
+
         _state.value = MapState.Loaded(
             context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
-            dedupedBuses, context.nearbyStops, LiveFeedStatus.OK,
+            displayedBuses, context.nearbyStops, LiveFeedStatus.OK,
             context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
+            context.seeEverythingEnabled,
         )
     }
 
@@ -595,6 +794,124 @@ class MapViewModel(
         repository.close()
         geocoder.close()
         tileClient.close()
+    }
+}
+
+/**
+ * "See Everything" map mode (Settings toggle, off by default) -- every live vehicle whose
+ * position falls within the map's own rendered radius, regardless of route or whether it's
+ * actually scheduled to serve any stop this screen cares about. A materially different pipeline
+ * from the rest of [MapViewModel.refresh]: it starts from every reported vehicle position and
+ * asks "is this in view", rather than starting from a specific stop's schedule and asking "is a
+ * live vehicle matching one of these trips". Deliberately GTFS-RT-only, even for commuter rail --
+ * MbtaV3VehicleSource's whole value (platform assignment) is scoped to a specific station's own
+ * platforms, which doesn't fit a mode that shows vehicles regardless of relevance to any
+ * particular station; commuter rail vehicles here still show up fine via ordinary GTFS-RT.
+ *
+ * With "Filter by stop" also on and at least one stop selected in [selectedStopIds] (the same
+ * tap-a-stop selection Track Tapped Stops reuses), narrows down to just vehicles whose own trip
+ * visits one of those stops, tagged TO/FROM/AT it (reusing the exact same current_status/
+ * current_stop_sequence comparison the schedule-anchored pipeline already does, just for a label
+ * instead of an inclusion filter) -- with a real ETA against that specific stop. With the toggle
+ * on but nothing selected yet, there's nothing to filter BY, so this falls through to the
+ * unfiltered list, same as if it were off.
+ *
+ * Top-level (not a MapViewModel member) so both the main Map screen and Map-Station mode's own
+ * ViewModel can share one implementation.
+ */
+internal fun buildSeeEverythingBuses(
+    repository: GtfsRepository,
+    centerLat: Double,
+    centerLon: Double,
+    zoom: Int,
+    vehiclePositionsFeed: GtfsRtFeedMessage,
+    tripUpdatesFeed: GtfsRtFeedMessage?,
+    today: LocalDate,
+    nowEpochSeconds: Long,
+    selectedStopIds: List<String>,
+    filterByStopEnabled: Boolean,
+    /** Used only as [BusMarker.targetStopId]'s inert placeholder for an unfiltered candidate,
+     * which never actually consults it (see that param's own doc). */
+    inertPlaceholderStopId: String,
+    /** Settings screen's per-mode "Modes shown" toggles (all on by default) -- a vehicle whose
+     * resolved [LineType] has its toggle off is excluded entirely, same as if it were never in
+     * bounds at all. */
+    showBus: Boolean = true,
+    showSubway: Boolean = true,
+    showCommuterRail: Boolean = true,
+): List<BusMarker> {
+    val fetchRadiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(centerLat, zoom)
+    val inBounds = vehiclePositionsFeed.vehiclePositionsByTripId.filterValues { vehicle ->
+        val position = vehicle.position ?: return@filterValues false
+        haversineMeters(centerLat, centerLon, position.latitude.toDouble(), position.longitude.toDouble()) <= fetchRadiusMeters
+    }
+    if (inBounds.isEmpty()) return emptyList()
+
+    val routesByTripId = repository.getRoutesForTrips(inBounds.keys)
+    val filteringByStop = filterByStopEnabled && selectedStopIds.isNotEmpty()
+    val stopTimesByTripId = if (filteringByStop) {
+        repository.getScheduledArrivalsForTrips(inBounds.keys, selectedStopIds).groupBy { it.tripId }
+    } else {
+        emptyMap()
+    }
+
+    return inBounds.mapNotNull { (tripId, vehicle) ->
+        val position = vehicle.position ?: return@mapNotNull null
+        val routeInfo = routesByTripId[tripId] ?: return@mapNotNull null
+        val lineType = LineType.forGtfsRouteType(routeInfo.route.routeType)
+        val modeShown = when (lineType) {
+            LineType.BUS, null -> showBus
+            LineType.SUBWAY -> showSubway
+            LineType.COMMUTER_RAIL -> showCommuterRail
+        }
+        if (!modeShown) return@mapNotNull null
+        val routeLabel = routeInfo.route.shortName?.takeIf { it.isNotBlank() } ?: routeInfo.route.displayName
+        val lat = position.latitude.toDouble()
+        val lon = position.longitude.toDouble()
+
+        if (filteringByStop) {
+            // A candidate whose trip doesn't visit any tap-selected stop at all is excluded
+            // entirely -- "Filter by stop" narrows the whole visible set, not just the label.
+            val stopTime = stopTimesByTripId[tripId]?.firstOrNull() ?: return@mapNotNull null
+            val currentSeq = vehicle.currentStopSequence
+            val relation = when {
+                vehicle.currentStatus == GtfsRtVehicleStatus.STOPPED_AT && currentSeq == stopTime.stopSequence -> StopRelation.AT
+                currentSeq != null && currentSeq > stopTime.stopSequence -> StopRelation.FROM
+                else -> StopRelation.TO
+            }
+            val rtStopUpdate = tripUpdatesFeed?.tripUpdatesByTripId?.get(tripId)?.updateFor(stopTime.stopId, stopTime.stopSequence)
+            val eta = computeArrivalEta(stopTime.departureTime, today, rtStopUpdate)
+            BusMarker(
+                tripId = tripId,
+                targetStopId = stopTime.stopId,
+                routeLabel = routeLabel,
+                directionLabel = routeInfo.direction.displayLabel(),
+                vehicleIcon = lineType.toVehicleIcon(),
+                etaEpochSeconds = eta?.etaEpochSeconds ?: nowEpochSeconds,
+                status = eta?.status,
+                isArrived = relation == StopRelation.AT,
+                lat = lat,
+                lon = lon,
+                platformLabel = stopTime.platformLabel,
+                stopRelation = relation,
+            )
+        } else {
+            BusMarker(
+                tripId = tripId,
+                // Inert placeholder -- isArrived is always false here (no specific stop to snap
+                // to), so this is never actually consulted for a render position.
+                targetStopId = inertPlaceholderStopId,
+                routeLabel = routeLabel,
+                directionLabel = routeInfo.direction.displayLabel(),
+                vehicleIcon = lineType.toVehicleIcon(),
+                etaEpochSeconds = nowEpochSeconds,
+                status = null,
+                isArrived = false,
+                lat = lat,
+                lon = lon,
+                liveStatusText = currentStatusText(vehicle.currentStatus) ?: "Live",
+            )
+        }
     }
 }
 
@@ -617,6 +934,7 @@ class MapScreen(
         val state by viewModel.state.collectAsState()
         val nearbyVehiclesEnabled by viewModel.nearbyVehiclesEnabled.collectAsState()
         val expandedStopIds by viewModel.expandedStopIds.collectAsState()
+        val expandedVehicleTripIds by viewModel.expandedVehicleTripIds.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -701,6 +1019,9 @@ class MapScreen(
                                     MapStationScreen(activity, dbFile, agency, memberStopIds, stationName)
                                 })
                             },
+                            seeEverythingEnabled = s.seeEverythingEnabled,
+                            expandedVehicleTripIds = expandedVehicleTripIds,
+                            onToggleVehicle = viewModel::toggleVehicleExpanded,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -799,6 +1120,15 @@ internal fun MapCanvas(
      * Arrivals for the WHOLE station (all platforms), distinct from long-pressing a single platform
      * pin (see [onStopLongPressed]). */
     onScrimTitleLongPressed: (() -> Unit)? = null,
+    /** Settings screen's "See Everything" toggle -- see MapPreferences.seeEverythingEnabledFlow.
+     * Only changes how [buses] are LABELED here (short by default, full on tap) -- which vehicles
+     * are even in [buses] to begin with is entirely the caller's own decision (see MapViewModel's
+     * buildSeeEverythingBuses). False in Map-Station mode, which doesn't support this yet. */
+    seeEverythingEnabled: Boolean = false,
+    expandedVehicleTripIds: Set<String> = emptySet(),
+    /** Fires on a plain tap of a vehicle marker while [seeEverythingEnabled] is on -- toggles that
+     * vehicle between [BusMarker.shortLabel] and its full details label. No-op otherwise. */
+    onToggleVehicle: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Loaded once per icon+size+tint (remember only works at composition time, not inside the
@@ -816,6 +1146,7 @@ internal fun MapCanvas(
             .pointerInput(
                 nearbyStops, centerLat, centerLon, zoom, tapHoldArrivalsEnabled,
                 doubleTapStationEnabled, centerIsStation, showCenterPin, scrimTitle,
+                buses, seeEverythingEnabled,
             ) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -841,7 +1172,34 @@ internal fun MapCanvas(
                     // it for the whole station's arrivals (see onScrimTitleLongPressed).
                     val hitScrimTitle = scrimTitle != null && down.position.y < scrimHeightPx
 
-                    if (hitStop == null && !hitCenter && !hitScrimTitle) {
+                    // "See Everything" mode's vehicle markers -- a plain tap toggles between the
+                    // compact route-only label and the full details label (see
+                    // BusMarker.shortLabel/drawBusMarker). Position mirrors the draw loop's own
+                    // isArrived-snap logic exactly (see BusMarker.targetStopId's own doc) so a tap
+                    // lands on the marker exactly where it's actually drawn.
+                    val hitBus = if (seeEverythingEnabled) {
+                        val primaryStopIdsForHitTest = if (centerIsStation) centerStationMemberIds else listOf(stopId)
+                        val stopCoordsForHitTest = buildMap {
+                            primaryStopIdsForHitTest.forEach { put(it, centerLat to centerLon) }
+                            nearbyStops.forEach { put(it.stopId, it.lat to it.lon) }
+                        }
+                        buses.firstOrNull { bus ->
+                            val (lat, lon) = if (bus.isArrived) {
+                                stopCoordsForHitTest[bus.targetStopId] ?: (bus.lat to bus.lon)
+                            } else {
+                                bus.lat to bus.lon
+                            }
+                            val rel = projectRelativeToCenter(centerLat, centerLon, lat, lon, zoom)
+                            val point = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
+                            val dx = down.position.x - point.x
+                            val dy = down.position.y - point.y
+                            sqrt(dx * dx + dy * dy) < STOP_HIT_RADIUS_PX
+                        }
+                    } else {
+                        null
+                    }
+
+                    if (hitStop == null && !hitCenter && !hitScrimTitle && hitBus == null) {
                         // Not on anything we handle -- leave the event completely untouched so
                         // ancestor/system gestures (like edge-swipe back) still see it normally.
                         return@awaitEachGesture
@@ -904,6 +1262,7 @@ internal fun MapCanvas(
                             }
                         }
                         hitStop?.let { onToggleStop(it.stopId) }
+                        hitBus?.let { onToggleVehicle(it.tripId) }
                     }
                 }
             }
@@ -1028,8 +1387,8 @@ internal fun MapCanvas(
         stopPoints.forEach { (_, point) ->
             nativeCanvas.drawBitmap(
                 nearbyMarkerBitmap,
-                point.x - NEARBY_MARKER_ICON_PX / 2f,
-                point.y - NEARBY_MARKER_ICON_PX / 2f,
+                point.x - NEARBY_MARKER_ICON_PX * PIN_TIP_FRACTION_X,
+                point.y - NEARBY_MARKER_ICON_PX * PIN_TIP_FRACTION_Y,
                 null,
             )
         }
@@ -1038,6 +1397,7 @@ internal fun MapCanvas(
         // touches the map) rather than centered underneath it, so the label text never overlaps the
         // icon itself -- flips to the marker's left instead when the label would otherwise clip off
         // the canvas's right edge (see resolveLabelSide).
+        val nearbyMarkerBottomEdgeOffset = NEARBY_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
         val expandedLabels = stopPoints
             .filter { (stop, _) -> stop.stopId in expandedStopIds }
             .map { (stop, point) ->
@@ -1049,7 +1409,7 @@ internal fun MapCanvas(
                     text = text,
                     anchorX = side.anchorX(point.x, NEARBY_MARKER_ICON_PX.toFloat()),
                     align = side.paintAlign(),
-                    initialY = point.y + NEARBY_MARKER_ICON_PX / 2f,
+                    initialY = point.y + nearbyMarkerBottomEdgeOffset + LABEL_GAP_PX,
                     width = width,
                 )
             }
@@ -1067,26 +1427,21 @@ internal fun MapCanvas(
         if (showCenterPin) {
             nativeCanvas.drawBitmap(
                 centerMarkerBitmap,
-                center.x - CENTER_MARKER_ICON_PX / 2f,
-                center.y - CENTER_MARKER_ICON_PX / 2f,
+                center.x - CENTER_MARKER_ICON_PX * PIN_TIP_FRACTION_X,
+                center.y - CENTER_MARKER_ICON_PX * PIN_TIP_FRACTION_Y,
                 null,
             )
-            nativeCanvas.drawText(stopLabel, center.x, center.y + 64f, labelOutlinePaint)
-            nativeCanvas.drawText(stopLabel, center.x, center.y + 64f, labelPaint)
+            // Same 32px/60px gaps below the pin's own bottom edge as before this was tip-anchored
+            // (that edge used to just be CENTER_MARKER_ICON_PX/2 below center; now it's wherever the
+            // pin's actual bottom renders, per PIN_TIP_FRACTION_Y).
+            val centerMarkerBottomEdge = center.y + CENTER_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
+            nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelOutlinePaint)
+            nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelPaint)
             streetContext?.let {
-                nativeCanvas.drawText(it, center.x, center.y + 92f, smallLabelOutlinePaint)
-                nativeCanvas.drawText(it, center.x, center.y + 92f, smallLabelPaint)
+                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelOutlinePaint)
+                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelPaint)
             }
         }
-
-        // Only the PRIMARY stop's arrived buses get the special row above the center pin -- that
-        // row visually means "arrived here", which would be misleading for a secondary stop's bus.
-        // When the center is itself a station, every member platform counts as "here" (e.g. a
-        // Commuter Rail vehicle stopped at South Station's own Commuter Rail platform), not just
-        // literal [stopId] (which is only one specific platform's id -- see centerStationMemberIds).
-        val primaryStopIds = if (centerIsStation) centerStationMemberIds else listOf(stopId)
-        val arrivedAtPrimary = buses.filter { it.isArrived && it.targetStopId in primaryStopIds }
-        val everythingElse = buses.filterNot { it.isArrived && it.targetStopId in primaryStopIds }
 
         fun vehicleIconBitmapFor(bus: BusMarker): Bitmap = when (bus.vehicleIcon) {
             LightIcons.DIRECTIONS_SUBWAY -> subwayIconBitmap
@@ -1094,20 +1449,39 @@ internal fun MapCanvas(
             else -> busIconBitmap
         }
 
-        arrivedAtPrimary.forEachIndexed { index, bus ->
-            val xOffset = (index - (arrivedAtPrimary.size - 1) / 2f) * 110f
-            val x = center.x + xOffset
-            val y = center.y - maxRadius * 0.45f
-            drawBusMarker(nativeCanvas, vehicleIconBitmapFor(bus), vehicleLabelPaint, vehicleLabelOutlinePaint, vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, x, y, size.width)
+        // Every stop_id this map currently knows the real coordinate of -- the primary/center stop
+        // (every member platform when it's a station, since StopLocation doesn't carry distinct
+        // per-platform coordinates) and every nearby stop. Used only for isArrived below.
+        val primaryStopIds = if (centerIsStation) centerStationMemberIds else listOf(stopId)
+        val stopCoordsById = buildMap {
+            primaryStopIds.forEach { put(it, centerLat to centerLon) }
+            nearbyStops.forEach { put(it.stopId, it.lat to it.lon) }
         }
 
-        // Every other bus drawn individually at its true projected position — clipped to the
-        // visible radius (preserving true direction) only as a fallback for rare far-outliers, with
-        // no grouping/de-overlap logic.
-        everythingElse.forEach { bus ->
-            val rel = projectRelativeToCenter(centerLat, centerLon, bus.lat, bus.lon, zoom)
+        // Every bus drawn at its true projected position — an arrived vehicle snaps to its target
+        // stop's own known coordinate rather than its own live GPS ping, since a vehicle that's
+        // literally stopped at a platform is genuinely there regardless of GPS noise, and this
+        // guarantees it renders exactly on that stop's own marker rather than next to it. Falls
+        // back to the vehicle's own position if its target stop's coordinate isn't known for some
+        // reason. Clipped to the visible radius (preserving true direction) only as a fallback for
+        // rare far-outliers, with no grouping/de-overlap logic -- multiple vehicles arrived at the
+        // exact same platform at once will overlap, same as this already accepted for any other
+        // cluster of nearby markers.
+        buses.forEach { bus ->
+            val (lat, lon) = if (bus.isArrived) {
+                stopCoordsById[bus.targetStopId] ?: (bus.lat to bus.lon)
+            } else {
+                bus.lat to bus.lon
+            }
+            val rel = projectRelativeToCenter(centerLat, centerLon, lat, lon, zoom)
             val clipped = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
-            drawBusMarker(nativeCanvas, vehicleIconBitmapFor(bus), vehicleLabelPaint, vehicleLabelOutlinePaint, vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, clipped.x, clipped.y, size.width)
+            // "See Everything" mode defaults every marker to its compact route-only label, until
+            // tapped (see onToggleVehicle) -- everywhere else, always the full label, unchanged.
+            val showShortLabel = seeEverythingEnabled && bus.tripId !in expandedVehicleTripIds
+            drawBusMarker(
+                nativeCanvas, vehicleIconBitmapFor(bus), vehicleLabelPaint, vehicleLabelOutlinePaint,
+                vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, clipped.x, clipped.y, size.width, showShortLabel,
+            )
         }
     }
 }
@@ -1218,19 +1592,38 @@ private fun drawBusMarker(
     x: Float,
     y: Float,
     canvasWidth: Float,
+    /** "See Everything" mode's compact default -- draws just [BusMarker.shortLabel], a single line,
+     * instead of the full stack below. Always false outside that mode (see MapCanvas's own
+     * showShortLabel computation). */
+    showShortLabel: Boolean = false,
 ) {
     canvas.drawBitmap(vehicleIconBitmap, x - VEHICLE_MARKER_ICON_PX / 2f, y - VEHICLE_MARKER_ICON_PX / 2f, null)
+    val baseY = y + VEHICLE_MARKER_ICON_PX / 2f
+
+    if (showShortLabel) {
+        val shortText = bus.shortLabel()
+        val side = resolveLabelSide(x, VEHICLE_MARKER_ICON_PX.toFloat(), smallLabelPaint.measureText(shortText), canvasWidth)
+        val anchorX = side.anchorX(x, VEHICLE_MARKER_ICON_PX.toFloat())
+        smallLabelPaint.textAlign = side.paintAlign()
+        smallLabelOutlinePaint.textAlign = side.paintAlign()
+        canvas.drawText(shortText, anchorX, baseY, smallLabelOutlinePaint)
+        canvas.drawText(shortText, anchorX, baseY, smallLabelPaint)
+        return
+    }
+
     // Anchored to the right of the icon's own base, the same offset-from-icon approach used for
     // tapped stop labels (see the expandedLabels block above) -- flips to the icon's left instead
     // when the label would otherwise clip off the canvas's right edge (see resolveLabelSide). All
     // three lines share one side decision (based on the widest of them) so they stay aligned with
     // each other rather than each flipping independently.
     val tripText = bus.tripDescription()
-    val etaText = bus.etaDisplay()
+    // A "See Everything" vehicle with no specific stop to measure an ETA against shows its live
+    // current_status text here instead (see BusMarker.liveStatusText's own doc).
+    val secondLineText = bus.liveStatusText ?: bus.etaDisplay()
     val statusText = bus.statusLabel()
     val widestTextPx = maxOf(
         smallLabelPaint.measureText(tripText),
-        labelPaint.measureText(etaText),
+        labelPaint.measureText(secondLineText),
         statusText?.let { smallLabelPaint.measureText(it) } ?: 0f,
     )
     val side = resolveLabelSide(x, VEHICLE_MARKER_ICON_PX.toFloat(), widestTextPx, canvasWidth)
@@ -1240,11 +1633,10 @@ private fun drawBusMarker(
     labelOutlinePaint.textAlign = align
     smallLabelPaint.textAlign = align
     smallLabelOutlinePaint.textAlign = align
-    val baseY = y + VEHICLE_MARKER_ICON_PX / 2f
     canvas.drawText(tripText, anchorX, baseY, smallLabelOutlinePaint)
     canvas.drawText(tripText, anchorX, baseY, smallLabelPaint)
-    canvas.drawText(etaText, anchorX, baseY + 24f, labelOutlinePaint)
-    canvas.drawText(etaText, anchorX, baseY + 24f, labelPaint)
+    canvas.drawText(secondLineText, anchorX, baseY + 24f, labelOutlinePaint)
+    canvas.drawText(secondLineText, anchorX, baseY + 24f, labelPaint)
     statusText?.let {
         canvas.drawText(it, anchorX, baseY + 48f, smallLabelOutlinePaint)
         canvas.drawText(it, anchorX, baseY + 48f, smallLabelPaint)

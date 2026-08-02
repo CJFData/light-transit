@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.AgencyPreferences
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
+import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -40,6 +41,7 @@ class SettingsViewModel(
     private val agencyPreferences: AgencyPreferences,
     private val mapPreferences: MapPreferences,
     private val boardedTripPreferences: BoardedTripPreferences,
+    private val homeScreenPreferences: HomeScreenPreferences,
 ) : LightViewModel<Unit>() {
 
     val defaultAgency: StateFlow<GtfsAgency?>
@@ -62,9 +64,33 @@ class SettingsViewModel(
         get() = _trackTappedStopsEnabled
     private val _trackTappedStopsEnabled = MutableStateFlow(false)
 
+    val seeEverythingEnabled: StateFlow<Boolean>
+        get() = _seeEverythingEnabled
+    private val _seeEverythingEnabled = MutableStateFlow(false)
+
+    val filterByStopEnabled: StateFlow<Boolean>
+        get() = _filterByStopEnabled
+    private val _filterByStopEnabled = MutableStateFlow(false)
+
+    val seeEverythingShowBus: StateFlow<Boolean>
+        get() = _seeEverythingShowBus
+    private val _seeEverythingShowBus = MutableStateFlow(true)
+
+    val seeEverythingShowSubway: StateFlow<Boolean>
+        get() = _seeEverythingShowSubway
+    private val _seeEverythingShowSubway = MutableStateFlow(true)
+
+    val seeEverythingShowCommuterRail: StateFlow<Boolean>
+        get() = _seeEverythingShowCommuterRail
+    private val _seeEverythingShowCommuterRail = MutableStateFlow(true)
+
     val progressBarVisible: StateFlow<Boolean>
         get() = _progressBarVisible
     private val _progressBarVisible = MutableStateFlow(true)
+
+    val dailyMessageVisible: StateFlow<Boolean>
+        get() = _dailyMessageVisible
+    private val _dailyMessageVisible = MutableStateFlow(true)
 
     init {
         viewModelScope.launch {
@@ -83,7 +109,25 @@ class SettingsViewModel(
             mapPreferences.trackTappedStopsEnabledFlow.collect { _trackTappedStopsEnabled.value = it }
         }
         viewModelScope.launch {
+            mapPreferences.seeEverythingEnabledFlow.collect { _seeEverythingEnabled.value = it }
+        }
+        viewModelScope.launch {
+            mapPreferences.filterByStopEnabledFlow.collect { _filterByStopEnabled.value = it }
+        }
+        viewModelScope.launch {
+            mapPreferences.seeEverythingShowBusFlow.collect { _seeEverythingShowBus.value = it }
+        }
+        viewModelScope.launch {
+            mapPreferences.seeEverythingShowSubwayFlow.collect { _seeEverythingShowSubway.value = it }
+        }
+        viewModelScope.launch {
+            mapPreferences.seeEverythingShowCommuterRailFlow.collect { _seeEverythingShowCommuterRail.value = it }
+        }
+        viewModelScope.launch {
             boardedTripPreferences.progressBarVisibleFlow.collect { _progressBarVisible.value = it }
+        }
+        viewModelScope.launch {
+            homeScreenPreferences.dailyMessageVisibleFlow.collect { _dailyMessageVisible.value = it }
         }
     }
 
@@ -111,8 +155,32 @@ class SettingsViewModel(
         viewModelScope.launch { mapPreferences.setTrackTappedStopsEnabled(enabled) }
     }
 
+    fun setSeeEverythingEnabled(enabled: Boolean) {
+        viewModelScope.launch { mapPreferences.setSeeEverythingEnabled(enabled) }
+    }
+
+    fun setFilterByStopEnabled(enabled: Boolean) {
+        viewModelScope.launch { mapPreferences.setFilterByStopEnabled(enabled) }
+    }
+
+    fun setSeeEverythingShowBus(enabled: Boolean) {
+        viewModelScope.launch { mapPreferences.setSeeEverythingShowBus(enabled) }
+    }
+
+    fun setSeeEverythingShowSubway(enabled: Boolean) {
+        viewModelScope.launch { mapPreferences.setSeeEverythingShowSubway(enabled) }
+    }
+
+    fun setSeeEverythingShowCommuterRail(enabled: Boolean) {
+        viewModelScope.launch { mapPreferences.setSeeEverythingShowCommuterRail(enabled) }
+    }
+
     fun setProgressBarVisible(visible: Boolean) {
         viewModelScope.launch { boardedTripPreferences.setProgressBarVisible(visible) }
+    }
+
+    fun setDailyMessageVisible(visible: Boolean) {
+        viewModelScope.launch { homeScreenPreferences.setDailyMessageVisible(visible) }
     }
 }
 
@@ -127,6 +195,7 @@ class SettingsScreen(
         AgencyPreferences(lightContext.dataStore),
         MapPreferences(lightContext.dataStore),
         BoardedTripPreferences(lightContext.dataStore),
+        HomeScreenPreferences(lightContext.dataStore),
     )
 
     /** Every on/off setting on this screen renders as one tappable row using the SDK's own
@@ -158,7 +227,13 @@ class SettingsScreen(
         val tapHoldArrivalsEnabled by viewModel.tapHoldArrivalsEnabled.collectAsState()
         val doubleTapStationEnabled by viewModel.doubleTapStationEnabled.collectAsState()
         val trackTappedStopsEnabled by viewModel.trackTappedStopsEnabled.collectAsState()
+        val seeEverythingEnabled by viewModel.seeEverythingEnabled.collectAsState()
+        val filterByStopEnabled by viewModel.filterByStopEnabled.collectAsState()
+        val seeEverythingShowBus by viewModel.seeEverythingShowBus.collectAsState()
+        val seeEverythingShowSubway by viewModel.seeEverythingShowSubway.collectAsState()
+        val seeEverythingShowCommuterRail by viewModel.seeEverythingShowCommuterRail.collectAsState()
         val progressBarVisible by viewModel.progressBarVisible.collectAsState()
+        val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -245,7 +320,9 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, tap and hold any stop on the Map screen to jump straight to its upcoming arrivals.",
+                    text = "When on, tap and hold any stop on the Map screen to jump straight to its upcoming " +
+                        "arrivals. Also applies to a station's own name while viewing its Station map -- tap " +
+                        "and hold it to jump to the main map centered on that station.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -283,6 +360,56 @@ class SettingsScreen(
                 ToggleRow("Track tapped stops", trackTappedStopsEnabled, viewModel::setTrackTappedStopsEnabled)
 
                 LightText(
+                    text = "See everything",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, the Map screen and Station map show every live vehicle in view, not " +
+                        "just ones actually relevant to the stop you're looking at -- each labeled with just " +
+                        "its route until tapped, which shows its full details.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("See everything", seeEverythingEnabled, viewModel::setSeeEverythingEnabled)
+
+                if (seeEverythingEnabled) {
+                    LightText(
+                        text = "Filter by stop",
+                        variant = LightTextVariant.Copy,
+                        lighten = true,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                    )
+                    LightText(
+                        text = "When on, tap a stop on the map to narrow \"See everything\" down to just " +
+                            "vehicles heading to, arrived at, or departed from it -- labeled e.g. \"SL1-TO\", " +
+                            "\"SL1-AT\", \"SL1-FROM\".",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 16.dp),
+                    )
+                    ToggleRow("Filter by stop", filterByStopEnabled, viewModel::setFilterByStopEnabled)
+
+                    LightText(
+                        text = "Modes shown",
+                        variant = LightTextVariant.Copy,
+                        lighten = true,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                    )
+                    LightText(
+                        text = "Which vehicle types \"See everything\" plots -- all three on by default.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 16.dp),
+                    )
+                    ToggleRow("Bus", seeEverythingShowBus, viewModel::setSeeEverythingShowBus)
+                    ToggleRow("Subway", seeEverythingShowSubway, viewModel::setSeeEverythingShowSubway)
+                    ToggleRow("Commuter Rail", seeEverythingShowCommuterRail, viewModel::setSeeEverythingShowCommuterRail)
+                }
+
+                LightText(
                     text = "Trip progress bar",
                     variant = LightTextVariant.Copy,
                     lighten = true,
@@ -296,6 +423,20 @@ class SettingsScreen(
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
                 ToggleRow("Trip progress bar", progressBarVisible, viewModel::setProgressBarVisible)
+
+                LightText(
+                    text = "Daily message",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, HomeScreen shows a small rotating message near the bottom of the screen.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Daily message", dailyMessageVisible, viewModel::setDailyMessageVisible)
                 }
                 BackToHomeFooter(onGoBackOnce = { goBack() })
             }

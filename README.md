@@ -11,7 +11,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 - 🏠 **Pick your agency** — MBTA or RIPTA — and Pico Transit downloads their schedule right onto your phone.
   
   ![alt text](docs/screenshots/Screenshot_20260801_202930.png)
-- ⚙️ **Settings** — a default agency to skip the picker, light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals, double-tap a station to zoom into its platforms, track tapped-open stops' own vehicles on the map, and the home screen's trip progress bar).
+- ⚙️ **Settings** — a default agency to skip the picker, light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals — the same gesture also jumps from a Station map's own name to the main map centered on it; double-tap a station to zoom into its platforms; track tapped-open stops' own vehicles on the map; the home screen's trip progress bar; the home screen's daily message; and "See Everything," a map mode covered below).
   
   ![alt text](docs/screenshots/Screenshot_20260801_215544.png)
   ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
@@ -32,12 +32,12 @@ Pico Transit can be used alongside the light phone's directions tool for more co
    ![alt text](docs/screenshots/Screenshot_20260801_204530.png)
 
 
-- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus).
+- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus). Flip on "See Everything" (Settings) to drop the usual "just this stop's own vehicles" filter and plot every live vehicle in view instead, labeled with just its route until you tap it; narrow it back down by tapping a stop ("Filter by stop" — tags each vehicle TO/FROM/AT that stop) or by mode (Bus/Subway/Commuter Rail).
   
   ![alt text](docs/screenshots/Screenshot_20260801_200838.png)
   ![alt text](docs/screenshots/Screenshot_20260801_204556.png)
 
-- 🚉 **Stations** — browse every real multi-platform station an agency has, and open a zoomed-in map of just that station's own platforms.
+- 🚉 **Stations** — browse every real multi-platform station an agency has, and open a zoomed-in map of just that station's own real platforms and gates (elevators, entrances, and escalators are filtered out). For MBTA commuter rail, once a specific track is assigned — usually 10-15 minutes before departure — its vehicle shows up right on that track's own platform.
   
   ![alt text](docs/screenshots/Screenshot_20260801_204530.png)
 
@@ -91,8 +91,9 @@ That's it — happy transit-ing! 🚏🚌🚆
 
 - **RIPTA's live feeds are HTTP-only** (no HTTPS), which Android blocks by default. There's a small, clearly-labeled `:netconfig` module that grants just that one narrow exception — see its own `build.gradle.kts` for exactly what it does and how to remove it if you'd rather stay HTTPS-only everywhere.
 - **No device GPS is used anywhere** — the SDK doesn't expose it to tools yet. Nearby-stop and location search are powered by Nominatim (OpenStreetMap) and IP-based geolocation instead. Be kind to their free APIs! 🙏
-- **Stations are deduplicated using GTFS's `parent_station`** — a big station with several platforms (subway entrances, commuter rail tracks, etc.) shows up as one marker/entry, not one per platform, while still resolving to the right platform's `stop_id` under the hood for schedule lookups.
+- **Stations are deduplicated using GTFS's `parent_station`** — a big station with several platforms (subway entrances, commuter rail tracks, etc.) shows up as one marker/entry, not one per platform, while still resolving to the right platform's `stop_id` under the hood for schedule lookups. Only real platforms and boarding areas count as "member platforms" for this — GTFS also links entrances, elevators, and escalator nodes to the same parent station, and those are filtered out so a big hub's map isn't cluttered with dozens of non-boardable points.
 - **Boarding a trip is a saved reference, not a background tracker** — Pico Transit never polls a live feed while the app itself isn't open. "You've reached your stop" detection only runs while Trip Detail or the home screen is actually visible and polling, the same way every other bit of live tracking in the app works.
+- **Commuter rail track assignments come from MBTA's V3 API, not GTFS-RT** — GTFS-RT never publishes which specific track a commuter rail trip will use, and MBTA's own dispatch system usually doesn't decide until 10-15 minutes before departure. Pico Transit polls the V3 API (`api-v3.mbta.com`, no key required) for this and for commuter rail's own live vehicle positions, falling back to the standard GTFS-RT feed if a trip has no V3 match yet.
 
 ## 📄 License
 

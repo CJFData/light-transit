@@ -37,6 +37,7 @@ import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsIngestor
 import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.TripStopRow
 import com.thelightphone.transit.gtfs.computeArrivalEta
 import com.thelightphone.transit.gtfs.formatGtfsTime
@@ -224,6 +225,7 @@ class HomeScreenViewModel(
     private val filesDir: File,
     private val preferences: AgencyPreferences,
     private val boardedTripPreferences: BoardedTripPreferences,
+    private val homeScreenPreferences: HomeScreenPreferences,
 ) : LightViewModel<Unit>() {
 
     private val ingestor = GtfsIngestor(filesDir)
@@ -241,6 +243,10 @@ class HomeScreenViewModel(
     /** Settings screen's "Trip progress bar" toggle (on by default) -- see
      * BoardedTripPreferences.progressBarVisibleFlow. */
     val progressBarVisible = MutableStateFlow(true)
+
+    /** Settings screen's "Daily message" toggle (on by default) -- see
+     * HomeScreenPreferences.dailyMessageVisibleFlow. */
+    val dailyMessageVisible = MutableStateFlow(true)
 
     /** One-shot signal: non-null exactly when the rider has just dismissed the "you've arrived"
      * modal for the boarded trip's alight stop while HomeScreen was the visible screen -- mirrors
@@ -268,6 +274,9 @@ class HomeScreenViewModel(
         }
         viewModelScope.launch {
             boardedTripPreferences.progressBarVisibleFlow.collect { progressBarVisible.value = it }
+        }
+        viewModelScope.launch {
+            homeScreenPreferences.dailyMessageVisibleFlow.collect { dailyMessageVisible.value = it }
         }
     }
 
@@ -453,6 +462,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
             lightContext.filesDir,
             AgencyPreferences(lightContext.dataStore),
             BoardedTripPreferences(lightContext.dataStore),
+            HomeScreenPreferences(lightContext.dataStore),
         )
     }
 
@@ -467,6 +477,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val boardedTrip by viewModel.boardedTrip.collectAsState()
         val activeTripStatus by viewModel.activeTripStatus.collectAsState()
         val progressBarVisible by viewModel.progressBarVisible.collectAsState()
+        val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
         val reachedAlightStop by viewModel.reachedAlightStop.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
@@ -663,12 +674,14 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                 // LightOS ActionBar" convention (see its doc comment) rather than the previous
                 // ad-hoc Alignment.BottomStart/BottomEnd pair.
                 Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-                    LightText(
-                        text = dailyMessage(),
-                        variant = LightTextVariant.Detail,
-                        lighten = true,
-                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
-                    )
+                    if (dailyMessageVisible) {
+                        LightText(
+                            text = dailyMessage(),
+                            variant = LightTextVariant.Detail,
+                            lighten = true,
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                        )
+                    }
                     // Settings, About first, then whichever of Schedule/Station/Explore are
                     // actually reachable right now (built, not a fixed-size list with null
                     // placeholders) -- Current Trip lives in the top-right corner instead (see
