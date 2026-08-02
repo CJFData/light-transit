@@ -11,15 +11,17 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 - 🏠 **Pick your agency** — MBTA or RIPTA — and Pico Transit downloads their schedule right onto your phone.
   
   ![alt text](docs/screenshots/Screenshot_20260801_202930.png)
+  
 - ⚙️ **Settings** — a default agency to skip the picker, light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals, double-tap a station to zoom into its platforms, track tapped-open stops' own vehicles on the map, and the home screen's trip progress bar).
   
   ![alt text](docs/screenshots/Screenshot_20260801_215544.png)
   ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
-  ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
+
 - 📅 **Explore Schedules** — browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, pick a route, a direction, and a stop, and see every departure today.
   ![alt text](docs/screenshots/Screenshot_20260801_204325.png)
 
 - 🔗 **Connections** — tap any stop along a trip to see what else comes through there next, across every platform of a station, not just the one your trip happened to use. Great for planning a transfer on the fly.
+  
   ![alt text](docs/screenshots/Screenshot_20260801_211241.png)
   
 - 📍 **Explore** — type where you are (or let Pico Transit take a quick IP-based guess 🛰️) and get the closest stops, nearest first — it remembers your last search, so ducking into a stop's arrivals and back doesn't make you search all over again. Need something more precise, search for an address or landmark and find the closest stops in feet to it, then find how soon the next trip will arrive at your stop.
@@ -28,9 +30,8 @@ Pico Transit can be used alongside the light phone's directions tool for more co
    ![alt text](image.png)
   
 - ⏱️ **Live ETAs** — real-time predictions with On Time / Late / Early badges, whenever the agency's live feed is playing along nicely.
-
+  
    ![alt text](docs/screenshots/Screenshot_20260801_204530.png)
-
 
 - 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus).
   
@@ -48,15 +49,15 @@ Pico Transit can be used alongside the light phone's directions tool for more co
    ![alt text](docs/screenshots/Screenshot_20260801_212442.png)
   
 - 🚦 **Home screen trip status** — while a trip is boarded, the home screen swaps its agency picker for your route, live ETA, and stops remaining, plus an optional progress bar with a little vehicle marker crawling from your boarding stop toward your alight stop.
-  
 
   ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
 
-
 - ↩️ **Jump back anytime** — a Play icon shows up in the corner of every screen while a trip's boarded, one tap from wherever you are back to its live tracking; a plain circle in the footer does the same for the home screen itself.
+  
    ![alt text](docs/screenshots/Screenshot_20260801_212013.png)
 
 - ℹ️ **About** — a full legend of every icon and mode Pico Transit uses, reachable right from the home screen.
+  
    ![alt text](docs/screenshots/Screenshot_20260801_212041.png)
 
 ## 🛠️ Building & running it
