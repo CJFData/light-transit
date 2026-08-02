@@ -53,6 +53,8 @@ data class StopWithDistance(
     val distanceMeters: Double,
     /** See [StopLocation.memberStopIds]. */
     val memberStopIds: List<String>,
+    /** See [StopLocation.isStation]. */
+    val isStation: Boolean,
 )
 
 data class Departure(
@@ -74,6 +76,10 @@ data class StopConnection(
     val tripId: String,
     val stopSequence: Int,
     val departureTime: String,
+    /** This connection's own platform within the station, only populated when the query spanned
+     * an actual multi-platform grouped station (e.g. "Track 1", "Ashmont/Braintree") -- see
+     * GtfsRepository.getNextConnections(stopIds: List<String>, ...). Null for a plain stop. */
+    val platformLabel: String?,
     val route: RouteOption,
     val direction: DirectionOption,
 )
@@ -90,14 +96,33 @@ data class StopLocation(
      * stop_times of their own, so schedule/arrival lookups need a real child id, not the station's.
      */
     val memberStopIds: List<String>,
+    /**
+     * True only when [stopId] is a real GTFS Station record (`location_type=1`) with 2 or more
+     * child platforms/entrances grouped under it via `parent_station` -- see
+     * [groupStationsByParent]. A stop where several routes merely happen to converge, but with no
+     * such parent record, does NOT qualify, regardless of how many routes serve it. Powers the
+     * Station sub-map feature (search-result/trip-detail transfer icon, double-tap-to-zoom on the
+     * Map screen).
+     */
+    val isStation: Boolean,
 )
 
 data class ScheduledArrival(
     val tripId: String,
+    /** The specific child platform stop_id this arrival was actually found at -- for a grouped
+     * multi-platform station (see [groupStationsByParent]), this may differ between rows even
+     * though they're all "the same station" from the rider's perspective. Live/RT prediction
+     * lookups must match against this, not whichever stop_id the caller originally asked about. */
+    val stopId: String,
     val stopSequence: Int,
     val departureTime: String,
     val route: RouteOption,
     val direction: DirectionOption,
+    /** This platform's own identifying label within a multi-platform station (e.g. "Track 1",
+     * "Ashmont/Braintree"), derived from the child stop's own stop_desc -- see
+     * [platformLabelFromStopDesc]. Null for a plain, non-grouped stop lookup, where there's nothing
+     * more specific to show than the stop's own name. */
+    val platformLabel: String? = null,
 )
 
 /**
@@ -247,49 +272,59 @@ class GtfsRepository(dbFile: File) {
         }
 
     /**
-     * The next scheduled departures from [stopId] after [afterTime], across every route and
-     * direction serving that stop (not just the one [excludeTripId] belongs to) — used to show
-     * connecting service from a stop selected on a trip's detail screen. Restricted to trips
+     * The next scheduled departures across every id in [stopIds] after [afterTime], across every
+     * route and direction serving those stops (not just the one [excludeTripId] belongs to) --
+     * used to show connecting service from a stop selected on a trip's detail screen. When
+     * [stopIds] is a real multi-platform station's full [StopLocation.memberStopIds] (see
+     * [getStationContaining]), this unions every platform's schedule the same way
+     * [getScheduledArrivals]'s list overload does, tagging each result with the specific platform
+     * it was found at ([StopConnection.platformLabel]) -- only populated when [stopIds] has more
+     * than one entry. A plain single stop just passes a one-element list. Restricted to trips
      * active on [today] using the same calendar/calendar_dates logic as [getDepartures].
      */
     fun getNextConnections(
-        stopId: String,
+        stopIds: List<String>,
         afterTime: String,
         excludeTripId: String,
         today: LocalDate,
     ): List<StopConnection> {
+        if (stopIds.isEmpty()) return emptyList()
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val placeholders = stopIds.joinToString(",") { "?" }
+        val isGrouped = stopIds.size > 1
 
         val sql = """
-            SELECT st.departure_time, t.trip_id, st.stop_sequence,
+            SELECT st.departure_time, t.trip_id, st.stop_sequence, s.stop_desc,
                    r.route_id, r.route_short_name, r.route_long_name, r.route_type,
                    t.direction_id, t.trip_headsign
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN routes r ON r.route_id = t.route_id
-            WHERE st.stop_id = ? AND st.departure_time > ? AND t.trip_id != ?
+            JOIN stops s ON s.stop_id = st.stop_id
+            WHERE st.stop_id IN ($placeholders) AND st.departure_time > ? AND t.trip_id != ?
               AND ${activeTodayClause(dayColumn)}
             ORDER BY st.departure_time
         """.trimIndent()
 
         return db.rawQuery(
             sql,
-            arrayOf(stopId, afterTime, excludeTripId, todayGtfs, todayGtfs, todayGtfs),
+            (stopIds + listOf(afterTime, excludeTripId, todayGtfs, todayGtfs, todayGtfs)).toTypedArray(),
         ).use { cursor ->
             cursor.mapRowsNotNull {
-                val directionId = getIntOrNull(7) ?: return@mapRowsNotNull null
+                val directionId = getIntOrNull(8) ?: return@mapRowsNotNull null
                 StopConnection(
                     departureTime = getString(0),
                     tripId = getString(1),
                     stopSequence = getInt(2),
+                    platformLabel = if (isGrouped) platformLabelFromStopDesc(getStringOrNull(3)) else null,
                     route = RouteOption(
-                        routeId = getString(3),
-                        shortName = getStringOrNull(4),
-                        longName = getStringOrNull(5),
-                        routeType = getInt(6),
+                        routeId = getString(4),
+                        shortName = getStringOrNull(5),
+                        longName = getStringOrNull(6),
+                        routeType = getInt(7),
                     ),
-                    direction = DirectionOption(directionId, getStringOrNull(8)),
+                    direction = DirectionOption(directionId, getStringOrNull(9)),
                 )
             }
         }
@@ -303,7 +338,7 @@ class GtfsRepository(dbFile: File) {
      */
     fun getStopsWithLocation(): List<StopLocation> =
         db.rawQuery(
-            "SELECT stop_id, stop_name, stop_lat, stop_lon, parent_station FROM stops " +
+            "SELECT stop_id, stop_name, stop_lat, stop_lon, parent_station, location_type FROM stops " +
                 "WHERE stop_lat IS NOT NULL AND stop_lon IS NOT NULL",
             null,
         ).use { cursor ->
@@ -314,6 +349,7 @@ class GtfsRepository(dbFile: File) {
                     lat = getDouble(2),
                     lon = getDouble(3),
                     parentStation = getStringOrNull(4),
+                    locationType = getIntOrNull(5),
                 )
             }
             groupStationsByParent(rows)
@@ -334,19 +370,71 @@ class GtfsRepository(dbFile: File) {
                     lat = getDouble(2),
                     lon = getDouble(3),
                     memberStopIds = listOf(getString(0)),
+                    isStation = false,
                 )
             }.firstOrNull()
         }
 
     /**
-     * Every route+direction scheduled to serve [stopId] at or after [afterTime] today, across
-     * every route (not just one), active-today-filtered the same way as [getDepartures]. This is
-     * the static half of the "Leave Now" upcoming-arrivals screen; the caller merges it with
-     * GTFS-RT predictions where available.
+     * Resolves [stopId] to its full station group if it belongs to one -- whether [stopId] is the
+     * station's own representative id or one of its member platforms. Used by the Map screen's
+     * double-tap-to-open-Station gesture so it behaves identically whether the tapped marker is the
+     * currently centered/selected stop or a nearby one -- both call this same function rather than
+     * two separate detection paths. Null if [stopId] isn't part of any qualifying station.
      */
-    fun getScheduledArrivals(stopId: String, afterTime: String, today: LocalDate): List<ScheduledArrival> {
+    fun getStationContaining(stopId: String): StopLocation? =
+        getStopsWithLocation().firstOrNull { it.isStation && (it.stopId == stopId || stopId in it.memberStopIds) }
+
+    /**
+     * Every stop_id that's part of a real, qualifying multi-platform station -- the station's own
+     * representative id plus every one of its child platform ids (see [StopLocation.isStation]).
+     * Computed once from the same grouping used everywhere else (not a separate detection method),
+     * so a caller checking many individual stop_ids (e.g. Trip Detail's stop-by-stop list) can test
+     * cheap set membership per row instead of re-querying per row.
+     */
+    fun getMultiPlatformStationStopIds(): Set<String> =
+        getStopsWithLocation().filter { it.isStation }.flatMapTo(mutableSetOf()) { it.memberStopIds + it.stopId }
+
+    /** Every real, qualifying multi-platform station this agency has (see [StopLocation.isStation]),
+     * alphabetically by name -- powers the HomeScreen's direct "Station" browse list, which lists
+     * every station up front rather than asking the rider to search a location first. */
+    fun getAllStations(): List<StopLocation> =
+        getStopsWithLocation().filter { it.isStation }.sortedBy { it.stopName ?: it.stopId }
+
+    /** stop_desc for every given stop_id, keyed by stop_id -- used to derive each platform's own
+     * label within a station (see [platformLabelFromStopDesc]) for screens that already have
+     * individual platform stop_ids in hand, rather than going through the unioned arrivals query
+     * that already carries this (see the other [getScheduledArrivals] overload). */
+    fun getStopDescriptions(stopIds: List<String>): Map<String, String?> {
+        if (stopIds.isEmpty()) return emptyMap()
+        val placeholders = stopIds.joinToString(",") { "?" }
+        return db.rawQuery(
+            "SELECT stop_id, stop_desc FROM stops WHERE stop_id IN ($placeholders)",
+            stopIds.toTypedArray(),
+        ).use { cursor -> cursor.mapRows { getString(0) to getStringOrNull(1) }.toMap() }
+    }
+
+    /**
+     * Every route+direction scheduled to serve [stopId] at or after [afterTime] today (minus
+     * [graceSeconds], if given), across every route (not just one), active-today-filtered the same
+     * way as [getDepartures]. This is the static half of the "Leave Now" upcoming-arrivals screen;
+     * the caller merges it with GTFS-RT predictions where available.
+     *
+     * [graceSeconds] exists for callers that keep polling live vehicle data against this same
+     * candidate list over time (see MapScreen's own SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS): a
+     * plain `departure_time >= afterTime` filter permanently drops a trip the moment its scheduled
+     * time ticks past, even if the *live* feed shows the vehicle still dwelling right at the stop --
+     * once dropped from this list, no later poll (querying a still-later "afterTime") can ever bring
+     * it back. Widening the window backward keeps recently-scheduled trips as candidates so the
+     * live-position-based inclusion/exclusion logic downstream (not this query) gets to make the
+     * real call on whether they're still relevant. Zero by default, so a plain one-shot snapshot
+     * caller (e.g. Upcoming Arrivals, which has no live-position data to make that downstream call
+     * with) keeps its exact existing behavior.
+     */
+    fun getScheduledArrivals(stopId: String, afterTime: String, today: LocalDate, graceSeconds: Int = 0): List<ScheduledArrival> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val effectiveAfterTime = if (graceSeconds > 0) subtractSecondsFromGtfsTime(afterTime, graceSeconds) else afterTime
 
         val sql = """
             SELECT st.departure_time, t.trip_id, st.stop_sequence,
@@ -362,13 +450,14 @@ class GtfsRepository(dbFile: File) {
 
         return db.rawQuery(
             sql,
-            arrayOf(stopId, afterTime, todayGtfs, todayGtfs, todayGtfs),
+            arrayOf(stopId, effectiveAfterTime, todayGtfs, todayGtfs, todayGtfs),
         ).use { cursor ->
             cursor.mapRowsNotNull {
                 val directionId = getIntOrNull(7) ?: return@mapRowsNotNull null
                 ScheduledArrival(
                     departureTime = getString(0),
                     tripId = getString(1),
+                    stopId = stopId,
                     stopSequence = getInt(2),
                     route = RouteOption(
                         routeId = getString(3),
@@ -377,6 +466,61 @@ class GtfsRepository(dbFile: File) {
                         routeType = getInt(6),
                     ),
                     direction = DirectionOption(directionId, getStringOrNull(8)),
+                )
+            }
+        }
+    }
+
+    /**
+     * Union of [getScheduledArrivals] across every id in [stopIds] -- for a deduplicated
+     * multi-platform station (see [groupStationsByParent]), a single representative stop_id's own
+     * schedule is only one of several platforms actually serving it; this looks up every child
+     * platform grouped under the same station and merges their schedules into one chronological
+     * list. Each result is tagged with the specific platform it was found at
+     * ([ScheduledArrival.stopId]/[ScheduledArrival.platformLabel]) so the UI can tell riders which
+     * platform each arrival uses -- [platformLabel] is only populated when [stopIds] has more than
+     * one entry (an actual grouped station), since a plain single-platform stop has nothing more
+     * specific to show than its own name.
+     */
+    fun getScheduledArrivals(stopIds: List<String>, afterTime: String, today: LocalDate): List<ScheduledArrival> {
+        if (stopIds.isEmpty()) return emptyList()
+        val todayGtfs = today.toGtfsDateString()
+        val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val placeholders = stopIds.joinToString(",") { "?" }
+        val isGrouped = stopIds.size > 1
+
+        val sql = """
+            SELECT st.departure_time, t.trip_id, st.stop_sequence, st.stop_id, s.stop_desc,
+                   r.route_id, r.route_short_name, r.route_long_name, r.route_type,
+                   t.direction_id, t.trip_headsign
+            FROM trips t
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            JOIN routes r ON r.route_id = t.route_id
+            JOIN stops s ON s.stop_id = st.stop_id
+            WHERE st.stop_id IN ($placeholders) AND st.departure_time >= ?
+              AND ${activeTodayClause(dayColumn)}
+            ORDER BY st.departure_time
+        """.trimIndent()
+
+        return db.rawQuery(
+            sql,
+            (stopIds + listOf(afterTime, todayGtfs, todayGtfs, todayGtfs)).toTypedArray(),
+        ).use { cursor ->
+            cursor.mapRowsNotNull {
+                val directionId = getIntOrNull(9) ?: return@mapRowsNotNull null
+                ScheduledArrival(
+                    departureTime = getString(0),
+                    tripId = getString(1),
+                    stopId = getString(3),
+                    stopSequence = getInt(2),
+                    platformLabel = if (isGrouped) platformLabelFromStopDesc(getStringOrNull(4)) else null,
+                    route = RouteOption(
+                        routeId = getString(5),
+                        shortName = getStringOrNull(6),
+                        longName = getStringOrNull(7),
+                        routeType = getInt(8),
+                    ),
+                    direction = DirectionOption(directionId, getStringOrNull(10)),
                 )
             }
         }
@@ -404,6 +548,7 @@ class GtfsRepository(dbFile: File) {
                     lon = stop.lon,
                     distanceMeters = haversineMeters(anchorLat, anchorLon, stop.lat, stop.lon),
                     memberStopIds = stop.memberStopIds,
+                    isStation = stop.isStation,
                 )
             }
             .sortedBy { it.distanceMeters }
@@ -435,6 +580,7 @@ class GtfsRepository(dbFile: File) {
                     lon = stop.lon,
                     distanceMeters = haversineMeters(anchorLat, anchorLon, stop.lat, stop.lon),
                     memberStopIds = stop.memberStopIds,
+                    isStation = stop.isStation,
                 )
             }
             .filter { it.distanceMeters <= radiusMeters }
@@ -456,19 +602,25 @@ internal data class RawStopRow(
     val lat: Double,
     val lon: Double,
     val parentStation: String?,
+    /** GTFS `location_type` -- 1 means this row is itself a real Station record. Only relevant for
+     * [StopLocation.isStation]; the grouping itself still keys purely on `parent_station`. */
+    val locationType: Int? = null,
 )
 
 /**
  * Groups GTFS child platforms/entrances (`location_type=0` rows with a populated `parent_station`)
  * under their parent station (`location_type=1`) record, per the GTFS spec, so a single physical
  * station with several platform-level stop_ids is represented once instead of once per platform.
- * Only the `parent_station` linkage matters here, not `location_type` itself -- a row with no
- * `parent_station` is its own representative regardless of whether it's a true station or a simple
- * standalone stop, and either way any rows pointing at it via `parent_station` get folded into it.
+ * Grouping itself only depends on the `parent_station` linkage -- a row with no `parent_station` is
+ * its own representative regardless of its own `location_type`, and either way any rows pointing at
+ * it via `parent_station` get folded into it. `location_type` only matters separately for
+ * [StopLocation.isStation] (see below).
  *
  * If a `parent_station` value doesn't resolve to any row with coordinates (a missing station record,
  * or one without lat/lon), the first child (by stop_id, for determinism) is promoted to represent
- * the group instead of silently dropping those stops from the results.
+ * the group instead of silently dropping those stops from the results -- this fallback case is never
+ * `isStation`, since by definition there's no real Station record backing it (see [isStation]'s own
+ * doc for why this distinction matters for the Station sub-map feature).
  */
 internal fun groupStationsByParent(rows: List<RawStopRow>): List<StopLocation> {
     val (withParent, withoutParent) = rows.partition { !it.parentStation.isNullOrBlank() }
@@ -478,13 +630,15 @@ internal fun groupStationsByParent(rows: List<RawStopRow>): List<StopLocation> {
     val claimedParentIds = mutableSetOf<String>()
 
     withoutParent.forEach { row ->
-        val childIds = childrenByParent[row.stopId]?.map { it.stopId }?.sorted()
+        val children = childrenByParent[row.stopId]
+        val childIds = children?.map { it.stopId }?.sorted()
         result += StopLocation(
             stopId = row.stopId,
             stopName = row.stopName,
             lat = row.lat,
             lon = row.lon,
             memberStopIds = childIds ?: listOf(row.stopId),
+            isStation = row.locationType == 1 && (children?.size ?: 0) >= 2,
         )
         claimedParentIds += row.stopId
     }
@@ -498,10 +652,28 @@ internal fun groupStationsByParent(rows: List<RawStopRow>): List<StopLocation> {
             lat = representative.lat,
             lon = representative.lon,
             memberStopIds = children.map { it.stopId }.sorted(),
+            isStation = false,
         )
     }
 
     return result
+}
+
+/**
+ * A child platform's own identifying label within a multi-platform GTFS station, derived from its
+ * stop_desc (e.g. "South Station - Commuter Rail - Track 1" -> "Track 1", "South Station - Red
+ * Line - Alewife" -> "Alewife"). stop_name is deliberately not used for this -- verified against
+ * real MBTA data, every platform under a station shares the exact same stop_name as the parent
+ * station itself, so it can't distinguish anything; stop_desc's last " - "-delimited segment
+ * reliably names just that one platform. Null when there's no such segment to extract (a plain,
+ * non-grouped stop, or one with a blank/single-segment desc) -- internal rather than private so
+ * it's unit-testable without a real database, same as [groupStationsByParent].
+ */
+internal fun platformLabelFromStopDesc(stopDesc: String?): String? {
+    if (stopDesc.isNullOrBlank()) return null
+    val lastSeparator = stopDesc.lastIndexOf(" - ")
+    if (lastSeparator == -1) return null
+    return stopDesc.substring(lastSeparator + 3).trim().takeIf { it.isNotBlank() }
 }
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0
@@ -550,6 +722,19 @@ fun todayForGtfs(): LocalDate = LocalDate.now()
 fun currentGtfsTimeOfDay(): String {
     val now = java.time.LocalTime.now()
     return "%02d:%02d:%02d".format(now.hour, now.minute, now.second)
+}
+
+/** Subtracts [seconds] from a GTFS "HH:MM:SS" time string -- see [GtfsRepository.getScheduledArrivals]'s
+ * graceSeconds param. Clamped at "00:00:00" rather than going negative; a query a few minutes wide
+ * near midnight pulling in nothing extra (there's essentially never real service exactly then) is a
+ * fine trade for not having to represent a negative GTFS time. */
+private fun subtractSecondsFromGtfsTime(time: String, seconds: Int): String {
+    val parts = time.split(":")
+    val hour = parts.getOrNull(0)?.toIntOrNull() ?: return time
+    val minute = parts.getOrNull(1)?.toIntOrNull() ?: return time
+    val second = parts.getOrNull(2)?.toIntOrNull() ?: 0
+    val totalSeconds = (hour * 3600 + minute * 60 + second - seconds).coerceAtLeast(0)
+    return "%02d:%02d:%02d".format(totalSeconds / 3600, (totalSeconds % 3600) / 60, totalSeconds % 60)
 }
 
 private fun LocalDate.toGtfsDateString(): String = "%04d%02d%02d".format(year, monthValue, dayOfMonth)

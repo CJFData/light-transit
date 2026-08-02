@@ -61,11 +61,23 @@ data class ArrivalRow(
     val etaEpochSeconds: Long,
     val isLive: Boolean,
     val status: ArrivalStatus?,
+    /** This arrival's own platform within the station, only populated when the selected stop is an
+     * actual multi-platform grouped station (e.g. "Track 1", "Ashmont/Braintree") -- see
+     * GtfsRepository.getScheduledArrivals(stopIds: List<String>, ...). Null for a plain stop. */
+    val platformLabel: String?,
 )
 
 fun ArrivalRow.etaDisplay(): String {
     val time = LocalDateTime.ofInstant(Instant.ofEpochSecond(etaEpochSeconds), ZoneId.systemDefault())
     return formatGtfsTime("%02d:%02d:00".format(time.hour, time.minute))
+}
+
+/** e.g. "Red Line - Toward Alewife - Alewife" or "Commuter Rail - Toward Providence - Track 1" --
+ * the platform is only appended when this arrival actually came from a grouped multi-platform
+ * station ([ArrivalRow.platformLabel] non-null); a plain stop's line is unchanged. */
+fun ArrivalRow.routeAndDirectionLabel(): String {
+    val base = "$routeLabel - $directionLabel"
+    return platformLabel?.let { "$base - $it" } ?: base
 }
 
 fun ArrivalRow.statusLabel(): String? = when (val s = status) {
@@ -96,7 +108,11 @@ sealed class UpcomingArrivalsState {
 class UpcomingArrivalsViewModel(
     dbFile: File,
     private val agency: GtfsAgency,
-    private val stopId: String,
+    /** Every child platform stop_id belonging to the selected stop -- more than one entry means
+     * this is a real multi-platform grouped station (see GtfsRepository.groupStationsByParent), in
+     * which case arrivals across every platform are unioned and each is labeled with its own
+     * platform. A plain stop is just its own single-element list. */
+    private val stopIds: List<String>,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -104,12 +120,31 @@ class UpcomingArrivalsViewModel(
     private val _state = MutableStateFlow<UpcomingArrivalsState>(UpcomingArrivalsState.Loading)
     val state: StateFlow<UpcomingArrivalsState> = _state
 
+    /** Whether the selected stop is itself a real, qualifying multi-platform station -- see
+     * GtfsRepository.getStationContaining, the same single source of truth every other screen's
+     * transfer icon uses. Resolved via [stopIds]'s first entry rather than checking its length,
+     * since a caller may pass just one representative id even for a station (e.g. the Map screen's
+     * tap-and-hold shortcut). Kept separate from [state] so the icon can render as soon as this
+     * quick lookup resolves, without waiting on the (network-bound) arrivals fetch below. */
+    val isStation = MutableStateFlow(false)
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
+            // Own try/catch (not folded into the state one below) so a screen popped mid-query --
+            // e.g. several rapid-fire goBack() calls in a row, like BackToHomeFooter's "jump to
+            // Home" loop -- can't crash the app just because this repository got closed out from
+            // under an in-flight query on the way out. Same reasoning applies to every DB call in
+            // this coroutine, not just this one, but this is the one call that used to sit outside
+            // any try/catch at all.
+            try {
+                isStation.value = repository.getStationContaining(stopIds.first()) != null
+            } catch (e: Exception) {
+                Log.e("UpcomingArrivalsScreen", "getStationContaining failed for stops $stopIds", e)
+            }
             _state.value = try {
                 val today = todayForGtfs()
-                val scheduled = repository.getScheduledArrivals(stopId, currentGtfsTimeOfDay(), today)
+                val scheduled = repository.getScheduledArrivals(stopIds, currentGtfsTimeOfDay(), today)
 
                 val feed = agency.realtimeTripUpdatesUrl?.let { url ->
                     try {
@@ -121,8 +156,11 @@ class UpcomingArrivalsViewModel(
                 }
 
                 val rows = scheduled.mapNotNull { arrival ->
+                    // Matched against this specific arrival's own platform (arrival.stopId), not
+                    // just whichever platform the screen was originally opened for -- a grouped
+                    // station's live predictions are per-platform, same as its static schedule.
                     val rtStopUpdate = feed?.tripUpdatesByTripId?.get(arrival.tripId)
-                        ?.updateFor(stopId, arrival.stopSequence)
+                        ?.updateFor(arrival.stopId, arrival.stopSequence)
                     val eta = computeArrivalEta(arrival.departureTime, today, rtStopUpdate) ?: return@mapNotNull null
                     ArrivalRow(
                         tripId = arrival.tripId,
@@ -133,6 +171,7 @@ class UpcomingArrivalsViewModel(
                         etaEpochSeconds = eta.etaEpochSeconds,
                         isLive = eta.isLive,
                         status = eta.status,
+                        platformLabel = arrival.platformLabel,
                     )
                 }.sortedBy { it.etaEpochSeconds }
 
@@ -143,7 +182,7 @@ class UpcomingArrivalsViewModel(
                 val isOffline = feed == null || (rows.isNotEmpty() && rows.none { it.isLive })
                 UpcomingArrivalsState.Loaded(rows, isOffline = isOffline, realtimeStale = stale)
             } catch (e: Exception) {
-                Log.e("UpcomingArrivalsScreen", "Failed to load arrivals for stop $stopId", e)
+                Log.e("UpcomingArrivalsScreen", "Failed to load arrivals for stops $stopIds", e)
                 UpcomingArrivalsState.Error("Unable to load arrivals.")
             }
         }
@@ -159,7 +198,7 @@ class UpcomingArrivalsScreen(
     sealedActivity: SealedLightActivity,
     private val dbFile: File,
     private val agency: GtfsAgency,
-    private val stopId: String,
+    private val stopIds: List<String>,
     private val stopLabel: String,
 ) : LightScreen<Unit, UpcomingArrivalsViewModel>(sealedActivity) {
 
@@ -167,11 +206,12 @@ class UpcomingArrivalsScreen(
         get() = UpcomingArrivalsViewModel::class.java
 
     override fun createViewModel(): UpcomingArrivalsViewModel =
-        UpcomingArrivalsViewModel(dbFile, agency, stopId)
+        UpcomingArrivalsViewModel(dbFile, agency, stopIds)
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
+        val isStation by viewModel.isStation.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -183,6 +223,9 @@ class UpcomingArrivalsScreen(
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text("Upcoming Arrivals"),
+                    rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                        navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+                    },
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(
@@ -196,13 +239,28 @@ class UpcomingArrivalsScreen(
                     modifier = Modifier
                         .lightClickable {
                             navigateTo(screenFactory = { activity ->
-                                MapScreen(activity, dbFile, agency, stopId, stopLabel)
+                                MapScreen(activity, dbFile, agency, stopIds.first(), stopLabel)
                             })
                         }
                         .padding(bottom = 16.dp),
                 ) {
                     LightIcon(icon = LightIcons.MAP, size = 1.4f, modifier = Modifier.padding(end = 8.dp))
-                    LightText(text = stopLabel, variant = LightTextVariant.Copy)
+                    // Weighted so a long stop name wraps within its own bounded share of the row,
+                    // leaving guaranteed room for the trailing icon -- see NearbyStopsScreen's
+                    // identical fix for the same underlying Compose behavior.
+                    LightText(
+                        text = stopLabel,
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (isStation) {
+                        LightIcon(
+                            icon = LightIcons.DIRECTIONS_MIDDLE_FORK,
+                            size = 1.2f,
+                            contentDescription = "Transfer station",
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
                 }
 
                 when (val s = state) {
@@ -270,23 +328,30 @@ class UpcomingArrivalsScreen(
                                                 size = 1.2f,
                                                 modifier = Modifier.padding(end = 8.dp),
                                             )
-                                            LightText(
-                                                text = "${arrival.routeLabel} - ${arrival.directionLabel}",
-                                                variant = LightTextVariant.Copy,
+                                            // Status renders directly under the route/direction text
+                                            // it describes (same weighted column) rather than as a
+                                            // sibling of the whole Row -- otherwise it lines up flush
+                                            // with the mode icon's left edge instead of the text.
+                                            Column(
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .padding(end = 16.dp),
-                                            )
+                                            ) {
+                                                LightText(
+                                                    text = arrival.routeAndDirectionLabel(),
+                                                    variant = LightTextVariant.Copy,
+                                                )
+                                                arrival.statusLabel()?.let {
+                                                    LightText(
+                                                        text = it,
+                                                        variant = LightTextVariant.Detail,
+                                                        lighten = true,
+                                                    )
+                                                }
+                                            }
                                             LightText(
                                                 text = arrival.etaDisplay(),
                                                 variant = LightTextVariant.Copy,
-                                                lighten = true,
-                                            )
-                                        }
-                                        arrival.statusLabel()?.let {
-                                            LightText(
-                                                text = it,
-                                                variant = LightTextVariant.Detail,
                                                 lighten = true,
                                             )
                                         }
@@ -297,6 +362,7 @@ class UpcomingArrivalsScreen(
                     }
                 }
                 }
+                BackToHomeFooter(onGoBackOnce = { goBack() })
             }
         }
     }

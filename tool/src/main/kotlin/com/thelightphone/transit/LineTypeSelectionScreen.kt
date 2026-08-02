@@ -3,6 +3,7 @@ package com.thelightphone.transit
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
@@ -21,6 +23,7 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -91,6 +94,9 @@ class LineTypeSelectionScreen(
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text("Choose Line"),
+                    rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                        navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+                    },
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 when (val s = state) {
@@ -115,9 +121,8 @@ class LineTypeSelectionScreen(
                     } else {
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.lineTypes) { lineType ->
-                                LightText(
-                                    text = lineType.label,
-                                    variant = LightTextVariant.Copy,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .lightClickable {
@@ -126,12 +131,20 @@ class LineTypeSelectionScreen(
                                             })
                                         }
                                         .padding(vertical = 12.dp),
-                                )
+                                ) {
+                                    LightIcon(
+                                        icon = lineType.toVehicleIcon(),
+                                        size = 1.2f,
+                                        modifier = Modifier.padding(end = 12.dp),
+                                    )
+                                    LightText(text = lineType.label, variant = LightTextVariant.Copy)
+                                }
                             }
                         }
                     }
                 }
                 }
+                BackToHomeFooter(onGoBackOnce = { goBack() })
             }
         }
     }

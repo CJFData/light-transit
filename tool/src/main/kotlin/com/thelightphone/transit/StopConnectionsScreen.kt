@@ -26,6 +26,7 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -71,7 +72,8 @@ fun NearbyStopConnections.distanceFeetLabel(): String = "%.0f ft".format(distanc
 fun StopConnection.displayLabel(): String {
     val lineLabel = LineType.forGtfsRouteType(route.routeType)?.label
     val routeAndDirection = "${route.displayName} - ${direction.displayLabel()}"
-    return lineLabel?.let { "$it - $routeAndDirection" } ?: routeAndDirection
+    val base = lineLabel?.let { "$it - $routeAndDirection" } ?: routeAndDirection
+    return platformLabel?.let { "$base - $it" } ?: base
 }
 
 class StopConnectionsViewModel(
@@ -86,12 +88,30 @@ class StopConnectionsViewModel(
     private val _state = MutableStateFlow<StopConnectionsState>(StopConnectionsState.Loading)
     val state: StateFlow<StopConnectionsState> = _state
 
+    /** Whether [stopId] is itself a real, qualifying multi-platform station -- see
+     * GtfsRepository.getStationContaining, the same single source of truth Upcoming Arrivals' own
+     * transfer icon uses. */
+    val isStation = MutableStateFlow(false)
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
+            // Inside the same try/catch as the rest of this block (not a separate unguarded call
+            // before it) so a screen popped mid-query -- e.g. several rapid-fire goBack() calls in
+            // a row, like BackToHomeFooter's "jump to Home" loop -- can't crash the app just
+            // because this repository got closed out from under an in-flight query on the way out.
             _state.value = try {
+                // A trip only ever stops at one platform of a station, so stopId here is just that
+                // one platform -- resolve its full station (if any) so connections are listed
+                // across every platform actually serving it, not just the one this particular trip
+                // happened to use. Same pattern as UpcomingArrivalsViewModel/
+                // GtfsRepository.getScheduledArrivals(stopIds).
+                val station = repository.getStationContaining(stopId)
+                isStation.value = station != null
+                val stopIds = station?.memberStopIds ?: listOf(stopId)
+
                 val today = todayForGtfs()
-                val connections = repository.getNextConnections(stopId, afterTime, excludeTripId, today)
+                val connections = repository.getNextConnections(stopIds, afterTime, excludeTripId, today)
                 // What's already offered right here -- a nearby stop repeating one of these isn't
                 // telling you anything new, so it's left out of that stop's list entirely.
                 val servedHere = connections.mapTo(mutableSetOf()) { it.route.routeId to it.direction.directionId }
@@ -102,8 +122,7 @@ class StopConnectionsViewModel(
                 } else {
                     repository.getStopsWithinRadius(here.lat, here.lon, NEARBY_STOP_RADIUS_METERS, excludeStopId = stopId)
                         .mapNotNull { nearby ->
-                            val nearbyConnections = nearby.memberStopIds
-                                .flatMap { repository.getNextConnections(it, afterTime, excludeTripId, today) }
+                            val nearbyConnections = repository.getNextConnections(nearby.memberStopIds, afterTime, excludeTripId, today)
                                 .filter { (it.route.routeId to it.direction.directionId) !in servedHere }
                                 .sortedBy { it.departureTime }
                                 .take(NEARBY_STOP_CONNECTIONS_LIMIT)
@@ -182,6 +201,7 @@ class StopConnectionsScreen(
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
+        val isStation by viewModel.isStation.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -193,14 +213,30 @@ class StopConnectionsScreen(
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text("Connections"),
+                    rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                        navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+                    },
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
-                LightText(
-                    text = "$stopLabel - After ${formatGtfsTime(afterTime)}",
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(bottom = 16.dp),
-                )
+                ) {
+                    LightText(
+                        text = "$stopLabel - After ${formatGtfsTime(afterTime)}",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (isStation) {
+                        LightIcon(
+                            icon = LightIcons.DIRECTIONS_MIDDLE_FORK,
+                            size = 1.2f,
+                            contentDescription = "Transfer station",
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
 
                 when (val s = state) {
                     is StopConnectionsState.Loading -> LightText(
@@ -243,6 +279,7 @@ class StopConnectionsScreen(
                     }
                 }
                 }
+                BackToHomeFooter(onGoBackOnce = { goBack() })
             }
         }
     }

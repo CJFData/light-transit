@@ -3,7 +3,6 @@ package com.thelightphone.transit
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,13 +11,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.StopOption
-import com.thelightphone.transit.gtfs.haversineMeters
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -47,22 +44,10 @@ sealed class FirstStopSelectionState {
 
 fun StopOption.displayLabel(): String = stopName?.takeIf { it.isNotBlank() } ?: "Stop $stopId"
 
-private const val FEET_PER_METER = 3.28084
-
-/** Null if this stop has no ingested coordinates — displayed with no distance rather than "0 ft". */
-fun StopOption.distanceFeetLabel(userLat: Double, userLon: Double): String? {
-    val stopLat = lat ?: return null
-    val stopLon = lon ?: return null
-    val feet = haversineMeters(userLat, userLon, stopLat, stopLon) * FEET_PER_METER
-    return "%.0f ft".format(feet)
-}
-
 class FirstStopSelectionViewModel(
     dbFile: File,
     private val routeId: String,
     private val directionId: Int,
-    private val userLat: Double,
-    private val userLon: Double,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -74,14 +59,10 @@ class FirstStopSelectionViewModel(
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
-                // Nearest-to-you first, not route/stop_sequence order -- the distance already shown
-                // per row (see distanceFeetLabel) should match what the list order implies.
-                val stops = repository.getStops(routeId, directionId).sortedBy { stop ->
-                    val lat = stop.lat
-                    val lon = stop.lon
-                    if (lat != null && lon != null) haversineMeters(userLat, userLon, lat, lon) else Double.MAX_VALUE
-                }
-                FirstStopSelectionState.Loaded(stops)
+                // Already in physical route order (see GtfsRepository.getStops's own doc comment) --
+                // no location needed to pick a stop along a route, same as choosing a route or
+                // direction isn't location-based either.
+                FirstStopSelectionState.Loaded(repository.getStops(routeId, directionId))
             } catch (e: Exception) {
                 Log.e("FirstStopSelectionScreen", "Failed to load first stops for route $routeId", e)
                 FirstStopSelectionState.Error("Unable to load stops.")
@@ -102,15 +83,13 @@ class FirstStopSelectionScreen(
     private val routeLabel: String,
     private val directionId: Int,
     private val directionLabel: String,
-    private val userLat: Double,
-    private val userLon: Double,
 ) : LightScreen<Unit, FirstStopSelectionViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<FirstStopSelectionViewModel>
         get() = FirstStopSelectionViewModel::class.java
 
     override fun createViewModel(): FirstStopSelectionViewModel =
-        FirstStopSelectionViewModel(dbFile, routeId, directionId, userLat, userLon)
+        FirstStopSelectionViewModel(dbFile, routeId, directionId)
 
     @Composable
     override fun Content() {
@@ -126,6 +105,9 @@ class FirstStopSelectionScreen(
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text("Choose Stop"),
+                    rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                        navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+                    },
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(
@@ -157,7 +139,9 @@ class FirstStopSelectionScreen(
                     } else {
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.stops) { stop ->
-                                Row(
+                                LightText(
+                                    text = stop.displayLabel(),
+                                    variant = LightTextVariant.Copy,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .lightClickable {
@@ -175,28 +159,13 @@ class FirstStopSelectionScreen(
                                             })
                                         }
                                         .padding(vertical = 12.dp),
-                                    verticalAlignment = Alignment.Top,
-                                ) {
-                                    LightText(
-                                        text = stop.displayLabel(),
-                                        variant = LightTextVariant.Copy,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(end = 16.dp),
-                                    )
-                                    stop.distanceFeetLabel(userLat, userLon)?.let {
-                                        LightText(
-                                            text = it,
-                                            variant = LightTextVariant.Copy,
-                                            lighten = true,
-                                        )
-                                    }
-                                }
+                                )
                             }
                         }
                     }
                 }
                 }
+                BackToHomeFooter(onGoBackOnce = { goBack() })
             }
         }
     }

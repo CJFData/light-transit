@@ -12,13 +12,13 @@ class GtfsRepositoryDedupTest {
         // plus its six real child platform/entrance stop_ids (location_type=0, parent_station=
         // place-sstat), verified by hand-downloading the feed during development.
         val rows = listOf(
-            RawStopRow("place-sstat", "South Station", 42.352271, -71.055242, parentStation = null),
-            RawStopRow("70079", "South Station", 42.352271, -71.055242, parentStation = "place-sstat"),
-            RawStopRow("70080", "South Station", 42.352271, -71.055242, parentStation = "place-sstat"),
-            RawStopRow("74611", "South Station", 42.352271, -71.055242, parentStation = "place-sstat"),
-            RawStopRow("74617", "South Station", 42.352271, -71.055242, parentStation = "place-sstat"),
-            RawStopRow("84611", "South Station", 42.352271, -71.055242, parentStation = "place-sstat"),
-            RawStopRow("NEC-2287", "South Station", 42.352271, -71.055242, parentStation = "place-sstat"),
+            RawStopRow("place-sstat", "South Station", 42.352271, -71.055242, parentStation = null, locationType = 1),
+            RawStopRow("70079", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
+            RawStopRow("70080", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
+            RawStopRow("74611", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
+            RawStopRow("74617", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
+            RawStopRow("84611", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
+            RawStopRow("NEC-2287", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
         )
 
         val result = groupStationsByParent(rows)
@@ -32,6 +32,49 @@ class GtfsRepositoryDedupTest {
             station.memberStopIds,
             "member ids must be every real child platform, for schedule lookups",
         )
+        assertTrue(station.isStation, "a real location_type=1 record with 6 children must qualify as a station")
+    }
+
+    @Test
+    fun stopWithManyConvergingRoutesButNoStationRecordIsNotAStation() {
+        // A stop many routes happen to converge at, but with no location_type=1 parent record
+        // backing it -- per the Station sub-map rule, this must never qualify, no matter how many
+        // routes serve it.
+        val rows = listOf(
+            RawStopRow("busy-stop", "Busy Corner", 42.0, -71.0, parentStation = null, locationType = 0),
+        )
+
+        val result = groupStationsByParent(rows)
+
+        assertTrue(!result.single().isStation)
+    }
+
+    @Test
+    fun stationRecordWithOnlyOneChildDoesNotQualify() {
+        // A real location_type=1 record, but only a single child platform -- the rule requires 2+.
+        val rows = listOf(
+            RawStopRow("place-solo", "Lonely Station", 42.0, -71.0, parentStation = null, locationType = 1),
+            RawStopRow("child-1", "Lonely Station", 42.0, -71.0, parentStation = "place-solo", locationType = 0),
+        )
+
+        val result = groupStationsByParent(rows)
+
+        assertTrue(!result.single().isStation)
+    }
+
+    @Test
+    fun fallbackPromotedRepresentativeIsNeverAStation() {
+        // Same missing-parent-record scenario as fallsBackToFirstChildWhenTheParentRecordItselfIsMissing
+        // below -- even with 2+ children, there's no real Station record to back it, so it must not
+        // qualify as a station regardless of how many children point at the missing parent.
+        val rows = listOf(
+            RawStopRow("child-b", "Ghost Stop", 42.1, -71.1, parentStation = "place-ghost", locationType = 0),
+            RawStopRow("child-a", "Ghost Stop", 42.1, -71.1, parentStation = "place-ghost", locationType = 0),
+        )
+
+        val result = groupStationsByParent(rows)
+
+        assertTrue(!result.single().isStation)
     }
 
     @Test
@@ -82,5 +125,29 @@ class GtfsRepositoryDedupTest {
         assertTrue(result.any { it.stopId == "place-sstat" && it.memberStopIds == listOf("70079") })
         assertTrue(result.any { it.stopId == "place-north" && it.memberStopIds == listOf("70200", "70201") })
         assertTrue(result.any { it.stopId == "99999" && it.memberStopIds == listOf("99999") })
+    }
+
+    @Test
+    fun platformLabelExtractsTheLastSegmentOfRealSouthStationStopDescs() {
+        // Real stop_desc values from MBTA's static GTFS stops.txt for South Station's own child
+        // platforms -- stop_name is identical ("South Station") across every one of these and can't
+        // distinguish them, but stop_desc's last " - "-delimited segment names the specific platform.
+        assertEquals("Ashmont/Braintree", platformLabelFromStopDesc("South Station - Red Line - Ashmont/Braintree"))
+        assertEquals("Alewife", platformLabelFromStopDesc("South Station - Red Line - Alewife"))
+        assertEquals(
+            "SL2/SL3 Design Center/Chelsea",
+            platformLabelFromStopDesc("South Station - Silver Line - SL2/SL3 Design Center/Chelsea"),
+        )
+        assertEquals("Track 1", platformLabelFromStopDesc("South Station - Commuter Rail - Track 1"))
+        assertEquals("Track 13", platformLabelFromStopDesc("South Station - Commuter Rail - Track 13"))
+    }
+
+    @Test
+    fun platformLabelFallsBackToNullWhenTheresNothingMoreSpecificToExtract() {
+        assertEquals(null, platformLabelFromStopDesc(null))
+        assertEquals(null, platformLabelFromStopDesc(""))
+        assertEquals(null, platformLabelFromStopDesc("   "))
+        // A single segment, no " - " separator at all -- nothing to split off as a platform.
+        assertEquals(null, platformLabelFromStopDesc("South Station"))
     }
 }

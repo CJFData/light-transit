@@ -104,6 +104,9 @@ class DirectionSelectionScreen(
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text("Choose Direction"),
+                    rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                        navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+                    },
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(
@@ -142,7 +145,7 @@ class DirectionSelectionScreen(
                                         .fillMaxWidth()
                                         .lightClickable {
                                             navigateTo(screenFactory = { activity ->
-                                                ScheduleLocationScreen(
+                                                FirstStopSelectionScreen(
                                                     activity,
                                                     dbFile,
                                                     routeId,
@@ -159,6 +162,7 @@ class DirectionSelectionScreen(
                     }
                 }
                 }
+                BackToHomeFooter(onGoBackOnce = { goBack() })
             }
         }
     }

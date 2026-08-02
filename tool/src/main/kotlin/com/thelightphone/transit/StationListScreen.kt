@@ -3,6 +3,7 @@ package com.thelightphone.transit
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,18 +12,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
-import com.thelightphone.transit.gtfs.Departure
+import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
-import com.thelightphone.transit.gtfs.formatGtfsTime
-import com.thelightphone.transit.gtfs.todayForGtfs
+import com.thelightphone.transit.gtfs.StopLocation
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -38,33 +40,29 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
-sealed class DepartureListState {
-    object Loading : DepartureListState()
-    data class Loaded(val departures: List<Departure>) : DepartureListState()
-    data class Error(val message: String) : DepartureListState()
+fun StopLocation.displayLabel(): String = stopName?.takeIf { it.isNotBlank() } ?: "Station $stopId"
+
+sealed class StationListState {
+    object Loading : StationListState()
+    data class Loaded(val stations: List<StopLocation>) : StationListState()
+    data class Error(val message: String) : StationListState()
 }
 
-class DepartureListViewModel(
-    dbFile: File,
-    private val routeId: String,
-    private val directionId: Int,
-    private val stopId: String,
-) : LightViewModel<Unit>() {
+class StationListViewModel(dbFile: File) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
 
-    private val _state = MutableStateFlow<DepartureListState>(DepartureListState.Loading)
-    val state: StateFlow<DepartureListState> = _state
+    private val _state = MutableStateFlow<StationListState>(StationListState.Loading)
+    val state: StateFlow<StationListState> = _state
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
-                val today = todayForGtfs()
-                DepartureListState.Loaded(repository.getDepartures(routeId, directionId, stopId, today))
+                StationListState.Loaded(repository.getAllStations())
             } catch (e: Exception) {
-                Log.e("DepartureListScreen", "Failed to load departures for stop $stopId", e)
-                DepartureListState.Error("Unable to load departures.")
+                Log.e("StationListScreen", "Failed to load stations", e)
+                StationListState.Error("Unable to load stations.")
             }
         }
     }
@@ -75,22 +73,22 @@ class DepartureListViewModel(
     }
 }
 
-class DepartureListScreen(
+/**
+ * HomeScreen's "Station" entry point: every real multi-platform station this agency has, listed
+ * directly (see GtfsRepository.getAllStations) -- unlike "Explore", this never asks the rider to
+ * search a location first, since a rider looking for a specific station already knows its name.
+ * Tapping one opens its Map-Station sub-map directly (see MapStationScreen).
+ */
+class StationListScreen(
     sealedActivity: SealedLightActivity,
     private val dbFile: File,
-    private val routeId: String,
-    private val routeLabel: String,
-    private val directionId: Int,
-    private val directionLabel: String,
-    private val stopId: String,
-    private val stopLabel: String,
-) : LightScreen<Unit, DepartureListViewModel>(sealedActivity) {
+    private val agency: GtfsAgency,
+) : LightScreen<Unit, StationListViewModel>(sealedActivity) {
 
-    override val viewModelClass: Class<DepartureListViewModel>
-        get() = DepartureListViewModel::class.java
+    override val viewModelClass: Class<StationListViewModel>
+        get() = StationListViewModel::class.java
 
-    override fun createViewModel(): DepartureListViewModel =
-        DepartureListViewModel(dbFile, routeId, directionId, stopId)
+    override fun createViewModel(): StationListViewModel = StationListViewModel(dbFile)
 
     @Composable
     override fun Content() {
@@ -105,60 +103,61 @@ class DepartureListScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text("Departures"),
+                    center = LightTopBarCenter.Text("Stations"),
                     rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
                         navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
                     },
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
-                LightText(
-                    text = "$stopLabel - $routeLabel ($directionLabel)",
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(bottom = 16.dp),
-                )
-
                 when (val s = state) {
-                    is DepartureListState.Loading -> LightText(
-                        text = "Loading departures...",
+                    is StationListState.Loading -> LightText(
+                        text = "Loading stations...",
                         variant = LightTextVariant.Copy,
                         lighten = true,
                     )
 
-                    is DepartureListState.Error -> LightText(
+                    is StationListState.Error -> LightText(
                         text = s.message,
                         variant = LightTextVariant.Copy,
                         lighten = true,
                     )
 
-                    is DepartureListState.Loaded -> if (s.departures.isEmpty()) {
+                    is StationListState.Loaded -> if (s.stations.isEmpty()) {
                         LightText(
-                            text = "No departures today.",
+                            text = "No stations found.",
                             variant = LightTextVariant.Copy,
                             lighten = true,
                         )
                     } else {
                         LazyColumn(modifier = Modifier.weight(1f)) {
-                            items(s.departures) { departure ->
-                                LightText(
-                                    text = formatGtfsTime(departure.departureTime),
-                                    variant = LightTextVariant.Copy,
+                            items(s.stations) { station ->
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .lightClickable {
                                             navigateTo(screenFactory = { activity ->
-                                                TripDetailScreen(
-                                                    activity,
-                                                    dbFile,
-                                                    departure.tripId,
-                                                    departure.stopSequence,
-                                                    routeLabel,
-                                                    directionLabel,
-                                                )
+                                                MapStationScreen(activity, dbFile, agency, station.memberStopIds, station.displayLabel())
                                             })
                                         }
                                         .padding(vertical = 12.dp),
-                                )
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    // Weighted so a long station name wraps within its own bounded
+                                    // share of the row, leaving guaranteed room for the icon, instead
+                                    // of first greedily measuring against the row's full width -- see
+                                    // NearbyStopsScreen's identical fix for the same Compose behavior.
+                                    LightText(
+                                        text = station.displayLabel(),
+                                        variant = LightTextVariant.Copy,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    LightIcon(
+                                        icon = LightIcons.DIRECTIONS_MIDDLE_FORK,
+                                        size = 1.2f,
+                                        contentDescription = "Transfer station",
+                                        modifier = Modifier.padding(start = 8.dp),
+                                    )
+                                }
                             }
                         }
                     }

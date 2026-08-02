@@ -29,6 +29,7 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextInputEditor
@@ -73,6 +74,11 @@ class NearbyStopsViewModel(dbFile: File) : LightViewModel<Unit>() {
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
+        // Only the very first time this screen becomes visible -- onScreenShow fires again on
+        // returning here from a child screen (e.g. backing out of Upcoming Arrivals), and without
+        // this guard that re-ran IP geolocation and reset straight back to the search prompt,
+        // discarding whatever search results/stop list was already on screen.
+        if (_mode.value !is NearbyStopsMode.Locating) return
         viewModelScope.launch(Dispatchers.IO) {
             val prefill = try {
                 ipGeolocator.locate().displayName
@@ -170,6 +176,9 @@ class NearbyStopsScreen(
                     LightTopBar(
                         leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                         center = LightTopBarCenter.Text("Nearby Stops"),
+                        rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                            navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+                        },
                     )
                     Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                     when (m) {
@@ -192,22 +201,33 @@ class NearbyStopsScreen(
                                 lighten = true,
                                 modifier = Modifier.padding(bottom = 16.dp),
                             )
-                            LightText(
-                                text = "Search Again",
-                                variant = LightTextVariant.Copy,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.lightClickable { viewModel.backToInput() },
-                            )
+                            ) {
+                                LightIcon(
+                                    icon = LightIcons.SEARCH,
+                                    size = 1f,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                LightText(text = "Search Again", variant = LightTextVariant.Copy)
+                            }
                         }
 
                         is NearbyStopsMode.GeocodeResults -> {
-                            LightText(
-                                text = "Search Again",
-                                variant = LightTextVariant.Copy,
-                                lighten = true,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .lightClickable { viewModel.backToInput() }
                                     .padding(bottom = 16.dp),
-                            )
+                            ) {
+                                LightIcon(
+                                    icon = LightIcons.SEARCH,
+                                    size = 1f,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                LightText(text = "Search Again", variant = LightTextVariant.Copy, lighten = true)
+                            }
                             LazyColumn(modifier = Modifier.weight(1f)) {
                                 items(m.results) { result ->
                                     LightText(
@@ -229,14 +249,19 @@ class NearbyStopsScreen(
                         }
 
                         is NearbyStopsMode.NearbyStops -> {
-                            LightText(
-                                text = "Search Again",
-                                variant = LightTextVariant.Copy,
-                                lighten = true,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .lightClickable { viewModel.backToInput() }
                                     .padding(bottom = 16.dp),
-                            )
+                            ) {
+                                LightIcon(
+                                    icon = LightIcons.SEARCH,
+                                    size = 1f,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                LightText(text = "Search Again", variant = LightTextVariant.Copy, lighten = true)
+                            }
                             if (m.stops.isEmpty()) {
                                 LightText(
                                     text = "No stops found.",
@@ -251,34 +276,54 @@ class NearbyStopsScreen(
                                                 .fillMaxWidth()
                                                 .lightClickable {
                                                     navigateTo(screenFactory = { activity ->
-                                                        // A deduplicated station's own stopId (see
-                                                        // GtfsRepository.groupStationsByParent)
-                                                        // typically has no stop_times of its own --
-                                                        // a real child platform id is what schedule
-                                                        // lookups need. Label stays the station's.
+                                                        // The full member list, not just one child
+                                                        // platform -- a deduplicated station (see
+                                                        // GtfsRepository.groupStationsByParent) can
+                                                        // have several platforms each serving
+                                                        // different lines (e.g. South Station), and
+                                                        // arrivals need to be unioned across all of
+                                                        // them, not just whichever one happened to be
+                                                        // the dedup representative.
                                                         UpcomingArrivalsScreen(
                                                             activity,
                                                             dbFile,
                                                             agency,
-                                                            stop.memberStopIds.first(),
+                                                            stop.memberStopIds,
                                                             stop.displayLabel(),
                                                         )
                                                     })
                                                 }
                                                 .padding(vertical = 12.dp),
-                                            verticalAlignment = Alignment.Top,
+                                            verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            LightText(
-                                                text = stop.displayLabel(),
-                                                variant = LightTextVariant.Copy,
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .padding(end = 16.dp),
-                                            )
+                                            // Weighted so a long stop name wraps within its own
+                                            // share of the row instead of first greedily measuring
+                                            // against the row's *full* width (Compose's default for
+                                            // an unweighted Text) and only then discovering there's
+                                            // no room left for the distance label -- that's what was
+                                            // pushing distanceLabel() off the right edge.
+                                            Row(
+                                                modifier = Modifier.weight(1f),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                LightText(
+                                                    text = stop.displayLabel(),
+                                                    variant = LightTextVariant.Copy,
+                                                )
+                                                if (stop.isStation) {
+                                                    LightIcon(
+                                                        icon = LightIcons.DIRECTIONS_MIDDLE_FORK,
+                                                        size = 1.2f,
+                                                        contentDescription = "Transfer station",
+                                                        modifier = Modifier.padding(start = 8.dp),
+                                                    )
+                                                }
+                                            }
                                             LightText(
                                                 text = stop.distanceLabel(),
                                                 variant = LightTextVariant.Copy,
                                                 lighten = true,
+                                                modifier = Modifier.padding(start = 16.dp),
                                             )
                                         }
                                     }
@@ -295,6 +340,7 @@ class NearbyStopsScreen(
                         is NearbyStopsMode.LocationInput -> Unit
                     }
                     }
+                    BackToHomeFooter(onGoBackOnce = { goBack() })
                 }
             }
         }
