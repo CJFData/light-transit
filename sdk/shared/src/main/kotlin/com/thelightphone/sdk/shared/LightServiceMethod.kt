@@ -135,7 +135,6 @@ sealed interface LightServiceMethod<TRequest, TResponse> {
     }
 }
 
-// TODO we're gonna forget to add manually, maybe use reflection?
 val allMethods: Map<String, LightServiceMethod<*, *>> = listOf(
     LightServiceMethod.GetToken,
     LightServiceMethod.GetVersion,
