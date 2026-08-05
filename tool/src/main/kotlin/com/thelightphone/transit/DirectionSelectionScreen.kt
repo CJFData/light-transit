@@ -36,16 +36,23 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+/**This Screen shows route direction via GTFS trip headsign
+ *  The first part formats the direction statemnent to say "toward" so that vehicle labels can say not only
+ *  the route but which direction the route is headed towards.
+ */
 sealed class DirectionSelectionState {
     object Loading : DirectionSelectionState()
     data class Loaded(val directions: List<DirectionOption>) : DirectionSelectionState()
     data class Error(val message: String) : DirectionSelectionState()
 }
 
-/** Matches MBTA-style headsigns like "Hospital District via CCRI Lincoln" -- the via-clause is
- * routing detail, not part of the destination riders actually look for. */
+/** Matches MBTA-style headsigns like "Hospital District via CCRI Lincoln" via is a
+ * routing detail which typically highlights a variant in the route */
 private val viaClauseRegex = Regex(""" via .*""", RegexOption.IGNORE_CASE)
 
+/** Headsign is used to label direction rather than direction ID which would require further parsing and matching
+ * while remaining less descriptive generally to riders. Riders will be familiar with the headsign onm buses and tickers
+ * while static signage may say inbound outbound/ northbound/southbound westbound/eastbound  this is generally more descriptive*/
 fun DirectionOption.displayLabel(): String =
     headsign?.takeIf { it.isNotBlank() }
         ?.replace(viaClauseRegex, "")
@@ -66,7 +73,7 @@ class DirectionSelectionViewModel(dbFile: File, private val routeId: String) : L
             _state.value = try {
                 DirectionSelectionState.Loaded(repository.getDirections(routeId))
             } catch (e: Exception) {
-                Log.e("DirectionSelectionScreen", "Failed to load directions for route $routeId", e)
+                Log.e("DirectionSelectionScreen", "Failed to load directions for route $routeId", e) // I have yet to see this error in action... yay headsigns!
                 DirectionSelectionState.Error("Unable to load directions.")
             }
         }

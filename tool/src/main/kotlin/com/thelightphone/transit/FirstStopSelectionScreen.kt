@@ -36,6 +36,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+/* This is the stop selection screen for schedule mode which involves first selecting a route and direction to see all scheduled stops
+* The beatu of this screen in schedule view is it is the only screen that when tapping and holding on a stoip will connect you
+* to live data (Upcoming arrivals) other than that, tapping on a stop will then continue on the static schedule to show you the departure times
+* (See DepartureListScreen)*/
 sealed class FirstStopSelectionState {
     object Loading : FirstStopSelectionState()
     data class Loaded(val stops: List<StopOption>) : FirstStopSelectionState()

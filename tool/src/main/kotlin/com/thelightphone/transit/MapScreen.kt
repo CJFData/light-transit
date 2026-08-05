@@ -87,19 +87,16 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlin.math.sqrt
 
-// Tunable. Faster than agencies typically refresh their own feed (~15-20s), so some polls just
-// re-fetch the same data -- a deliberate trade of a few extra requests for lower latency once a
-// feed does update, not a continuous/unbounded poll.
+//Defines the polling interval to be every 10 seconds. evenb if an agency doesn't refresh this often,
+// you're bound to get a refresh within 20 seconds...
 private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
-// Per active stop, not a shared total -- turning on "Nearby Vehicles" and selecting more stops
-// should show more buses, not compete with the primary stop for the same fixed slots.
+//This variable should read "Vehicles" rather than buses, I limited it to 4  per tapped stop to avoid crowding.
+// If this isn't enough for someone, they can just flip on see everything mode (AKA GOD MODE ((insert helmo here)) )
 private const val MAX_DISPLAYED_BUSES_PER_STOP = 4
 // A vehicle reporting STOPPED_AT (e.g. dwelling at a layover/terminal) with a predicted arrival
-// farther out than this is excluded entirely rather than left to the sort+cap above -- otherwise a
-// stop with a thin real candidate pool ends up padding its display with static, not-actually-
-// arriving-soon vehicles just because a slot was open. Doesn't apply to a vehicle that's actually
-// stopped AT the target stop itself (see isArrived in refresh()) or to any vehicle still moving
-// (IN_TRANSIT_TO/INCOMING_AT), however far away -- those are still meaningful to show.
+// farther out than this is excluded entirely rather than left to the sort+cap above Doesn't apply
+// to a vehicle that's actually stopped AT the selected stop stop itself (see isArrived in refresh())
+// or to any vehicle still moving (IN_TRANSIT_TO/INCOMING_AT), however far away.
 private const val DWELLING_FAR_ETA_THRESHOLD_SECONDS = 15 * 60L
 // Widens the SQL prefilter behind scheduledArrivalsByStopId backward by this much (see
 // GtfsRepository.getScheduledArrivals's graceSeconds param) -- without it, a trip whose scheduled

@@ -11,16 +11,28 @@ import com.thelightphone.transit.gtfs.gtfsDbFile
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import java.io.File
-
 /**
- * The "Current Trip" entry point every screen's own [com.thelightphone.sdk.ui.LightTopBar] shows in
- * its rightButton slot -- present whenever there's a boarded trip (see [BoardedTripPreferences]),
- * gone otherwise, so it's always one tap away from wherever the rider happens to be in the app, not
- * just HomeScreen's own dedicated (vehicle-icon + Play) entry. Called from within a screen's own
- * Content() (needs [dataStore]/[filesDir] from its own `lightContext`, both protected there) rather
- * than as a receiver/extension, since [com.thelightphone.sdk.SimpleLightScreen.navigateTo] can't be
- * called from outside that class either -- [onOpenTripDetail] is the caller's own
- * `navigateTo { TripDetailScreen(...) }` wrapper.
+ * Play button shown in [com.thelightphone.sdk.ui.LightTopBar]'s rightButton slot, with different
+ * behavior on Trip Detail vs. everywhere else:
+ *
+ * - On Trip Detail, this IS the board/alight toggle: Play icon when not boarded (tap to board this
+ *   trip), Stop icon when boarded (tap to alight). If a DIFFERENT trip is already boarded when this
+ *   screen opens, a delete icon appears alongside Play to warn that boarding here will end tracking
+ *   on that other trip and switch to this one instead.
+ * - On every other screen, this button only appears while some trip is boarded, and only ever shows
+ *   Play — tapping it just navigates back to that trip's Detail screen. It never boards or alights
+ *   anything from outside Trip Detail.
+ *
+ * Implementation note: this can't be written as a shared helper that any screen calls from outside.
+ * It has to be called from inside each screen's own Content() function, for two reasons:
+ * 1. It needs [dataStore] and [filesDir], which only exist on a screen's own `lightContext` and
+ *    aren't accessible from outside that screen.
+ * 2. Navigating to Trip Detail requires [com.thelightphone.sdk.SimpleLightScreen.navigateTo],
+ *    which also only works from inside a screen class.
+ *
+ * Because of #2, this function can't navigate anywhere on its own. Instead, each screen that uses
+ * it passes in [onOpenTripDetail] — that screen's own `navigateTo { TripDetailScreen(...) }` call —
+ * and this function just invokes whatever was passed in when the button is tapped.
  */
 @Composable
 fun currentTripTopBarButton(

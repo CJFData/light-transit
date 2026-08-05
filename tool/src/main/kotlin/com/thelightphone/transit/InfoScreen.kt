@@ -30,11 +30,8 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 
 private data class IconLegendEntry(val icon: LightIconConfiguration, val label: String)
 
-/** Every icon this app actually draws on the map/HomeScreen that a rider would need explained --
- * kept as a single list so it can't quietly drift out of sync with what MapScreen/HomeScreen use
- * (verified against a full grep of every LightIcons.* reference in this package). Chrome-only icons
- * (back, settings, search, this screen's own entry point) aren't map/data indicators, so they're
- * left out per the same reasoning that excluded them from the request this screen was built for. */
+/** The Info/About screen is selectable from the homescreen via an ellipses icon. It describes the functions of the app
+ * provides attributions and describes icons on the screen*/
 private val ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_SUBWAY, "Subway / Light Rail vehicle"),
     IconLegendEntry(LightIcons.DIRECTIONS_BUS, "Bus vehicle"),
@@ -53,10 +50,10 @@ private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.LIST, "Schedule -- browse today's static route schedule"),
     IconLegendEntry(LightIcons.DIRECTIONS_PEDESTRIAN, "Explore -- find nearby stops and live upcoming arrivals"),
     IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Station -- browse a transit authority's multi-platform stations"),
-    IconLegendEntry(LightIcons.PLAY, "Play -- on a Trip Detail screen, boards that trip. Everywhere else, shown once a trip's boarded, to jump back to its live tracking"),
-    IconLegendEntry(LightIcons.STOP, "Alight -- Trip Detail's header, shown in place of Play while that trip is the one you've boarded; taps end tracking"),
-    IconLegendEntry(LightIcons.DELETE, "Trip switch warning -- Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; boarding this one ends tracking of that one"),
-    IconLegendEntry(LightIcons.CIRCLE, "Home -- every other screen's own footer button; jumps back to HomeScreen"),
+    IconLegendEntry(LightIcons.PLAY, "Play/Board -- on a Trip Detail screen, boards that trip. Everywhere else, shown once a trip's boarded, to jump back to its live tracking"),
+    IconLegendEntry(LightIcons.STOP, "Stop/Alight -- Trip Detail's header, shown in place of Play while that trip is the one you've boarded; taps end tracking"),
+    IconLegendEntry(LightIcons.DELETE, "Trip switch warning -- Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; boarding the trip you are currently viewing will ends tracking of the trip boarded earlier"),
+    IconLegendEntry(LightIcons.CIRCLE, "Home -- Jumps back to HomeScreen whre you can select your agency or minimally keep track of your boarded trip"),
 )
 
 /** Settings screen's own on/off toggles -- every one of them (Tap and hold a stop, Double-tap to

@@ -83,8 +83,10 @@ private const val AGENCY_ICON_SIZE = 1f
 
 /**
  * A friendly, low-stakes message shown at the bottom of the home screen -- picked deterministically
- * by calendar day (not randomly) so it stays the same across every visit in a day and only changes
- * once daily, like a small daily ritual rather than a slot machine.
+ * by calendar day or randomly if random selection is enabled,so it stays the same across every visit
+ * in a day and only changes once daily.. some of these need to be reqorked as a little corny and
+ * I'd like to build on this further so thatit begins to acknowledge holidays and seasons,
+ * maybe even weather.
  */
 private val DAILY_MESSAGES = listOf(
     // Transit-themed
@@ -155,18 +157,15 @@ private fun dailyMessage(): String {
     return DAILY_MESSAGES[dayOfYear % DAILY_MESSAGES.size]
 }
 
-/**
- * Whether HomeScreen is the currently visible screen -- lets [BackToHomeFooter] on every other
- * screen pop straight back to it (see that file's own doc comment) without any "pop to root"
- * primitive in the SDK itself: since [SimpleLightScreen.goBack] already reveals (and calls
- * onScreenShow on) whatever screen is next down the stack before returning, a caller can just call
- * it in a loop and stop the instant this flips true.
- *
- * [scope] backs that same loop -- deliberately NOT `rememberCoroutineScope()` at the call site,
- * since popping the CURRENT screen tears down its own composition (and cancels anything scoped to
- * it) partway through the loop, before it's had a chance to pop the rest of the way to Home. This
- * app-process-lifetime scope survives exactly that kind of screen teardown.
+
+
+/** Homevisibility sets isVisible to false (referring to if the back to homebutton fotter should be visible
+ * becuase we're on the homescreen... this is false, no homescreen button here! Because the homescreen button
+ * pops each previous screen as it goes back it is set to assure no further pops occur on this screen thus,
+ * stopping at the homescreen, this both prevents infinite screens from opening and assures the home screen
+ * can be easily returned to.
  */
+)
 object HomeVisibility {
     val isVisible = MutableStateFlow(false)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -177,12 +176,13 @@ object HomeVisibility {
 private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
 
 /**
- * The boarded trip's live progress toward its designated alight stop, shown in place of "Choose
- * Transit Agency" on HomeScreen while a trip is boarded. [stopsRemaining]/[etaEpochSeconds] are
- * null whenever there's nothing live to show yet (trip not yet reporting a position, or the rider
- * hasn't designated an alight stop on Trip Detail) -- [headingSubtitle] falls back to guidance text
+ * instantiates a constant for live polling. the homescreen only livepolls GTFS-RT when a trip is boarded to
+ * show the progress bar and ETA of the trip minimally on the homescreen. while a trip is boarded.
+ * [stopsRemaining]/[etaEpochSeconds] are null whenever there's nothing live to show yet (trip not yet
+ * reporting a position, or the rider hasn't designated an alight stop on Trip Detail) -- [headingSubtitle] falls back to guidance text
  * rather than a blank line in that case.
  */
+
 data class ActiveTripStatus(
     val routeLabel: String,
     val alightStopName: String?,
@@ -284,17 +284,20 @@ class HomeScreenViewModel(
         reachedAlightStop.value = null
     }
 
+    /** When there is NO active trip this is the default state: Choose your agency, view the attribution
+     * to the agency's data, and enjoy your daily message**/
     val selectedAgency = MutableStateFlow<GtfsAgency?>(null)
     /** Error text only now -- per-agency ready/syncing state renders as an icon next to each
      * agency's name instead (see [cachedAgencies]/[syncingAgency]). */
     val status = MutableStateFlow<String?>(null)
 
-    /** Set once ingestion completes successfully; gates the "Schedule"/"Explore" entry points. */
+    /** Set once ingestion completes successfully; gates the "Schedule"/"Explore" mode buttons are available. */
     val readyAgency = MutableStateFlow<GtfsAgency?>(null)
 
     /** Agencies with a GTFS schedule already downloaded/cached on disk -- checked once at
      * screen-open, then grown as each agency's own ingest completes. An agency in this set (and
-     * not currently in [syncingAgency]) shows no icon at all next to its name. */
+     * not currently in [syncingAgency]) shows no icon at all next to its name. A ready agency just means
+     * they have an up to date GTFS file downloaded, not that they are selected, downloaded and buttons loaded*/
     val cachedAgencies = MutableStateFlow<Set<GtfsAgency>>(emptySet())
 
     /** The one agency (if any) currently checking for updates/downloading/parsing right now --
@@ -451,7 +454,8 @@ class HomeScreenViewModel(
     }
 }
 
-@InitialScreen
+@InitialScreen /** This screen appears when PICO transit is first installed, the agencies are available to select with download indicators next to each agency name
+ no populated buttons at the bottom except for about and settings**/
 class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeScreenViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<HomeScreenViewModel>
@@ -481,6 +485,10 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val reachedAlightStop by viewModel.reachedAlightStop.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
+
+        /** OH this, isn't part of the initial screen, Only on the homescreen and trip detail screen will this appear
+         * if you boarded a trip and you reached your selected to stop to alight you get a message. once it clears
+         * it will immediatly open upcoming arrivals for the stop or station you land at so if you are transfering you know what's coming up*/
         // Fires once the "you've arrived" modal has been dismissed while HomeScreen was the
         // visible screen (manually or by timeout) -- see ReachedStopModal/checkReachedAlightStop.
         // Navigates to that stop's own Upcoming Arrivals, matching Trip Detail's identical handling.

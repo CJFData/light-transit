@@ -39,6 +39,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** The line type selection screen is the first selection of Pico Transit's schedule mode.
+ * It allows selection of "Bus", "Commuter Rail", or "Subway/Light rail"*/
+
 sealed class LineTypeSelectionState {
     object Loading : LineTypeSelectionState()
     data class Loaded(val lineTypes: List<LineType>) : LineTypeSelectionState()

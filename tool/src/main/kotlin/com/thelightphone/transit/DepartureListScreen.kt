@@ -38,6 +38,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+//This Screen shows departure times based on the selections of two prior screens, only visible
+//from selecting schedules mode from home screen, selecting a line from the line type selection screen (bus, commuter rail, or subway/light rail),
+// selecting a route from the route selection screen, then selecting a direction from the direction selection screen, and
+//selecting a stop from the stop selection screen. This screen then shows filtered from the previous selections the departure
+// times available for that stop through that day for that route/direction. selecting a depature time shows a scheduled trip's
+//trips detail. Just like any trips detail, this trip can be boarded even prior to live view. I personally do this when I
+//plan a trip for later and want to grab my phone and head to the stop without a second thought. Departures come from the parsed static
+//GTFS's static schedule (GTFS Repository(dbfile)) not GTFS-RT live feed given that, these are future departures.
 sealed class DepartureListState {
     object Loading : DepartureListState()
     data class Loaded(val departures: List<Departure>) : DepartureListState()
