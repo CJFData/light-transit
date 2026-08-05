@@ -7,6 +7,7 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import io.ktor.http.HttpHeaders
+import java.net.URI
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -170,11 +171,7 @@ object GtfsRealtimeClient {
                     status in 300..399 -> {
                         val location = response.headers[HttpHeaders.Location]
                             ?: throw GtfsRealtimeException("GTFS-RT redirected without a Location header")
-                        currentUrl = if (location.startsWith("http://")) {
-                            "https://" + location.removePrefix("http://")
-                        } else {
-                            location
-                        }
+                        currentUrl = secureRealtimeRedirectUrl(currentUrl, location)
                     }
                     else -> throw GtfsRealtimeException("GTFS-RT fetch failed: HTTP $status")
                 }
@@ -183,6 +180,16 @@ object GtfsRealtimeClient {
         } finally {
             client.close()
         }
+    }
+}
+
+/** Resolves absolute and relative redirects while never following a redirect back to plain HTTP. */
+private fun secureRealtimeRedirectUrl(currentUrl: String, location: String): String {
+    val resolved = URI(currentUrl).resolve(location).toString()
+    return if (resolved.startsWith("http://")) {
+        "https://" + resolved.removePrefix("http://")
+    } else {
+        resolved
     }
 }
 

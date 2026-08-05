@@ -2,13 +2,13 @@
 
 Pico Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a live map that shows exactly where your ride actually is — no ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-Right now Pico Transit knows its way around **MBTA** and **RIPTA**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
+Right now Pico Transit knows its way around **MBTA**, **RIPTA**, and **RTD Denver**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
 
 Pico Transit can be used alongside the light phone's directions tool for more context on your commutes, or standalone, covering buses, commuter rail.subway systems, and transit stations.
 
 ## 🗺️ What can it do?
 
-- 🏠 **Pick your agency** — MBTA or RIPTA — and Pico Transit downloads their schedule right onto your phone.
+- 🏠 **Pick your agency** — MBTA, RIPTA, or RTD Denver — and Pico Transit downloads their schedule right onto your phone.
   
   ![alt text](docs/screenshots/Screenshot_20260801_202930.png)
   
