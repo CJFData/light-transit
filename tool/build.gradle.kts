@@ -59,10 +59,6 @@ kotlin {
 
 dependencies {
     implementation(project(":sdk:client"))
-    // REMOVABLE: grants realtime.ripta.com a cleartext exception so its plain-HTTP-only realtime
-    // feeds are reachable. See netconfig/build.gradle.kts for the full explanation and removal
-    // steps (remove this line, the settings.gradle.kts include, and the module itself).
-    implementation(project(":netconfig"))
     // Only the "org.jetbrains.kotlinx:kotlinx-serialization" prefix is on the SDK plugin's
     // dependency allow-list, but that check is a startsWith match, so this artifact passes too —
     // verified against a live build. No official protobuf/gtfs-realtime-bindings library is

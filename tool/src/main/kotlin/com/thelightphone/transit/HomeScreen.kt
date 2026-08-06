@@ -61,6 +61,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -165,7 +166,6 @@ private fun dailyMessage(): String {
  * stopping at the homescreen, this both prevents infinite screens from opening and assures the home screen
  * can be easily returned to.
  */
-
 object HomeVisibility {
     val isVisible = MutableStateFlow(false)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -303,6 +303,7 @@ class HomeScreenViewModel(
     /** The one agency (if any) currently checking for updates/downloading/parsing right now --
      * shows a spinning sync icon next to that agency's name only. */
     val syncingAgency = MutableStateFlow<GtfsAgency?>(null)
+    private var agencyIngestJob: Job? = null
 
     /** Whether [readyAgency] has any real, qualifying multi-platform stations at all (see
      * GtfsRepository.getAllStations) -- an agency with none (e.g. RIPTA, which has no grouped
@@ -423,6 +424,7 @@ class HomeScreenViewModel(
     }
 
     fun selectAgency(agency: GtfsAgency) {
+        agencyIngestJob?.cancel()
         selectedAgency.value = agency
         readyAgency.value = null
         status.value = null
@@ -430,14 +432,17 @@ class HomeScreenViewModel(
         agencyHasStations.value = false
         Log.d("HomeScreen", "Selected agency: ${agency.displayName}")
 
-        viewModelScope.launch(Dispatchers.IO) {
+        agencyIngestJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 ingestor.ingest(agency) { ingestStatus ->
-                    if (ingestStatus == GtfsIngestStatus.Ready) {
+                    if (ingestStatus == GtfsIngestStatus.Ready && selectedAgency.value == agency) {
                         syncingAgency.value = null
                         cachedAgencies.value = cachedAgencies.value + agency
                     }
                 }
+                // A later selection may have started another ingest while this one was running.
+                // Do not let the older job replace the newer agency's ready state or station check.
+                if (selectedAgency.value != agency) return@launch
                 readyAgency.value = agency
                 val stationRepo = GtfsRepository(gtfsDbFile(filesDir, agency))
                 try {
@@ -445,10 +450,14 @@ class HomeScreenViewModel(
                 } finally {
                     stationRepo.close()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("HomeScreen", "GTFS ingestion failed for ${agency.displayName}", e)
-                syncingAgency.value = null
-                status.value = "Unable to load ${agency.displayName} data."
+                if (selectedAgency.value == agency) {
+                    syncingAgency.value = null
+                    status.value = "Unable to load ${agency.displayName} data."
+                }
             }
         }
     }

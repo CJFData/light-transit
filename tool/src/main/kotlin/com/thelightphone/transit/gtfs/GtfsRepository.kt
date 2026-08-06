@@ -36,7 +36,7 @@ enum class LineType(val gtfsRouteTypes: Set<Int>, val label: String, val emoji: 
     }
 }
 
-data class DirectionOption(val directionId: Int, val headsign: String?)
+data class DirectionOption(val directionId: Int?, val headsign: String?)
 
 data class StopOption(
     val stopId: String,
@@ -184,18 +184,20 @@ class GtfsRepository(dbFile: File) {
      * earliest stop_sequence across those trips — an approximation of physical route order,
      * since GTFS doesn't guarantee stop_sequence numbering is identical across trip variants.
      */
-    fun getStops(routeId: String, directionId: Int): List<StopOption> =
-        db.rawQuery(
+    fun getStops(routeId: String, directionId: Int?): List<StopOption> {
+        val directionClause = if (directionId == null) "t.direction_id IS NULL" else "t.direction_id = ?"
+        val args = if (directionId == null) arrayOf(routeId) else arrayOf(routeId, directionId.toString())
+        return db.rawQuery(
             """
             SELECT st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN stops s ON s.stop_id = st.stop_id
-            WHERE t.route_id = ? AND t.direction_id = ?
+            WHERE t.route_id = ? AND $directionClause
             GROUP BY st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
             ORDER BY MIN(st.stop_sequence)
             """,
-            arrayOf(routeId, directionId.toString()),
+            args,
         ).use { cursor ->
             cursor.mapRows {
                 StopOption(
@@ -206,6 +208,7 @@ class GtfsRepository(dbFile: File) {
                 )
             }
         }
+    }
 
     /**
      * Departures for [stopId] on [routeId]+[directionId], restricted to trips whose service_id
@@ -217,22 +220,28 @@ class GtfsRepository(dbFile: File) {
      * restricted to route termini; each result carries the matched stop_sequence so trip detail
      * can filter to "from this stop onward" instead of assuming the trip starts there.
      */
-    fun getDepartures(routeId: String, directionId: Int, stopId: String, today: LocalDate): List<Departure> {
+    fun getDepartures(routeId: String, directionId: Int?, stopId: String, today: LocalDate): List<Departure> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
 
+        val directionClause = if (directionId == null) "t.direction_id IS NULL" else "t.direction_id = ?"
         val sql = """
             SELECT st.departure_time, t.trip_id, t.trip_headsign, st.stop_sequence
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
-            WHERE t.route_id = ? AND t.direction_id = ? AND st.stop_id = ?
+            WHERE t.route_id = ? AND $directionClause AND st.stop_id = ?
               AND ${activeTodayClause(dayColumn)}
             ORDER BY st.departure_time
         """.trimIndent()
 
+        val args = if (directionId == null) {
+            arrayOf(routeId, stopId, todayGtfs, todayGtfs, todayGtfs)
+        } else {
+            arrayOf(routeId, directionId.toString(), stopId, todayGtfs, todayGtfs, todayGtfs)
+        }
         return db.rawQuery(
             sql,
-            arrayOf(routeId, directionId.toString(), stopId, todayGtfs, todayGtfs, todayGtfs),
+            args,
         ).use { cursor ->
             cursor.mapRows {
                 Departure(

@@ -51,7 +51,7 @@ fun StopOption.displayLabel(): String = stopName?.takeIf { it.isNotBlank() } ?: 
 class FirstStopSelectionViewModel(
     dbFile: File,
     private val routeId: String,
-    private val directionId: Int,
+    private val directionId: Int?,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -85,7 +85,7 @@ class FirstStopSelectionScreen(
     private val dbFile: File,
     private val routeId: String,
     private val routeLabel: String,
-    private val directionId: Int,
+    private val directionId: Int?,
     private val directionLabel: String,
 ) : LightScreen<Unit, FirstStopSelectionViewModel>(sealedActivity) {
 

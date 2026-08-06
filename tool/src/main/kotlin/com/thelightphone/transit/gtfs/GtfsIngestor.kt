@@ -11,7 +11,11 @@ import io.ktor.http.HttpHeaders
 import java.io.BufferedReader
 import java.io.File
 import java.net.URI
-import java.util.zip.ZipInputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.zip.ZipFile
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 enum class GtfsIngestStatus {
     CheckingForUpdates, Downloading, Parsing, Ready
@@ -33,6 +37,7 @@ private data class FeedMeta(val etag: String, val lastModified: String) {
 
 /** Downloads, unzips, and bulk-loads an agency's GTFS static feed into a local SQLite database. */
 class GtfsIngestor(private val filesDir: File) {
+    private val ingestMutex = Mutex()
 
     /**
      * Re-downloads only when the feed has actually changed: a HEAD request's ETag/Last-Modified is
@@ -41,42 +46,61 @@ class GtfsIngestor(private val filesDir: File) {
      * the HEAD request. Changed, or nothing cached yet, or the check itself is inconclusive -> falls
      * back to a full re-download, since that's always safe (just not always necessary).
      */
-    suspend fun ingest(agency: GtfsAgency, onStatus: (GtfsIngestStatus) -> Unit) {
+    suspend fun ingest(agency: GtfsAgency, onStatus: (GtfsIngestStatus) -> Unit) = ingestMutex.withLock {
+        ingestInternal(agency, onStatus)
+    }
+
+    private suspend fun ingestInternal(agency: GtfsAgency, onStatus: (GtfsIngestStatus) -> Unit) {
         val agencyDir = File(filesDir, "gtfs/${agency.id}")
         agencyDir.mkdirs()
-        val zipFile = File(agencyDir, "gtfs.zip")
+        val feedUrls = listOf(agency.feedUrl) + agency.additionalStaticFeedUrls
+        val zipFiles = feedUrls.mapIndexed { index, _ ->
+            File(agencyDir, if (index == 0) "gtfs.zip" else "gtfs-$index.zip")
+        }
         val dbFile = gtfsDbFile(filesDir, agency)
         val metaFile = File(agencyDir, "feed_meta.txt")
 
         onStatus(GtfsIngestStatus.CheckingForUpdates)
-        val cachedMeta = readFeedMeta(metaFile)
+        val cachedMeta = readFeedMeta(metaFile, feedUrls)
         val remoteMeta = try {
-            checkForUpdate(agency.feedUrl)
+            feedUrls.map { checkForUpdate(it) }.takeIf { metas -> metas.all { it != null } }?.map { it!! }
         } catch (e: Exception) {
             Log.e("GtfsIngestor", "Feed update check failed for ${agency.displayName}, redownloading to be safe", e)
             null
         }
 
         val upToDate = dbFile.exists() && cachedMeta != null && remoteMeta != null &&
-            !cachedMeta.isEmpty() && cachedMeta == remoteMeta
+            cachedMeta.size == remoteMeta.size && cachedMeta.zip(remoteMeta).all { (cached, remote) ->
+                !cached.isEmpty() && cached == remote
+            }
         if (upToDate) {
             onStatus(GtfsIngestStatus.Ready)
             return
         }
 
         onStatus(GtfsIngestStatus.Downloading)
-        downloadZip(agency.feedUrl, zipFile)
+        feedUrls.zip(zipFiles).forEach { (url, zipFile) -> downloadZip(url, zipFile) }
 
         onStatus(GtfsIngestStatus.Parsing)
-        dbFile.delete()
-        val db = openGtfsDatabase(dbFile)
+        val tempDbFile = File(agencyDir, "transit.db.tmp")
+        tempDbFile.delete()
+        val db = openGtfsDatabase(tempDbFile)
         try {
-            parseAndLoad(zipFile, db)
+            clearGtfsTables(db)
+            zipFiles.forEachIndexed { index, zipFile ->
+                parseAndLoad(zipFile, db, if (index == 0) "" else "feed$index:")
+            }
         } finally {
             db.close()
         }
+        Files.move(
+            tempDbFile.toPath(),
+            dbFile.toPath(),
+            StandardCopyOption.REPLACE_EXISTING,
+            StandardCopyOption.ATOMIC_MOVE,
+        )
 
-        remoteMeta?.let { writeFeedMeta(metaFile, it) }
+        remoteMeta?.let { metas -> writeFeedMeta(metaFile, feedUrls, metas) }
         onStatus(GtfsIngestStatus.Ready)
     }
 
@@ -112,15 +136,21 @@ class GtfsIngestor(private val filesDir: File) {
         }
     }
 
-    private fun readFeedMeta(file: File): FeedMeta? {
+    private fun readFeedMeta(file: File, feedUrls: List<String>): List<FeedMeta>? {
         if (!file.exists()) return null
         val lines = file.readLines()
-        if (lines.size < 2) return null
-        return FeedMeta(etag = lines[0], lastModified = lines[1])
+        if (lines.size < feedUrls.size * 3) return null
+        return feedUrls.mapIndexed { index, url ->
+            val offset = index * 3
+            if (lines[offset] != url) return null
+            FeedMeta(etag = lines[offset + 1], lastModified = lines[offset + 2])
+        }
     }
 
-    private fun writeFeedMeta(file: File, meta: FeedMeta) {
-        file.writeText("${meta.etag}\n${meta.lastModified}\n")
+    private fun writeFeedMeta(file: File, feedUrls: List<String>, metas: List<FeedMeta>) {
+        file.writeText(feedUrls.zip(metas).joinToString("\n") { (url, meta) ->
+            "$url\n${meta.etag}\n${meta.lastModified}"
+        } + "\n")
     }
 
     /**
@@ -159,19 +189,19 @@ class GtfsIngestor(private val filesDir: File) {
         }
     }
 
-    private fun parseAndLoad(zipFile: File, db: SQLiteDatabase) {
+    private fun parseAndLoad(zipFile: File, db: SQLiteDatabase, idPrefix: String) {
         db.beginTransaction()
         try {
-            ZipInputStream(zipFile.inputStream()).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
+            ZipFile(zipFile).use { archive ->
+                val entries = archive.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
                     val loader = TABLE_LOADERS[entry.name.substringAfterLast('/')]
                     if (loader != null) {
-                        val reader = BufferedReader(zis.reader(Charsets.UTF_8))
-                        loader(db, reader)
+                        archive.getInputStream(entry).reader(Charsets.UTF_8).buffered().use { reader ->
+                            loader(db, reader, idPrefix)
+                        }
                     }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
                 }
             }
             db.setTransactionSuccessful()
@@ -181,7 +211,7 @@ class GtfsIngestor(private val filesDir: File) {
     }
 
     companion object {
-        private val TABLE_LOADERS: Map<String, (SQLiteDatabase, BufferedReader) -> Unit> = mapOf(
+        private val TABLE_LOADERS: Map<String, (SQLiteDatabase, BufferedReader, String) -> Unit> = mapOf(
             "routes.txt" to ::loadRoutes,
             "trips.txt" to ::loadTrips,
             "stops.txt" to ::loadStops,
@@ -202,8 +232,18 @@ private fun secureRedirectUrl(currentUrl: String, location: String): String {
     }
 }
 
-private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader) {
+private fun clearGtfsTables(db: SQLiteDatabase) {
+    db.delete("stop_times", null, null)
+    db.delete("trips", null, null)
     db.delete("routes", null, null)
+    db.delete("stops", null, null)
+    db.delete("calendar_dates", null, null)
+    db.delete("calendar", null, null)
+}
+
+private fun prefixedId(prefix: String, id: String?): String? = id?.takeIf { it.isNotEmpty() }?.let { prefix + it }
+
+private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         """
         INSERT INTO routes
@@ -212,7 +252,7 @@ private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader) {
         """
     )
     readCsvEntry(reader) { header, row ->
-        val routeId = header.get(row, "route_id") ?: return@readCsvEntry
+        val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, routeId)
         stmt.bindStringOrNull(2, header.get(row, "agency_id"))
@@ -227,8 +267,7 @@ private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader) {
     }
 }
 
-private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader) {
-    db.delete("trips", null, null)
+private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         """
         INSERT INTO trips
@@ -237,9 +276,9 @@ private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader) {
         """
     )
     readCsvEntry(reader) { header, row ->
-        val tripId = header.get(row, "trip_id") ?: return@readCsvEntry
-        val routeId = header.get(row, "route_id") ?: return@readCsvEntry
-        val serviceId = header.get(row, "service_id") ?: return@readCsvEntry
+        val tripId = prefixedId(idPrefix, header.get(row, "trip_id")) ?: return@readCsvEntry
+        val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry
+        val serviceId = prefixedId(idPrefix, header.get(row, "service_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, tripId)
         stmt.bindString(2, routeId)
@@ -255,8 +294,7 @@ private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader) {
     }
 }
 
-private fun loadStops(db: SQLiteDatabase, reader: BufferedReader) {
-    db.delete("stops", null, null)
+private fun loadStops(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         """
         INSERT INTO stops
@@ -265,7 +303,7 @@ private fun loadStops(db: SQLiteDatabase, reader: BufferedReader) {
         """
     )
     readCsvEntry(reader) { header, row ->
-        val stopId = header.get(row, "stop_id") ?: return@readCsvEntry
+        val stopId = prefixedId(idPrefix, header.get(row, "stop_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, stopId)
         stmt.bindStringOrNull(2, header.get(row, "stop_code"))
@@ -276,14 +314,13 @@ private fun loadStops(db: SQLiteDatabase, reader: BufferedReader) {
         stmt.bindStringOrNull(7, header.get(row, "zone_id"))
         stmt.bindStringOrNull(8, header.get(row, "stop_url"))
         stmt.bindLongOrNull(9, header.get(row, "location_type"))
-        stmt.bindStringOrNull(10, header.get(row, "parent_station"))
+        stmt.bindStringOrNull(10, prefixedId(idPrefix, header.get(row, "parent_station")))
         stmt.bindLongOrNull(11, header.get(row, "wheelchair_boarding"))
         stmt.executeInsert()
     }
 }
 
-private fun loadStopTimes(db: SQLiteDatabase, reader: BufferedReader) {
-    db.delete("stop_times", null, null)
+private fun loadStopTimes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         """
         INSERT INTO stop_times
@@ -292,9 +329,9 @@ private fun loadStopTimes(db: SQLiteDatabase, reader: BufferedReader) {
         """
     )
     readCsvEntry(reader) { header, row ->
-        val tripId = header.get(row, "trip_id") ?: return@readCsvEntry
+        val tripId = prefixedId(idPrefix, header.get(row, "trip_id")) ?: return@readCsvEntry
         val stopSequence = header.get(row, "stop_sequence")?.toLongOrNull() ?: return@readCsvEntry
-        val stopId = header.get(row, "stop_id") ?: return@readCsvEntry
+        val stopId = prefixedId(idPrefix, header.get(row, "stop_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, tripId)
         stmt.bindLong(2, stopSequence)
@@ -309,8 +346,7 @@ private fun loadStopTimes(db: SQLiteDatabase, reader: BufferedReader) {
     }
 }
 
-private fun loadCalendar(db: SQLiteDatabase, reader: BufferedReader) {
-    db.delete("calendar", null, null)
+private fun loadCalendar(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         """
         INSERT INTO calendar
@@ -319,7 +355,7 @@ private fun loadCalendar(db: SQLiteDatabase, reader: BufferedReader) {
         """
     )
     readCsvEntry(reader) { header, row ->
-        val serviceId = header.get(row, "service_id") ?: return@readCsvEntry
+        val serviceId = prefixedId(idPrefix, header.get(row, "service_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, serviceId)
         stmt.bindLongOrNull(2, header.get(row, "monday"))
@@ -335,8 +371,7 @@ private fun loadCalendar(db: SQLiteDatabase, reader: BufferedReader) {
     }
 }
 
-private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader) {
-    db.delete("calendar_dates", null, null)
+private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         """
         INSERT INTO calendar_dates (service_id, date, exception_type)
@@ -344,7 +379,7 @@ private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader) {
         """
     )
     readCsvEntry(reader) { header, row ->
-        val serviceId = header.get(row, "service_id") ?: return@readCsvEntry
+        val serviceId = prefixedId(idPrefix, header.get(row, "service_id")) ?: return@readCsvEntry
         val date = header.get(row, "date") ?: return@readCsvEntry
         val exceptionType = header.get(row, "exception_type")?.toLongOrNull() ?: return@readCsvEntry
         stmt.clearBindings()

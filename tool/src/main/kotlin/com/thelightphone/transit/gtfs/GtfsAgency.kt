@@ -7,11 +7,8 @@ import java.io.File
  * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
  * URL here is the only change a screen-level caller ever needs to make.
  *
- * RIPTA's realtime service (realtime.ripta.com) is plain-HTTP-only with no HTTPS equivalent for
- * either feed, which Android blocks by default. Its URLs below are only reachable because of a
- * REMOVABLE cleartext exception — see the :netconfig module (netconfig/build.gradle.kts) for the
- * full explanation and exact removal steps. To restore HTTPS-only enforcement everywhere, remove
- * that module (per its own instructions) AND set RIPTA's two URLs below back to null.
+ * RIPTA's realtime service is plain-HTTP-only with no HTTPS equivalent, so it is intentionally
+ * disabled here. Static GTFS remains available until an HTTPS realtime endpoint is published.
  */
 enum class GtfsAgency(
     val id: String,
@@ -19,9 +16,11 @@ enum class GtfsAgency(
     val feedUrl: String,
     val realtimeTripUpdatesUrl: String?,
     val realtimeVehiclePositionsUrl: String?,
-    /** Optional extra data sources beyond the four feed URLs above -- see [AgencyComponent]. Empty
+    /** Optional extra data sources beyond the feed URLs above -- see [AgencyComponent]. Empty
      * for any agency that doesn't have one (e.g. RIPTA, today). */
     val components: List<AgencyComponent> = emptyList(),
+    /** Additional static feeds merged into this agency's database, with IDs namespaced per feed. */
+    val additionalStaticFeedUrls: List<String> = emptyList(),
 ) {
     MBTA(
         "mbta",
@@ -37,15 +36,16 @@ enum class GtfsAgency(
         "https://www.rtd-denver.com/files/gtfs/google_transit.zip",
         "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/TripUpdate.pb",
         "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/VehiclePosition.pb",
+        additionalStaticFeedUrls = listOf(
+            "https://www.rtd-denver.com/files/gtfs/bustang-co-us.zip",
+        ),
     ),
-    // REMOVABLE: these two URLs only work because of the :netconfig cleartext exception (see
-    // class doc above). Set both back to null to restore HTTPS-only enforcement for RIPTA.
     RIPTA(
         "ripta",
         "RIPTA",
         "https://ripta.com/RIPTA-GTFS.zip",
-        "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
-        "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
+        null,
+        null,
     ),
     ;
 

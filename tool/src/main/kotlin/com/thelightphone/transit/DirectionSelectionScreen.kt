@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -101,6 +102,14 @@ class DirectionSelectionScreen(
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
+
+        LaunchedEffect(state) {
+            if (state is DirectionSelectionState.Loaded && (state as DirectionSelectionState.Loaded).directions.isEmpty()) {
+                navigateTo(screenFactory = { activity ->
+                    FirstStopSelectionScreen(activity, dbFile, routeId, routeLabel, null, "Route")
+                })
+            }
+        }
 
         LightTheme(colors = themeColors) {
             Column(
