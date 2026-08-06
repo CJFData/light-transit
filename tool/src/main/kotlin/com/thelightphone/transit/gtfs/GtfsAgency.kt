@@ -7,8 +7,8 @@ import java.io.File
  * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
  * URL here is the only change a screen-level caller ever needs to make.
  *
- * RIPTA's realtime service is plain-HTTP-only with no HTTPS equivalent, so it is intentionally
- * disabled here. Static GTFS remains available until an HTTPS realtime endpoint is published.
+ * RIPTA's realtime service is plain-HTTP-only with no HTTPS equivalent. Its two URLs below are
+ * reachable through the narrowly scoped cleartext exception provided by the :netconfig module.
  */
 enum class GtfsAgency(
     val id: String,
@@ -44,8 +44,8 @@ enum class GtfsAgency(
         "ripta",
         "RIPTA",
         "https://ripta.com/RIPTA-GTFS.zip",
-        null,
-        null,
+        "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
+        "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
     ),
     ;
 
