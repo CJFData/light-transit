@@ -93,12 +93,20 @@ class GtfsIngestor(private val filesDir: File) {
         } finally {
             db.close()
         }
-        Files.move(
-            tempDbFile.toPath(),
-            dbFile.toPath(),
-            StandardCopyOption.REPLACE_EXISTING,
-            StandardCopyOption.ATOMIC_MOVE,
-        )
+        try {
+            Files.move(
+                tempDbFile.toPath(),
+                dbFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (e: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(
+                tempDbFile.toPath(),
+                dbFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
 
         remoteMeta?.let { metas -> writeFeedMeta(metaFile, feedUrls, metas) }
         onStatus(GtfsIngestStatus.Ready)
