@@ -10,6 +10,7 @@ import io.ktor.client.request.head
 import io.ktor.http.HttpHeaders
 import java.io.BufferedReader
 import java.io.File
+import java.net.URI
 import java.util.zip.ZipInputStream
 
 enum class GtfsIngestStatus {
@@ -100,11 +101,7 @@ class GtfsIngestor(private val filesDir: File) {
                     }
                     status in 300..399 -> {
                         val location = response.headers[HttpHeaders.Location] ?: return null
-                        currentUrl = if (location.startsWith("http://")) {
-                            "https://" + location.removePrefix("http://")
-                        } else {
-                            location
-                        }
+                        currentUrl = secureRedirectUrl(currentUrl, location)
                     }
                     else -> return null
                 }
@@ -151,11 +148,7 @@ class GtfsIngestor(private val filesDir: File) {
                     status in 300..399 -> {
                         val location = response.headers[HttpHeaders.Location]
                             ?: throw GtfsIngestException("GTFS download redirected without a Location header")
-                        currentUrl = if (location.startsWith("http://")) {
-                            "https://" + location.removePrefix("http://")
-                        } else {
-                            location
-                        }
+                        currentUrl = secureRedirectUrl(currentUrl, location)
                     }
                     else -> throw GtfsIngestException("GTFS download failed: HTTP $status")
                 }
@@ -196,6 +189,16 @@ class GtfsIngestor(private val filesDir: File) {
             "calendar.txt" to ::loadCalendar,
             "calendar_dates.txt" to ::loadCalendarDates,
         )
+    }
+}
+
+/** Resolves absolute and relative redirects while never following a redirect back to plain HTTP. */
+private fun secureRedirectUrl(currentUrl: String, location: String): String {
+    val resolved = URI(currentUrl).resolve(location).toString()
+    return if (resolved.startsWith("http://")) {
+        "https://" + resolved.removePrefix("http://")
+    } else {
+        resolved
     }
 }
 
