@@ -1,97 +1,39 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    `maven-publish`
 }
-
-// for publishing
-val uiVersion = providers.gradleProperty("projectVersion").get()
 
 android {
     namespace = "com.thelightphone.lp3Keyboard.ui"
-    compileSdk = 34
+    compileSdk = rootProject.ext["compileSdk"] as Int
 
     defaultConfig {
-        minSdk = 33
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        minSdk = rootProject.ext["minSdk"] as Int
         consumerProguardFiles("consumer-rules.pro")
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-    }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    kotlinOptions {
-        jvmTarget = "11"
+        sourceCompatibility = JavaVersion.toVersion(rootProject.ext["jvmTarget"] as String)
+        targetCompatibility = JavaVersion.toVersion(rootProject.ext["jvmTarget"] as String)
     }
 }
 
-android.publishing {
-    singleVariant("release") {
-        withSourcesJar()
-    }
-}
-
-val localProperties = Properties().apply {
-    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
-}
-
-publishing {
-    // TODO signing config
-    publications {
-        register<MavenPublication>("release") {
-            groupId = "com.thelightphone.lp3keyboard"
-            artifactId = "ui"
-            version = uiVersion
-
-            afterEvaluate {
-                from(components["release"])
-            }
-        }
-    }
-    repositories {
-        maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/lightphone/light-keyboard")
-            credentials {
-                username = localProperties.getProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
-                password = localProperties.getProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
-            }
-        }
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(rootProject.ext["jvmTarget"] as String))
     }
 }
 
 dependencies {
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.compose.foundation)
-    api(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.material)
-    implementation(libs.androidx.compose.ui.tooling)
-    implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.lifecycle.viewmodel)
-    testImplementation(libs.junit)
-    testImplementation(libs.mockk)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-}
-
-// Suppress Gradle module metadata so consumers use the POM exclusively.
-tasks.withType<GenerateModuleMetadata> {
-    enabled = false
+    implementation(platform(libs.compose.bom))
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.11.0")
+    implementation(libs.compose.foundation)
+    api(libs.compose.ui)
+    implementation(libs.compose.material)
+    implementation(libs.compose.ui.tooling)
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel:2.8.7")
 }

@@ -43,7 +43,7 @@ afterEvaluate {
 }
 
 dependencies {
-    api(libs.light.keyboard)
+    api(project(":light-keyboard-ui"))
     implementation(libs.androidx.lifecycle.viewmodel)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
