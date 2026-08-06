@@ -4,19 +4,25 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3KeyboardViewModel
 import com.thelightphone.transit.gtfs.GeocodeResult
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
@@ -32,13 +38,13 @@ import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
-import com.thelightphone.sdk.ui.LightTextInputEditor
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
+import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -154,16 +160,60 @@ class NearbyStopsScreen(
         when (val m = mode) {
             is NearbyStopsMode.LocationInput -> {
                 val textFieldState = rememberTextFieldState(m.prefillText)
+                // Submit-triggered, not live-filtered like Stations search -- this hits Nominatim's
+                // free geocoding API (see this app's own "be kind to their free APIs" note), so it
+                // should never fire on every keystroke, only when the rider actually asks to search.
+                val keyboardCallback = remember(textFieldState) {
+                    InlineTextFieldKeyboardCallback(state = textFieldState, onReturn = { viewModel.search(textFieldState.text) })
+                }
+                val keyboardViewModel: Lp3KeyboardViewModel<*> = rememberInlineLp3KeyboardViewModel(
+                    key = "NearbyStopsSearchKeyboard",
+                    callback = keyboardCallback,
+                    keyboardOptionsFlow = keyboardOptionsFlow,
+                )
                 LightTheme(colors = themeColors) {
-                    LightTextInputEditor(
-                        title = "Search Location",
-                        state = textFieldState,
-                        onSubmit = { viewModel.search(it) },
-                        onBack = { goBack() },
-                        keyboardOptionsFlow = keyboardOptionsFlow,
-                        submitIcon = LightIcons.SEARCH,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(LightThemeTokens.colors.background)
+                    ) {
+                        LightTopBar(
+                            leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                            center = LightTopBarCenter.Text("Search Location"),
+                        )
+                        Column(modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp)) {
+                            BasicText(
+                                text = textFieldState.text.toString(),
+                                style = LightThemeTokens.typography.copy.copy(color = LightThemeTokens.colors.content),
+                                maxLines = 1,
+                                overflow = TextOverflow.StartEllipsis,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(LightThemeTokens.colors.content),
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .lightClickable { viewModel.search(textFieldState.text) }
+                                .padding(horizontal = 32.dp),
+                        ) {
+                            LightIcon(
+                                icon = LightIcons.SEARCH,
+                                size = 1.2f,
+                                contentDescription = "Search",
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                            LightText(text = "Search", variant = LightTextVariant.Copy, lighten = true)
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        LightEmbeddedLp3Keyboard(viewModel = keyboardViewModel)
+                    }
                 }
             }
 

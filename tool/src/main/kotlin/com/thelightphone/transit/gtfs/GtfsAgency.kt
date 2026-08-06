@@ -31,13 +31,6 @@ enum class GtfsAgency(
         "https://cdn.mbta.com/realtime/VehiclePositions.pb",
         components = listOf(MbtaV3VehicleSource),
     ),
-    RTD(
-        "rtd",
-        "RTD Denver",
-        "https://www.rtd-denver.com/files/gtfs/google_transit.zip",
-        "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/TripUpdate.pb",
-        "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/VehiclePosition.pb",
-    ),
     // REMOVABLE: these two URLs only work because of the :netconfig cleartext exception (see
     // class doc above). Set both back to null to restore HTTPS-only enforcement for RIPTA.
     RIPTA(

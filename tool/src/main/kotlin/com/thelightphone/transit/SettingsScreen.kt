@@ -18,6 +18,7 @@ import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.MapPreferences
+import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -42,6 +43,7 @@ class SettingsViewModel(
     private val mapPreferences: MapPreferences,
     private val boardedTripPreferences: BoardedTripPreferences,
     private val homeScreenPreferences: HomeScreenPreferences,
+    private val tapHoldPreferences: TapHoldPreferences,
 ) : LightViewModel<Unit>() {
 
     val defaultAgency: StateFlow<GtfsAgency?>
@@ -55,6 +57,18 @@ class SettingsViewModel(
     val tapHoldArrivalsEnabled: StateFlow<Boolean>
         get() = _tapHoldArrivalsEnabled
     private val _tapHoldArrivalsEnabled = MutableStateFlow(false)
+
+    val tapHoldScheduleArrivalsEnabled: StateFlow<Boolean>
+        get() = _tapHoldScheduleArrivalsEnabled
+    private val _tapHoldScheduleArrivalsEnabled = MutableStateFlow(true)
+
+    val tapHoldStationArrivalsEnabled: StateFlow<Boolean>
+        get() = _tapHoldStationArrivalsEnabled
+    private val _tapHoldStationArrivalsEnabled = MutableStateFlow(true)
+
+    val tapHoldVehicleEnabled: StateFlow<Boolean>
+        get() = _tapHoldVehicleEnabled
+    private val _tapHoldVehicleEnabled = MutableStateFlow(true)
 
     val doubleTapStationEnabled: StateFlow<Boolean>
         get() = _doubleTapStationEnabled
@@ -92,6 +106,10 @@ class SettingsViewModel(
         get() = _dailyMessageVisible
     private val _dailyMessageVisible = MutableStateFlow(true)
 
+    val dailyMessageRandom: StateFlow<Boolean>
+        get() = _dailyMessageRandom
+    private val _dailyMessageRandom = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
             agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
@@ -101,6 +119,15 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             mapPreferences.tapHoldArrivalsEnabledFlow.collect { _tapHoldArrivalsEnabled.value = it }
+        }
+        viewModelScope.launch {
+            tapHoldPreferences.tapHoldScheduleArrivalsEnabledFlow.collect { _tapHoldScheduleArrivalsEnabled.value = it }
+        }
+        viewModelScope.launch {
+            tapHoldPreferences.tapHoldStationArrivalsEnabledFlow.collect { _tapHoldStationArrivalsEnabled.value = it }
+        }
+        viewModelScope.launch {
+            tapHoldPreferences.tapHoldVehicleEnabledFlow.collect { _tapHoldVehicleEnabled.value = it }
         }
         viewModelScope.launch {
             mapPreferences.doubleTapStationEnabledFlow.collect { _doubleTapStationEnabled.value = it }
@@ -129,6 +156,9 @@ class SettingsViewModel(
         viewModelScope.launch {
             homeScreenPreferences.dailyMessageVisibleFlow.collect { _dailyMessageVisible.value = it }
         }
+        viewModelScope.launch {
+            homeScreenPreferences.dailyMessageRandomFlow.collect { _dailyMessageRandom.value = it }
+        }
     }
 
     /** Tapping the already-selected default clears it back to "no default", so there's a way to
@@ -145,6 +175,18 @@ class SettingsViewModel(
 
     fun setTapHoldArrivalsEnabled(enabled: Boolean) {
         viewModelScope.launch { mapPreferences.setTapHoldArrivalsEnabled(enabled) }
+    }
+
+    fun setTapHoldScheduleArrivalsEnabled(enabled: Boolean) {
+        viewModelScope.launch { tapHoldPreferences.setTapHoldScheduleArrivalsEnabled(enabled) }
+    }
+
+    fun setTapHoldStationArrivalsEnabled(enabled: Boolean) {
+        viewModelScope.launch { tapHoldPreferences.setTapHoldStationArrivalsEnabled(enabled) }
+    }
+
+    fun setTapHoldVehicleEnabled(enabled: Boolean) {
+        viewModelScope.launch { tapHoldPreferences.setTapHoldVehicleEnabled(enabled) }
     }
 
     fun setDoubleTapStationEnabled(enabled: Boolean) {
@@ -182,6 +224,10 @@ class SettingsViewModel(
     fun setDailyMessageVisible(visible: Boolean) {
         viewModelScope.launch { homeScreenPreferences.setDailyMessageVisible(visible) }
     }
+
+    fun setDailyMessageRandom(random: Boolean) {
+        viewModelScope.launch { homeScreenPreferences.setDailyMessageRandom(random) }
+    }
 }
 
 class SettingsScreen(
@@ -196,6 +242,7 @@ class SettingsScreen(
         MapPreferences(lightContext.dataStore),
         BoardedTripPreferences(lightContext.dataStore),
         HomeScreenPreferences(lightContext.dataStore),
+        TapHoldPreferences(lightContext.dataStore),
     )
 
     /** Every on/off setting on this screen renders as one tappable row using the SDK's own
@@ -225,6 +272,9 @@ class SettingsScreen(
         val defaultAgency by viewModel.defaultAgency.collectAsState()
         val darkMapEnabled by viewModel.darkMapEnabled.collectAsState()
         val tapHoldArrivalsEnabled by viewModel.tapHoldArrivalsEnabled.collectAsState()
+        val tapHoldScheduleArrivalsEnabled by viewModel.tapHoldScheduleArrivalsEnabled.collectAsState()
+        val tapHoldStationArrivalsEnabled by viewModel.tapHoldStationArrivalsEnabled.collectAsState()
+        val tapHoldVehicleEnabled by viewModel.tapHoldVehicleEnabled.collectAsState()
         val doubleTapStationEnabled by viewModel.doubleTapStationEnabled.collectAsState()
         val trackTappedStopsEnabled by viewModel.trackTappedStopsEnabled.collectAsState()
         val seeEverythingEnabled by viewModel.seeEverythingEnabled.collectAsState()
@@ -234,6 +284,7 @@ class SettingsScreen(
         val seeEverythingShowCommuterRail by viewModel.seeEverythingShowCommuterRail.collectAsState()
         val progressBarVisible by viewModel.progressBarVisible.collectAsState()
         val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
+        val dailyMessageRandom by viewModel.dailyMessageRandom.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -322,12 +373,58 @@ class SettingsScreen(
                 LightText(
                     text = "When on, tap and hold any stop on the Map screen to jump straight to its upcoming " +
                         "arrivals. Also applies to a station's own name while viewing its Station map -- tap " +
-                        "and hold it to jump to the main map centered on that station.",
+                        "and hold it for the whole station's own upcoming arrivals.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
                 ToggleRow("Tap and hold a stop", tapHoldArrivalsEnabled, viewModel::setTapHoldArrivalsEnabled)
+
+                LightText(
+                    text = "Tap and hold -- Schedules",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, tap and hold a stop while choosing where to board (after picking " +
+                        "a route and direction) to jump to its actual live upcoming arrivals. A plain " +
+                        "tap still shows that route's scheduled times either way.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Tap and hold -- Schedules", tapHoldScheduleArrivalsEnabled, viewModel::setTapHoldScheduleArrivalsEnabled)
+
+                LightText(
+                    text = "Tap and hold -- Stations",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, tap and hold a station in the Stations list to jump straight to " +
+                        "its live upcoming arrivals. A plain tap still opens its platform map either way.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Tap and hold -- Stations", tapHoldStationArrivalsEnabled, viewModel::setTapHoldStationArrivalsEnabled)
+
+                LightText(
+                    text = "Tap and hold -- Vehicles",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, tap and hold a live vehicle on the Map screen or a Station map to " +
+                        "open that vehicle's own Trip Detail.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Tap and hold -- Vehicles", tapHoldVehicleEnabled, viewModel::setTapHoldVehicleEnabled)
 
                 LightText(
                     text = "Double-tap to open a station",
@@ -337,7 +434,9 @@ class SettingsScreen(
                 )
                 LightText(
                     text = "When on, double-tap a multi-platform station on the Map screen to open a " +
-                        "zoomed-in view of just its platforms.",
+                        "zoomed-in view of just its platforms -- and, symmetrically, double-tap a " +
+                        "station's own name while viewing its Station map to zoom back out to the " +
+                        "main map, centered on that station.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -437,6 +536,23 @@ class SettingsScreen(
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
                 ToggleRow("Daily message", dailyMessageVisible, viewModel::setDailyMessageVisible)
+
+                if (dailyMessageVisible) {
+                    LightText(
+                        text = "Randomize daily message",
+                        variant = LightTextVariant.Copy,
+                        lighten = true,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                    )
+                    LightText(
+                        text = "When on, the message is picked at random every time you return to " +
+                            "the home screen, instead of once per calendar day.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 16.dp),
+                    )
+                    ToggleRow("Randomize daily message", dailyMessageRandom, viewModel::setDailyMessageRandom)
+                }
                 }
                 BackToHomeFooter(onGoBackOnce = { goBack() })
             }

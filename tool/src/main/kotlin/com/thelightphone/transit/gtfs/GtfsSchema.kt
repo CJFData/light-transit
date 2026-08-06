@@ -92,6 +92,23 @@ private object GtfsSchema {
         ) WITHOUT ROWID
         """,
         "CREATE INDEX IF NOT EXISTS idx_calendar_dates_service_id ON calendar_dates(service_id)",
+        // feed_info.txt is optional per the GTFS spec, so agency.txt (required) is kept as a
+        // fallback attribution source -- see GtfsRepository.getFeedAttribution. Neither table has
+        // a natural single-row key (feed_info.txt has none at all; a feed can list several
+        // agency.txt rows), so both are just re-populated wholesale on each ingest, same as every
+        // other table here, and read back as "whichever row comes first".
+        """
+        CREATE TABLE IF NOT EXISTS feed_info (
+            feed_publisher_name TEXT,
+            feed_publisher_url TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS agency (
+            agency_name TEXT,
+            agency_url TEXT
+        )
+        """,
     )
 }
 

@@ -43,6 +43,7 @@ import com.thelightphone.transit.gtfs.GtfsRtFeedMessage
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.MapPreferences
+import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.transit.gtfs.MapTiles
 import com.thelightphone.transit.gtfs.NominatimGeocoder
 import com.thelightphone.transit.gtfs.MapTileClient
@@ -87,16 +88,19 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlin.math.sqrt
 
-//Defines the polling interval to be every 10 seconds. evenb if an agency doesn't refresh this often,
-// you're bound to get a refresh within 20 seconds...
+// Tunable. Faster than agencies typically refresh their own feed (~15-20s), so some polls just
+// re-fetch the same data -- a deliberate trade of a few extra requests for lower latency once a
+// feed does update, not a continuous/unbounded poll.
 private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
-//This variable should read "Vehicles" rather than buses, I limited it to 4  per tapped stop to avoid crowding.
-// If this isn't enough for someone, they can just flip on see everything mode (AKA GOD MODE ((insert helmo here)) )
+// Per active stop, not a shared total -- turning on "Nearby Vehicles" and selecting more stops
+// should show more buses, not compete with the primary stop for the same fixed slots.
 private const val MAX_DISPLAYED_BUSES_PER_STOP = 4
 // A vehicle reporting STOPPED_AT (e.g. dwelling at a layover/terminal) with a predicted arrival
-// farther out than this is excluded entirely rather than left to the sort+cap above Doesn't apply
-// to a vehicle that's actually stopped AT the selected stop stop itself (see isArrived in refresh())
-// or to any vehicle still moving (IN_TRANSIT_TO/INCOMING_AT), however far away.
+// farther out than this is excluded entirely rather than left to the sort+cap above -- otherwise a
+// stop with a thin real candidate pool ends up padding its display with static, not-actually-
+// arriving-soon vehicles just because a slot was open. Doesn't apply to a vehicle that's actually
+// stopped AT the target stop itself (see isArrived in refresh()) or to any vehicle still moving
+// (IN_TRANSIT_TO/INCOMING_AT), however far away -- those are still meaningful to show.
 private const val DWELLING_FAR_ETA_THRESHOLD_SECONDS = 15 * 60L
 // Widens the SQL prefilter behind scheduledArrivalsByStopId backward by this much (see
 // GtfsRepository.getScheduledArrivals's graceSeconds param) -- without it, a trip whose scheduled
@@ -315,6 +319,8 @@ sealed class MapState {
         val centerStation: StopLocation?,
         /** Settings screen toggle (off by default) -- see MapPreferences.seeEverythingEnabledFlow. */
         val seeEverythingEnabled: Boolean,
+        /** Settings screen toggle (on by default) -- see TapHoldPreferences.tapHoldVehicleEnabledFlow. */
+        val tapHoldVehicleEnabled: Boolean,
     ) : MapState()
     data class Error(val message: String) : MapState()
 }
@@ -336,6 +342,7 @@ private data class LoadedMapContext(
     val seeEverythingShowBus: Boolean,
     val seeEverythingShowSubway: Boolean,
     val seeEverythingShowCommuterRail: Boolean,
+    val tapHoldVehicleEnabled: Boolean,
 )
 
 class MapViewModel(
@@ -343,6 +350,7 @@ class MapViewModel(
     private val agency: GtfsAgency,
     private val stopId: String,
     private val mapPreferences: MapPreferences,
+    private val tapHoldPreferences: TapHoldPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -401,6 +409,7 @@ class MapViewModel(
                 val seeEverythingShowBus = mapPreferences.seeEverythingShowBusFlow.first()
                 val seeEverythingShowSubway = mapPreferences.seeEverythingShowSubwayFlow.first()
                 val seeEverythingShowCommuterRail = mapPreferences.seeEverythingShowCommuterRailFlow.first()
+                val tapHoldVehicleEnabled = tapHoldPreferences.tapHoldVehicleEnabledFlow.first()
                 // Reuses the exact same station-detection query every other screen does (search
                 // results, trip detail) -- non-null only if the selected stop is itself a real,
                 // qualifying multi-platform station.
@@ -470,6 +479,7 @@ class MapViewModel(
                     tapHoldArrivalsEnabled, darkMode, doubleTapStationEnabled, centerStation,
                     seeEverythingEnabled, filterByStopEnabled,
                     seeEverythingShowBus, seeEverythingShowSubway, seeEverythingShowCommuterRail,
+                    tapHoldVehicleEnabled,
                 )
 
                 while (isActive) {
@@ -541,7 +551,7 @@ class MapViewModel(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.NOT_SUPPORTED,
                 context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
-                context.seeEverythingEnabled,
+                context.seeEverythingEnabled, context.tapHoldVehicleEnabled,
             )
             return
         }
@@ -557,7 +567,7 @@ class MapViewModel(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.UNAVAILABLE,
                 context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
-                context.seeEverythingEnabled,
+                context.seeEverythingEnabled, context.tapHoldVehicleEnabled,
             )
             return
         }
@@ -782,7 +792,7 @@ class MapViewModel(
             context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
             displayedBuses, context.nearbyStops, LiveFeedStatus.OK,
             context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
-            context.seeEverythingEnabled,
+            context.seeEverythingEnabled, context.tapHoldVehicleEnabled,
         )
     }
 
@@ -924,7 +934,7 @@ class MapScreen(
         get() = MapViewModel::class.java
 
     override fun createViewModel(): MapViewModel =
-        MapViewModel(dbFile, agency, stopId, MapPreferences(lightContext.dataStore))
+        MapViewModel(dbFile, agency, stopId, MapPreferences(lightContext.dataStore), TapHoldPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
@@ -1019,6 +1029,16 @@ class MapScreen(
                             seeEverythingEnabled = s.seeEverythingEnabled,
                             expandedVehicleTripIds = expandedVehicleTripIds,
                             onToggleVehicle = viewModel::toggleVehicleExpanded,
+                            tapHoldVehicleEnabled = s.tapHoldVehicleEnabled,
+                            // fromStopSequence 0 -- a vehicle tapped on the map has no specific
+                            // "anchor stop" the way an arrival row does, so this just opens the trip
+                            // from its very start, same as any other "open this trip fresh" entry
+                            // point with nothing more specific to anchor to.
+                            onVehicleLongPressed = { bus ->
+                                navigateTo(screenFactory = { activity ->
+                                    TripDetailScreen(activity, dbFile, bus.tripId, 0, bus.routeLabel, bus.directionLabel)
+                                })
+                            },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -1117,6 +1137,11 @@ internal fun MapCanvas(
      * Arrivals for the WHOLE station (all platforms), distinct from long-pressing a single platform
      * pin (see [onStopLongPressed]). */
     onScrimTitleLongPressed: (() -> Unit)? = null,
+    /** Fires on a double-tap of [scrimTitle] when [doubleTapStationEnabled] is on -- the Map-Station
+     * mode side of the same "Double-tap to open a station" gesture that zooms IN from a station
+     * marker on the main Map screen (see [onOpenStation]): this is the zoom OUT back to the main
+     * map, symmetric with it. */
+    onScrimTitleDoubleTapped: (() -> Unit)? = null,
     /** Settings screen's "See Everything" toggle -- see MapPreferences.seeEverythingEnabledFlow.
      * Only changes how [buses] are LABELED here (short by default, full on tap) -- which vehicles
      * are even in [buses] to begin with is entirely the caller's own decision (see MapViewModel's
@@ -1126,13 +1151,28 @@ internal fun MapCanvas(
     /** Fires on a plain tap of a vehicle marker while [seeEverythingEnabled] is on -- toggles that
      * vehicle between [BusMarker.shortLabel] and its full details label. No-op otherwise. */
     onToggleVehicle: (String) -> Unit = {},
+    /** Settings screen's "Tap and hold -- Vehicles" toggle (on by default) -- see
+     * TapHoldPreferences.tapHoldVehicleEnabledFlow. Gates [onVehicleLongPressed], independent of
+     * [seeEverythingEnabled] -- a vehicle marker is tap-and-hold-able either way. */
+    tapHoldVehicleEnabled: Boolean = true,
+    /** Fires on a long press of a vehicle marker (regardless of [seeEverythingEnabled]) when
+     * [tapHoldVehicleEnabled] is on -- the caller opens that vehicle's own Trip Detail. */
+    onVehicleLongPressed: (BusMarker) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Loaded once per icon+size+tint (remember only works at composition time, not inside the
     // Canvas draw-phase lambda below), then just referenced as a plain Bitmap during drawing.
     val iconTint = if (darkMapEnabled) Color.White else Color.Black
     val centerMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_ARRIVAL, CENTER_MARKER_ICON_PX, iconTint)
+    // Matches the DIRECTIONS_MIDDLE_FORK glyph every other screen already uses to mark a
+    // multi-platform station (NearbyStopsScreen, StopConnectionsScreen, UpcomingArrivalsScreen,
+    // StationListScreen, HomeScreen, TripDetailScreen) -- the Map screen's own pins never had this
+    // distinction before, so a station's center/nearby marker looked identical to a plain stop's.
+    // A roughly symmetric glyph (no pin "point" the way DIRECTIONS_ARRIVAL has), so it's anchored by
+    // bounding-box center like the vehicle icons below, not by PIN_TIP_FRACTION_X/Y.
+    val centerStationMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_MIDDLE_FORK, CENTER_MARKER_ICON_PX, iconTint)
     val nearbyMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_ARRIVAL, NEARBY_MARKER_ICON_PX, iconTint)
+    val nearbyStationMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_MIDDLE_FORK, NEARBY_MARKER_ICON_PX, iconTint)
     val busIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_BUS, VEHICLE_MARKER_ICON_PX, iconTint)
     val subwayIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_SUBWAY, VEHICLE_MARKER_ICON_PX, iconTint)
     val trainIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_TRAIN, VEHICLE_MARKER_ICON_PX, iconTint)
@@ -1143,7 +1183,7 @@ internal fun MapCanvas(
             .pointerInput(
                 nearbyStops, centerLat, centerLon, zoom, tapHoldArrivalsEnabled,
                 doubleTapStationEnabled, centerIsStation, showCenterPin, scrimTitle,
-                buses, seeEverythingEnabled,
+                buses, seeEverythingEnabled, tapHoldVehicleEnabled,
             ) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -1169,12 +1209,14 @@ internal fun MapCanvas(
                     // it for the whole station's arrivals (see onScrimTitleLongPressed).
                     val hitScrimTitle = scrimTitle != null && down.position.y < scrimHeightPx
 
-                    // "See Everything" mode's vehicle markers -- a plain tap toggles between the
-                    // compact route-only label and the full details label (see
-                    // BusMarker.shortLabel/drawBusMarker). Position mirrors the draw loop's own
-                    // isArrived-snap logic exactly (see BusMarker.targetStopId's own doc) so a tap
-                    // lands on the marker exactly where it's actually drawn.
-                    val hitBus = if (seeEverythingEnabled) {
+                    // Vehicle markers -- always hit-testable now (not just in "See Everything"),
+                    // since tap-and-hold-to-open-trip (see onVehicleLongPressed) works regardless of
+                    // that mode; a plain tap toggling the short/long label still only means anything
+                    // in "See Everything" itself (see BusMarker.shortLabel/drawBusMarker). Position
+                    // mirrors the draw loop's own isArrived-snap logic exactly (see
+                    // BusMarker.targetStopId's own doc) so a tap lands on the marker exactly where
+                    // it's actually drawn.
+                    val hitBus = run {
                         val primaryStopIdsForHitTest = if (centerIsStation) centerStationMemberIds else listOf(stopId)
                         val stopCoordsForHitTest = buildMap {
                             primaryStopIdsForHitTest.forEach { put(it, centerLat to centerLon) }
@@ -1192,8 +1234,6 @@ internal fun MapCanvas(
                             val dy = down.position.y - point.y
                             sqrt(dx * dx + dy * dy) < STOP_HIT_RADIUS_PX
                         }
-                    } else {
-                        null
                     }
 
                     if (hitStop == null && !hitCenter && !hitScrimTitle && hitBus == null) {
@@ -1216,32 +1256,56 @@ internal fun MapCanvas(
                     }
                     val tappedStationLabel = hitStop?.takeIf { it.isStation }?.stopName ?: stopLabel
 
-                    // Tap-and-hold on a stop marker (the center stop or any nearby one) jumps to its
-                    // upcoming arrivals -- opt-in via Settings ("Tap and hold a stop"), since it's an
-                    // extra gesture layered on top of the tap-to-toggle behavior below. Fires as soon
-                    // as the hold threshold is reached rather than waiting for release, matching how
-                    // a long press reads everywhere else on Android. The same toggle also gates
-                    // tap-hold on the Map-Station scrim title.
-                    if (tapHoldArrivalsEnabled && (hitStop != null || hitCenter || hitScrimTitle)) {
+                    // What double-tap does here -- opening a station's own sub-map from a station
+                    // marker on the main Map screen (zoom IN), or, symmetrically, jumping back to the
+                    // main map from the scrim title in Map-Station mode itself (zoom OUT). Both
+                    // directions of the same "Double-tap to open a station" gesture, gated by the
+                    // same Settings toggle either way -- see doubleTapStationEnabled below.
+                    val onDoubleTapAction: (() -> Unit)? = when {
+                        hitScrimTitle -> onScrimTitleDoubleTapped
+                        tappedStationMemberIds != null -> {
+                            { onOpenStation(tappedStationMemberIds, tappedStationLabel) }
+                        }
+                        else -> null
+                    }
+
+                    // Tap-and-hold on a stop marker (the center stop or any nearby one), the
+                    // Map-Station scrim title, or a vehicle marker, jumps to arrivals/Trip Detail --
+                    // opt-in via Settings ("Tap and hold a stop" for the first two, "Tap and hold --
+                    // Vehicles" for the last), since each is an extra gesture layered on top of the
+                    // tap-to-toggle behavior below. Fires as soon as the hold threshold is reached
+                    // rather than waiting for release, matching how a long press reads everywhere
+                    // else on Android. When more than one of these overlaps the same touch (e.g. a
+                    // vehicle arrived right at a station), only one action fires -- station pins win
+                    // first (they're the harder target to find/tap again), then vehicles, then an
+                    // ordinary stop, each still gated by its own Settings toggle.
+                    val stopTapHoldActive = tapHoldArrivalsEnabled && (hitStop != null || hitCenter || hitScrimTitle)
+                    val vehicleTapHoldActive = tapHoldVehicleEnabled && hitBus != null
+                    if (stopTapHoldActive || vehicleTapHoldActive) {
                         val shortTapUp = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
                         if (shortTapUp == null) {
                             when {
                                 hitScrimTitle -> onScrimTitleLongPressed?.invoke()
-                                hitStop != null -> onStopLongPressed(hitStop.stopId, hitStop.stopName ?: "Stop ${hitStop.stopId}")
-                                else -> onStopLongPressed(stopId, stopLabel)
+                                tapHoldArrivalsEnabled && hitStop != null && hitStop.isStation ->
+                                    onStopLongPressed(hitStop.stopId, hitStop.stopName ?: "Stop ${hitStop.stopId}")
+                                tapHoldArrivalsEnabled && hitCenter && centerIsStation -> onStopLongPressed(stopId, stopLabel)
+                                tapHoldVehicleEnabled && hitBus != null -> onVehicleLongPressed(hitBus)
+                                tapHoldArrivalsEnabled && hitStop != null -> onStopLongPressed(hitStop.stopId, hitStop.stopName ?: "Stop ${hitStop.stopId}")
+                                tapHoldArrivalsEnabled && hitCenter -> onStopLongPressed(stopId, stopLabel)
                             }
                         } else {
                             shortTapUp.consume()
-                            if (doubleTapStationEnabled && tappedStationMemberIds != null) {
+                            if (doubleTapStationEnabled && onDoubleTapAction != null) {
                                 val secondDown = awaitSecondTapDown(shortTapUp)
                                 if (secondDown != null) {
                                     secondDown.consume()
                                     waitForUpOrCancellation()?.consume()
-                                    onOpenStation(tappedStationMemberIds, tappedStationLabel)
+                                    onDoubleTapAction()
                                     return@awaitEachGesture
                                 }
                             }
                             hitStop?.let { onToggleStop(it.stopId) }
+                            if (seeEverythingEnabled) hitBus?.let { onToggleVehicle(it.tripId) }
                         }
                         return@awaitEachGesture
                     }
@@ -1249,17 +1313,17 @@ internal fun MapCanvas(
                     val up = waitForUpOrCancellation()
                     if (up != null) {
                         up.consume()
-                        if (doubleTapStationEnabled && tappedStationMemberIds != null) {
+                        if (doubleTapStationEnabled && onDoubleTapAction != null) {
                             val secondDown = awaitSecondTapDown(up)
                             if (secondDown != null) {
                                 secondDown.consume()
                                 waitForUpOrCancellation()?.consume()
-                                onOpenStation(tappedStationMemberIds, tappedStationLabel)
+                                onDoubleTapAction()
                                 return@awaitEachGesture
                             }
                         }
                         hitStop?.let { onToggleStop(it.stopId) }
-                        hitBus?.let { onToggleVehicle(it.tripId) }
+                        if (seeEverythingEnabled) hitBus?.let { onToggleVehicle(it.tripId) }
                     }
                 }
             }
@@ -1375,13 +1439,17 @@ internal fun MapCanvas(
         // (and, when the Settings screen's "Track Tapped Stops" toggle is on, also toggles whether
         // it contributes vehicles). Markers themselves are never grouped/clustered -- only the
         // expanded labels below get basic collision handling, since those are the only thing that
-        // can visually stack.
+        // can visually stack. Station markers are the one exception -- they're deferred to draw
+        // AFTER vehicle markers instead (see below the buses.forEach loop), since an arrived vehicle
+        // snapping onto a station's own coordinate would otherwise bury the one marker riders
+        // actually need to find and tap (reported live at MBTA South Station with several Silver
+        // Line buses arrived there at once).
         val stopPoints = nearbyStops.map { stop ->
             val rel = projectRelativeToCenter(centerLat, centerLon, stop.lat, stop.lon, zoom)
             val point = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
             stop to point
         }
-        stopPoints.forEach { (_, point) ->
+        stopPoints.filter { (stop, _) -> !stop.isStation }.forEach { (_, point) ->
             nativeCanvas.drawBitmap(
                 nearbyMarkerBitmap,
                 point.x - NEARBY_MARKER_ICON_PX * PIN_TIP_FRACTION_X,
@@ -1393,8 +1461,12 @@ internal fun MapCanvas(
         // Anchored to the right of the marker's own base (its bottom edge, where the pin visually
         // touches the map) rather than centered underneath it, so the label text never overlaps the
         // icon itself -- flips to the marker's left instead when the label would otherwise clip off
-        // the canvas's right edge (see resolveLabelSide).
-        val nearbyMarkerBottomEdgeOffset = NEARBY_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
+        // the canvas's right edge (see resolveLabelSide). A station's own marker (see
+        // nearbyStationMarkerBitmap below) is a roughly symmetric glyph anchored by bounding-box
+        // center rather than a pointed pin, so its own bottom edge is just half its size below its
+        // coordinate instead of PIN_TIP_FRACTION_Y's offset.
+        fun nearbyMarkerBottomEdgeOffset(stop: NearbyStopMarker): Float =
+            if (stop.isStation) NEARBY_MARKER_ICON_PX / 2f else NEARBY_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
         val expandedLabels = stopPoints
             .filter { (stop, _) -> stop.stopId in expandedStopIds }
             .map { (stop, point) ->
@@ -1406,7 +1478,7 @@ internal fun MapCanvas(
                     text = text,
                     anchorX = side.anchorX(point.x, NEARBY_MARKER_ICON_PX.toFloat()),
                     align = side.paintAlign(),
-                    initialY = point.y + nearbyMarkerBottomEdgeOffset + LABEL_GAP_PX,
+                    initialY = point.y + nearbyMarkerBottomEdgeOffset(stop) + LABEL_GAP_PX,
                     width = width,
                 )
             }
@@ -1416,28 +1488,6 @@ internal fun MapCanvas(
             nearbyStopLabelPaint.textAlign = box.align
             nativeCanvas.drawText(box.text, box.anchorX, y, nearbyStopLabelOutlinePaint)
             nativeCanvas.drawText(box.text, box.anchorX, y, nearbyStopLabelPaint)
-        }
-
-        // Center stop pin, name, and street context — always pinned dead center. Skipped entirely in
-        // Map-Station mode (showCenterPin = false), where every platform renders as an equal
-        // nearby-style pin instead and the station's own name lives in the scrim (see scrimTitle).
-        if (showCenterPin) {
-            nativeCanvas.drawBitmap(
-                centerMarkerBitmap,
-                center.x - CENTER_MARKER_ICON_PX * PIN_TIP_FRACTION_X,
-                center.y - CENTER_MARKER_ICON_PX * PIN_TIP_FRACTION_Y,
-                null,
-            )
-            // Same 32px/60px gaps below the pin's own bottom edge as before this was tip-anchored
-            // (that edge used to just be CENTER_MARKER_ICON_PX/2 below center; now it's wherever the
-            // pin's actual bottom renders, per PIN_TIP_FRACTION_Y).
-            val centerMarkerBottomEdge = center.y + CENTER_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
-            nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelOutlinePaint)
-            nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelPaint)
-            streetContext?.let {
-                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelOutlinePaint)
-                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelPaint)
-            }
         }
 
         fun vehicleIconBitmapFor(bus: BusMarker): Bitmap = when (bus.vehicleIcon) {
@@ -1479,6 +1529,58 @@ internal fun MapCanvas(
                 nativeCanvas, vehicleIconBitmapFor(bus), vehicleLabelPaint, vehicleLabelOutlinePaint,
                 vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, clipped.x, clipped.y, size.width, showShortLabel,
             )
+        }
+
+        // Nearby STATION markers draw last, on top of every vehicle marker above (see the
+        // stopPoints filter earlier that skipped them in the background layer) -- guarantees a
+        // station's own distinguishing icon is never buried under a crowd of vehicles arrived at or
+        // near it. Bounding-box centered, matching DIRECTIONS_MIDDLE_FORK's own roughly symmetric
+        // shape (no pin "point" to anchor by), same convention as vehicle icons.
+        stopPoints.filter { (stop, _) -> stop.isStation }.forEach { (_, point) ->
+            nativeCanvas.drawBitmap(
+                nearbyStationMarkerBitmap,
+                point.x - NEARBY_MARKER_ICON_PX / 2f,
+                point.y - NEARBY_MARKER_ICON_PX / 2f,
+                null,
+            )
+        }
+
+        // Center stop pin, name, and street context — always pinned dead center, and (like a nearby
+        // station marker above) always drawn after every vehicle marker so an arrived bus snapped
+        // onto this exact coordinate never buries it. Skipped entirely in Map-Station mode
+        // (showCenterPin = false), where every platform renders as an equal nearby-style pin instead
+        // and the station's own name lives in the scrim (see scrimTitle). Uses the same
+        // DIRECTIONS_MIDDLE_FORK station glyph (bounding-box centered) as a nearby station marker
+        // when centerIsStation, matching every other screen's own station convention -- otherwise
+        // the ordinary pin-tip-anchored DIRECTIONS_ARRIVAL marker, unchanged from before.
+        if (showCenterPin) {
+            if (centerIsStation) {
+                nativeCanvas.drawBitmap(
+                    centerStationMarkerBitmap,
+                    center.x - CENTER_MARKER_ICON_PX / 2f,
+                    center.y - CENTER_MARKER_ICON_PX / 2f,
+                    null,
+                )
+            } else {
+                nativeCanvas.drawBitmap(
+                    centerMarkerBitmap,
+                    center.x - CENTER_MARKER_ICON_PX * PIN_TIP_FRACTION_X,
+                    center.y - CENTER_MARKER_ICON_PX * PIN_TIP_FRACTION_Y,
+                    null,
+                )
+            }
+            // Same 32px/60px gaps below the marker's own bottom edge as before this was tip-anchored
+            // (that edge used to just be CENTER_MARKER_ICON_PX/2 below center; now it's wherever the
+            // marker's actual bottom renders -- PIN_TIP_FRACTION_Y for a plain stop, half its size for
+            // a station's own symmetric glyph).
+            val centerMarkerBottomEdge = center.y +
+                if (centerIsStation) CENTER_MARKER_ICON_PX / 2f else CENTER_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
+            nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelOutlinePaint)
+            nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelPaint)
+            streetContext?.let {
+                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelOutlinePaint)
+                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelPaint)
+            }
         }
     }
 }

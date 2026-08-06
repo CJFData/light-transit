@@ -107,6 +107,11 @@ data class StopLocation(
     val isStation: Boolean,
 )
 
+/** The one line of required-by-convention attribution for wherever this agency's GTFS data came
+ * from -- see [GtfsRepository.getFeedAttribution]'s own doc for the fallback chain that produces
+ * this. [url] is informational only today (no screen renders it as a tappable link). */
+data class FeedAttribution(val name: String, val url: String?)
+
 data class ScheduledArrival(
     val tripId: String,
     /** The specific child platform stop_id this arrival was actually found at -- for a grouped
@@ -278,6 +283,25 @@ class GtfsRepository(dbFile: File) {
         }
 
     /**
+     * stop_lat/stop_lon for every stop on a trip from [fromStopSequence] onward, keyed by stop_id --
+     * paired with [getTripStops]'s own identically-scoped query to support GPS-proximity current-
+     * stop inference (see [matchCurrentStopByProximity]) for agencies whose VehiclePositions never
+     * populates current_stop_sequence at all (confirmed empirically for RIPTA).
+     */
+    fun getTripStopLocations(tripId: String, fromStopSequence: Int): Map<String, Pair<Double, Double>> =
+        db.rawQuery(
+            """
+            SELECT st.stop_id, s.stop_lat, s.stop_lon
+            FROM stop_times st
+            JOIN stops s ON s.stop_id = st.stop_id
+            WHERE st.trip_id = ? AND st.stop_sequence >= ?
+            """,
+            arrayOf(tripId, fromStopSequence.toString()),
+        ).use { cursor ->
+            cursor.mapRows { getString(0) to (getDouble(1) to getDouble(2)) }.toMap()
+        }
+
+    /**
      * The next scheduled departures across every id in [stopIds] after [afterTime], across every
      * route and direction serving those stops (not just the one [excludeTripId] belongs to) --
      * used to show connecting service from a stop selected on a trip's detail screen. When
@@ -406,6 +430,25 @@ class GtfsRepository(dbFile: File) {
      * every station up front rather than asking the rider to search a location first. */
     fun getAllStations(): List<StopLocation> =
         getStopsWithLocation().filter { it.isStation }.sortedBy { it.stopName ?: it.stopId }
+
+    /**
+     * Attribution for wherever this agency's GTFS feed says it actually came from -- prefers
+     * feed_info.txt's own `feed_publisher_name`/`_url` (the file GTFS agencies publish specifically
+     * to answer "who do we credit for this data"), falling back to agency.txt's first row (that
+     * file's required by the GTFS spec, unlike feed_info.txt, so every feed has at least this) if a
+     * feed omits feed_info.txt entirely. Null only if a feed has neither -- shouldn't happen for any
+     * agency this app supports today, but a screen showing this should treat null as "say nothing"
+     * rather than falling back to this app's own hardcoded [GtfsAgency.displayName], since that name
+     * is this app's label for the agency, not a claim about who published the underlying data.
+     */
+    fun getFeedAttribution(): FeedAttribution? {
+        db.rawQuery("SELECT feed_publisher_name, feed_publisher_url FROM feed_info LIMIT 1", null).use { cursor ->
+            cursor.mapRows { FeedAttribution(getString(0), getStringOrNull(1)) }.firstOrNull()?.let { return it }
+        }
+        return db.rawQuery("SELECT agency_name, agency_url FROM agency LIMIT 1", null).use { cursor ->
+            cursor.mapRows { FeedAttribution(getString(0), getStringOrNull(1)) }.firstOrNull()
+        }
+    }
 
     /** stop_desc for every given stop_id, keyed by stop_id -- used to derive each platform's own
      * label within a station (see [platformLabelFromStopDesc]) for screens that already have
@@ -792,6 +835,76 @@ fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Dou
         kotlin.math.sin(dLon / 2).let { it * it }
     val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
     return EARTH_RADIUS_METERS * c
+}
+
+/**
+ * [stopSequence] is which stop the vehicle currently occupies (see [matchCurrentStopByProximity]).
+ * [distanceMeters]/[distanceToNextStopMeters] are the same two haversine distances that search
+ * already computed to decide that -- exposed so a caller (see HomeScreen's own progress bar) can
+ * interpolate smoothly between this stop and the next by relative distance, rather than only ever
+ * snapping stop-to-stop. [distanceToNextStopMeters] is null when [stopSequence] is the last stop in
+ * the list the match was found against (nothing further to interpolate toward).
+ */
+data class StopProximityMatch(
+    val stopSequence: Int,
+    val distanceMeters: Double,
+    val distanceToNextStopMeters: Double?,
+)
+
+/**
+ * Infers which stop a vehicle currently occupies from its own raw GPS position, for agencies whose
+ * VehiclePositions feed never populates current_stop_sequence at all (confirmed empirically for
+ * RIPTA -- see [getTripStopLocations]'s own doc). [stops] must be sorted ascending by stop_sequence
+ * (as [GtfsRepository.getTripStops] already returns them); [lastMatchedStopSequence] is whatever
+ * [StopProximityMatch.stopSequence] this function itself returned on the previous poll (or null for
+ * the very first poll of a trip).
+ *
+ * Forward-only with hysteresis once an anchor exists: starting from the last matched stop, only
+ * ever advances to the NEXT stop in sequence, and only once the vehicle is measurably closer to it
+ * than to the one it's leaving -- "hold at the current stop until closer to the next one," never
+ * snapping backward or jumping ahead out of order. Repeatedly advances (not just by one) so a poll
+ * interval that missed several stops in a row still catches up in one call.
+ *
+ * [lastMatchedStopSequence] being null (the very first poll of a trip) is a special case: starting
+ * a forward-only walk at [stops]' own first entry assumes straight-line distance to the vehicle
+ * roughly decreases monotonically stop by stop from there, which fails outright on a long route
+ * where the vehicle is actually near the far end -- confirmed live (a RIPTA route 60 trip, vehicle
+ * genuinely at Kennedy Plaza near the end of a ~100-stop route, matched to Newport Transit Center,
+ * its very first stop, because nothing beyond that first stop ever measured closer than it while
+ * walking forward one at a time from a route that doesn't approach Kennedy Plaza monotonically).
+ * So cold start alone gets a one-time global nearest-of-all-stops search to establish a sane anchor;
+ * every later poll (a real [lastMatchedStopSequence]) uses the cheaper, flicker-resistant walk below.
+ */
+fun matchCurrentStopByProximity(
+    stops: List<TripStopRow>,
+    stopLocations: Map<String, Pair<Double, Double>>,
+    vehicleLat: Double,
+    vehicleLon: Double,
+    lastMatchedStopSequence: Int?,
+): StopProximityMatch? {
+    if (stops.isEmpty()) return null
+    fun distanceToIndex(index: Int): Double? {
+        val stop = stops.getOrNull(index) ?: return null
+        val (lat, lon) = stopLocations[stop.stopId] ?: return null
+        return haversineMeters(vehicleLat, vehicleLon, lat, lon)
+    }
+
+    var index = lastMatchedStopSequence
+        ?.let { seq -> stops.indexOfFirst { it.stopSequence == seq } }
+        ?.takeIf { it >= 0 }
+        ?: (stops.indices.minByOrNull { distanceToIndex(it) ?: Double.MAX_VALUE } ?: 0)
+    var currentDistance = distanceToIndex(index) ?: return null
+    while (true) {
+        val nextDistance = distanceToIndex(index + 1) ?: break
+        if (nextDistance >= currentDistance) break
+        index += 1
+        currentDistance = nextDistance
+    }
+    return StopProximityMatch(
+        stopSequence = stops[index].stopSequence,
+        distanceMeters = currentDistance,
+        distanceToNextStopMeters = distanceToIndex(index + 1),
+    )
 }
 
 /**

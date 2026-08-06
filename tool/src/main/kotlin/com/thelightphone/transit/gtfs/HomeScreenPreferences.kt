@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val dailyMessageVisibleKey = booleanPreferencesKey("HOME_DAILY_MESSAGE_VISIBLE")
+private val dailyMessageRandomKey = booleanPreferencesKey("HOME_DAILY_MESSAGE_RANDOM")
 
 /**
  * HomeScreen's own display settings (Settings screen), persisted the same way [MapPreferences]
@@ -22,5 +23,14 @@ class HomeScreenPreferences(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setDailyMessageVisible(visible: Boolean) {
         dataStore.edit { prefs -> prefs[dailyMessageVisibleKey] = visible }
+    }
+
+    /** Off by default -- preserves the original one-message-per-calendar-day design (see
+     * DAILY_MESSAGES' own doc comment in HomeScreen.kt) unless a rider opts into a fresh random
+     * message every time they return to the home screen instead. */
+    val dailyMessageRandomFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[dailyMessageRandomKey] ?: false }
+
+    suspend fun setDailyMessageRandom(random: Boolean) {
+        dataStore.edit { prefs -> prefs[dailyMessageRandomKey] = random }
     }
 }

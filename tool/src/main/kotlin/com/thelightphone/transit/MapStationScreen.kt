@@ -21,6 +21,7 @@ import com.thelightphone.transit.gtfs.fitBoundsZoom
 import com.thelightphone.transit.gtfs.metersPerPixel
 import com.thelightphone.transit.gtfs.platformLabelFromStopDesc
 import com.thelightphone.transit.gtfs.todayForGtfs
+import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -84,6 +85,13 @@ sealed class MapStationState {
          * this screen behaved before that mode existed. */
         val buses: List<BusMarker>,
         val seeEverythingEnabled: Boolean,
+        /** Settings screen toggle (off by default) -- see MapPreferences.doubleTapStationEnabledFlow.
+         * Governs double-tapping the scrim title here (zoom OUT to the main map) the same way it
+         * already governs double-tapping a station marker on the main Map screen (zoom IN). */
+        val doubleTapStationEnabled: Boolean,
+        /** Settings toggle (on by default) -- see TapHoldPreferences.tapHoldVehicleEnabledFlow. Tap
+         * and hold a vehicle marker here to open its own Trip Detail, same as on the main Map screen. */
+        val tapHoldVehicleEnabled: Boolean,
     ) : MapStationState()
     data class Error(val message: String) : MapStationState()
 }
@@ -104,6 +112,8 @@ private data class LoadedStationContext(
     val seeEverythingShowBus: Boolean,
     val seeEverythingShowSubway: Boolean,
     val seeEverythingShowCommuterRail: Boolean,
+    val doubleTapStationEnabled: Boolean,
+    val tapHoldVehicleEnabled: Boolean,
 )
 
 class MapStationViewModel(
@@ -111,6 +121,7 @@ class MapStationViewModel(
     private val agency: GtfsAgency,
     private val memberStopIds: List<String>,
     private val mapPreferences: MapPreferences,
+    private val tapHoldPreferences: TapHoldPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -155,6 +166,8 @@ class MapStationViewModel(
                 val seeEverythingShowBus = mapPreferences.seeEverythingShowBusFlow.first()
                 val seeEverythingShowSubway = mapPreferences.seeEverythingShowSubwayFlow.first()
                 val seeEverythingShowCommuterRail = mapPreferences.seeEverythingShowCommuterRailFlow.first()
+                val doubleTapStationEnabled = mapPreferences.doubleTapStationEnabledFlow.first()
+                val tapHoldVehicleEnabled = tapHoldPreferences.tapHoldVehicleEnabledFlow.first()
 
                 val zoom = fitBoundsZoom(
                     centerLat = centerLat,
@@ -195,6 +208,7 @@ class MapStationViewModel(
                     centerLat, centerLon, zoom, mapTiles, platformMarkers,
                     tapHoldArrivalsEnabled, darkMode, seeEverythingEnabled, filterByStopEnabled,
                     seeEverythingShowBus, seeEverythingShowSubway, seeEverythingShowCommuterRail,
+                    doubleTapStationEnabled, tapHoldVehicleEnabled,
                 )
 
                 // Only "See Everything" ever needs live vehicle data here -- with it off, this
@@ -207,7 +221,8 @@ class MapStationViewModel(
                 } else {
                     _state.value = MapStationState.Loaded(
                         centerLat, centerLon, zoom, mapTiles, platformMarkers,
-                        tapHoldArrivalsEnabled, darkMode, emptyList(), false,
+                        tapHoldArrivalsEnabled, darkMode, emptyList(), false, doubleTapStationEnabled,
+                        tapHoldVehicleEnabled,
                     )
                 }
             } catch (e: Exception) {
@@ -256,6 +271,7 @@ class MapStationViewModel(
     private fun stationLoaded(context: LoadedStationContext, buses: List<BusMarker>) = MapStationState.Loaded(
         context.centerLat, context.centerLon, context.zoom, context.mapTiles, context.platforms,
         context.tapHoldArrivalsEnabled, context.darkMapEnabled, buses, context.seeEverythingEnabled,
+        context.doubleTapStationEnabled, context.tapHoldVehicleEnabled,
     )
 
     override fun onScreenHide(screen: SimpleLightScreen<Unit>) {
@@ -305,7 +321,10 @@ class MapStationScreen(
         get() = MapStationViewModel::class.java
 
     override fun createViewModel(): MapStationViewModel =
-        MapStationViewModel(dbFile, agency, memberStopIds, MapPreferences(lightContext.dataStore))
+        MapStationViewModel(
+            dbFile, agency, memberStopIds,
+            MapPreferences(lightContext.dataStore), TapHoldPreferences(lightContext.dataStore),
+        )
 
     @Composable
     override fun Content() {
@@ -364,18 +383,29 @@ class MapStationScreen(
                                 UpcomingArrivalsScreen(activity, dbFile, agency, listOf(platformStopId), platformLabel)
                             })
                         },
-                        doubleTapStationEnabled = false,
+                        doubleTapStationEnabled = s.doubleTapStationEnabled,
                         centerIsStation = false,
                         centerStationMemberIds = emptyList(),
                         onOpenStation = { _, _ -> },
                         showCenterPin = false,
                         scrimTitle = stationLabel,
-                        // Jumps to the main Map screen, centered on this same station -- any one of
-                        // its own member platform ids resolves back to the full station (via
-                        // MapViewModel's own getStationContaining lookup, the same one every other
-                        // entry point into a station's map already goes through), so which specific
-                        // platform id gets passed doesn't matter.
+                        // Tap-and-hold the scrim title for the whole station's own upcoming arrivals
+                        // -- consistent with tap-and-hold meaning "show actual arrivals" everywhere
+                        // else in the app (a single platform pin here, a stop on the main Map screen,
+                        // Schedule's stop list, the Stations list).
                         onScrimTitleLongPressed = {
+                            navigateTo(screenFactory = { activity ->
+                                UpcomingArrivalsScreen(activity, dbFile, agency, memberStopIds, stationLabel)
+                            })
+                        },
+                        // Double-tap the scrim title to zoom back OUT to the main Map screen, centered
+                        // on this same station -- symmetric with double-tapping a station marker on
+                        // the main map to zoom IN here (see MapScreen's own onOpenStation). Any one of
+                        // this station's own member platform ids resolves back to the full station
+                        // (via MapViewModel's own getStationContaining lookup, the same one every
+                        // other entry point into a station's map already goes through), so which
+                        // specific platform id gets passed doesn't matter.
+                        onScrimTitleDoubleTapped = {
                             navigateTo(screenFactory = { activity ->
                                 MapScreen(activity, dbFile, agency, memberStopIds.first(), stationLabel)
                             })
@@ -383,6 +413,12 @@ class MapStationScreen(
                         seeEverythingEnabled = s.seeEverythingEnabled,
                         expandedVehicleTripIds = expandedVehicleTripIds,
                         onToggleVehicle = viewModel::toggleVehicleExpanded,
+                        tapHoldVehicleEnabled = s.tapHoldVehicleEnabled,
+                        onVehicleLongPressed = { bus ->
+                            navigateTo(screenFactory = { activity ->
+                                TripDetailScreen(activity, dbFile, bus.tripId, 0, bus.routeLabel, bus.directionLabel)
+                            })
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

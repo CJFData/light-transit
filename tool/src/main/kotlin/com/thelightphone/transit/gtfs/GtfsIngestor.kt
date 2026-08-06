@@ -10,7 +10,6 @@ import io.ktor.client.request.head
 import io.ktor.http.HttpHeaders
 import java.io.BufferedReader
 import java.io.File
-import java.net.URI
 import java.util.zip.ZipInputStream
 
 enum class GtfsIngestStatus {
@@ -57,8 +56,15 @@ class GtfsIngestor(private val filesDir: File) {
             null
         }
 
+        // hasCurrentSchema also gates "up to date" -- a cached database from before a table like
+        // feed_info/agency existed in the schema needs a genuine re-download to actually populate
+        // that table's real data, not just an empty CREATE TABLE IF NOT EXISTS patched on top of
+        // it (GtfsRepository opens read-only with no migration of its own, so this ingest path is
+        // the only place a schema change ever gets applied at all). Once this fires and rewrites
+        // feed_meta.txt below, later launches recognize the now-current cache as up to date again
+        // and go back to skipping the network re-download as usual.
         val upToDate = dbFile.exists() && cachedMeta != null && remoteMeta != null &&
-            !cachedMeta.isEmpty() && cachedMeta == remoteMeta
+            !cachedMeta.isEmpty() && cachedMeta == remoteMeta && hasCurrentSchema(dbFile)
         if (upToDate) {
             onStatus(GtfsIngestStatus.Ready)
             return
@@ -101,7 +107,11 @@ class GtfsIngestor(private val filesDir: File) {
                     }
                     status in 300..399 -> {
                         val location = response.headers[HttpHeaders.Location] ?: return null
-                        currentUrl = secureRedirectUrl(currentUrl, location)
+                        currentUrl = if (location.startsWith("http://")) {
+                            "https://" + location.removePrefix("http://")
+                        } else {
+                            location
+                        }
                     }
                     else -> return null
                 }
@@ -109,6 +119,24 @@ class GtfsIngestor(private val filesDir: File) {
             return null
         } finally {
             client.close()
+        }
+    }
+
+    /** Whether [dbFile] already has every table the current schema expects -- specifically
+     * feed_info, the newest addition (see GtfsSchema). A cached database from before that table
+     * existed would otherwise look "up to date" by ETag/Last-Modified alone forever, since nothing
+     * about the feed itself changed; this forces exactly one real re-download to catch it up. */
+    private fun hasCurrentSchema(dbFile: File): Boolean {
+        val db = SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY)
+        return try {
+            db.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'feed_info'", null,
+            ).use { it.moveToFirst() }
+        } catch (e: Exception) {
+            Log.e("GtfsIngestor", "Schema check failed for $dbFile, redownloading to be safe", e)
+            false
+        } finally {
+            db.close()
         }
     }
 
@@ -148,7 +176,11 @@ class GtfsIngestor(private val filesDir: File) {
                     status in 300..399 -> {
                         val location = response.headers[HttpHeaders.Location]
                             ?: throw GtfsIngestException("GTFS download redirected without a Location header")
-                        currentUrl = secureRedirectUrl(currentUrl, location)
+                        currentUrl = if (location.startsWith("http://")) {
+                            "https://" + location.removePrefix("http://")
+                        } else {
+                            location
+                        }
                     }
                     else -> throw GtfsIngestException("GTFS download failed: HTTP $status")
                 }
@@ -188,17 +220,9 @@ class GtfsIngestor(private val filesDir: File) {
             "stop_times.txt" to ::loadStopTimes,
             "calendar.txt" to ::loadCalendar,
             "calendar_dates.txt" to ::loadCalendarDates,
+            "feed_info.txt" to ::loadFeedInfo,
+            "agency.txt" to ::loadAgency,
         )
-    }
-}
-
-/** Resolves absolute and relative redirects while never following a redirect back to plain HTTP. */
-private fun secureRedirectUrl(currentUrl: String, location: String): String {
-    val resolved = URI(currentUrl).resolve(location).toString()
-    return if (resolved.startsWith("http://")) {
-        "https://" + resolved.removePrefix("http://")
-    } else {
-        resolved
     }
 }
 
@@ -331,6 +355,34 @@ private fun loadCalendar(db: SQLiteDatabase, reader: BufferedReader) {
         stmt.bindLongOrNull(8, header.get(row, "sunday"))
         stmt.bindStringOrNull(9, header.get(row, "start_date"))
         stmt.bindStringOrNull(10, header.get(row, "end_date"))
+        stmt.executeInsert()
+    }
+}
+
+private fun loadFeedInfo(db: SQLiteDatabase, reader: BufferedReader) {
+    db.delete("feed_info", null, null)
+    val stmt = db.compileStatement(
+        "INSERT INTO feed_info (feed_publisher_name, feed_publisher_url) VALUES (?, ?)"
+    )
+    readCsvEntry(reader) { header, row ->
+        val name = header.get(row, "feed_publisher_name") ?: return@readCsvEntry
+        stmt.clearBindings()
+        stmt.bindString(1, name)
+        stmt.bindStringOrNull(2, header.get(row, "feed_publisher_url"))
+        stmt.executeInsert()
+    }
+}
+
+private fun loadAgency(db: SQLiteDatabase, reader: BufferedReader) {
+    db.delete("agency", null, null)
+    val stmt = db.compileStatement(
+        "INSERT INTO agency (agency_name, agency_url) VALUES (?, ?)"
+    )
+    readCsvEntry(reader) { header, row ->
+        val name = header.get(row, "agency_name") ?: return@readCsvEntry
+        stmt.clearBindings()
+        stmt.bindString(1, name)
+        stmt.bindStringOrNull(2, header.get(row, "agency_url"))
         stmt.executeInsert()
     }
 }

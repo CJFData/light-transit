@@ -30,8 +30,11 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 
 private data class IconLegendEntry(val icon: LightIconConfiguration, val label: String)
 
-/** The Info/About screen is selectable from the homescreen via an ellipses icon. It describes the functions of the app
- * provides attributions and describes icons on the screen*/
+/** Every icon this app actually draws on the map/HomeScreen that a rider would need explained --
+ * kept as a single list so it can't quietly drift out of sync with what MapScreen/HomeScreen use
+ * (verified against a full grep of every LightIcons.* reference in this package). Chrome-only icons
+ * (back, settings, search, this screen's own entry point) aren't map/data indicators, so they're
+ * left out per the same reasoning that excluded them from the request this screen was built for. */
 private val ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_SUBWAY, "Subway / Light Rail vehicle"),
     IconLegendEntry(LightIcons.DIRECTIONS_BUS, "Bus vehicle"),
@@ -52,14 +55,15 @@ private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Station -- browse a transit authority's multi-platform stations"),
     IconLegendEntry(LightIcons.PLAY, "Play/Board -- on a Trip Detail screen, boards that trip. Everywhere else, shown once a trip's boarded, to jump back to its live tracking"),
     IconLegendEntry(LightIcons.STOP, "Stop/Alight -- Trip Detail's header, shown in place of Play while that trip is the one you've boarded; taps end tracking"),
-    IconLegendEntry(LightIcons.DELETE, "Trip switch warning -- Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; boarding the trip you are currently viewing will ends tracking of the trip boarded earlier"),
-    IconLegendEntry(LightIcons.CIRCLE, "Home -- Jumps back to HomeScreen whre you can select your agency or minimally keep track of your boarded trip"),
+    IconLegendEntry(LightIcons.DELETE, "Trip switch warning -- Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; boarding this one ends tracking of that one"),
+    IconLegendEntry(LightIcons.CIRCLE, "Home -- every other screen's own footer button; jumps back to HomeScreen"),
 )
 
-/** Settings screen's own on/off toggles -- every one of them (Tap and hold a stop, Double-tap to
- * open a station, Track tapped stops, See everything, Filter by stop, Modes shown's three per-mode
- * toggles, Trip progress bar, Daily message) renders as one of these two icons next to their label,
- * per SettingsScreen's own ToggleRow. */
+/** Settings screen's own on/off toggles -- every one of them (Tap and hold a stop, Tap and hold --
+ * Schedules, Tap and hold -- Stations, Tap and hold -- Vehicles, Double-tap to open a station,
+ * Track tapped stops, See everything, Filter by stop, Modes shown's three per-mode toggles, Trip
+ * progress bar, Daily message, Randomize daily message) renders as one of these two icons next to
+ * their label, per SettingsScreen's own ToggleRow. */
 private val TOGGLE_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "Setting is on -- tap the row to turn it off"),
     IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Setting is off -- tap the row to turn it on"),
@@ -117,6 +121,13 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         text = GtfsAgency.entries.joinToString(", ") { it.displayName },
                         variant = LightTextVariant.Detail,
                         lighten = true,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    LightText(
+                        text = "More coming soon. HomeScreen always credits whichever agency's GTFS " +
+                            "feed the data actually came from, near the bottom of the screen.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
                         modifier = Modifier.padding(bottom = 24.dp),
                     )
 
@@ -137,9 +148,11 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     )
                     ModeEntry(
                         name = "Station",
-                        description = "View a zoomed-in map of a multi-platform station's individual " +
-                            "real platforms and gates. For MBTA commuter rail, a vehicle shows up on " +
-                            "its assigned track once MBTA decides one.",
+                        description = "Browse every real multi-platform station an agency has (with a " +
+                            "live-filter search box once the list gets long enough to need one), and " +
+                            "view a zoomed-in map of a station's individual real platforms and gates. " +
+                            "For MBTA commuter rail, a vehicle shows up on its assigned track once " +
+                            "MBTA decides one.",
                     )
 
                     LightText(
@@ -205,7 +218,14 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                             "the home screen). \"See everything\" shows every live vehicle in view on " +
                             "the Map/Station map, each labeled with just its route until tapped; " +
                             "\"Filter by stop\" and per-mode \"Modes shown\" toggles refine it further " +
-                            "and only appear once it's on.",
+                            "and only appear once it's on. \"Tap and hold -- Schedules\" and \"Tap " +
+                            "and hold -- Stations\" (both on by default) add the same tap-and-hold-" +
+                            "for-arrivals gesture to the Schedule stop list and the Stations list. " +
+                            "\"Tap and hold -- Vehicles\" (on by default) opens a live vehicle's own " +
+                            "Trip Detail when tapped and held on the Map screen or a Station map. " +
+                            "\"Randomize daily message\" (off by default) only appears once \"Daily " +
+                            "message\" itself is on, and picks a fresh message at random each time " +
+                            "you return to the home screen instead of once per calendar day.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 8.dp),

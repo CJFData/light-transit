@@ -28,6 +28,7 @@ import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.matchCurrentStopByProximity
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.TripStopRow
 import com.thelightphone.transit.gtfs.computeArrivalEta
@@ -152,32 +153,50 @@ class TripDetailViewModel(
                     )
                     return@launch
                 }
+                // Fetched once (not per-poll) since a trip's own stop locations never change --
+                // feeds the GPS-proximity fallback below (see matchCurrentStopByProximity's own doc).
+                val stopLocations = repository.getTripStopLocations(tripId, fromStopSequence)
+                var lastMatchedStopSequence: Int? = null
                 val tripUpdatesUrl = agency.realtimeTripUpdatesUrl
                 val today = todayForGtfs()
 
                 while (isActive) {
-                    val liveStopSequence = try {
-                        GtfsRealtimeClient.fetchFeed(vehiclePositionsUrl)
-                            .vehiclePositionsByTripId[tripId]?.currentStopSequence
+                    val vehiclePosition = try {
+                        GtfsRealtimeClient.fetchFeed(vehiclePositionsUrl).vehiclePositionsByTripId[tripId]
                     } catch (e: Exception) {
                         Log.e("TripDetailScreen", "VehiclePositions fetch failed for trip $tripId", e)
                         null
                     }
+                    // Fetched unconditionally now (not just once a matched stop is already in hand)
+                    // since it also feeds the current-stop fallback below, not just the ETA lookup.
+                    val tripUpdate = tripUpdatesUrl?.let { url ->
+                        try {
+                            GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId]
+                        } catch (e: Exception) {
+                            Log.e("TripDetailScreen", "TripUpdates fetch failed for trip $tripId", e)
+                            null
+                        }
+                    }
+                    // VehiclePositions' own current_stop_sequence is preferred when present; falls
+                    // back to GPS-proximity matching against the vehicle's own raw position (see
+                    // matchCurrentStopByProximity's own doc), and only as a last resort to inferring
+                    // it from TripUpdates' own remaining stops (see
+                    // GtfsRtTripUpdate.inferCurrentStopSequence's own doc) -- confirmed empirically
+                    // that RIPTA's feed needs one of these two fallbacks, since it never populates
+                    // current_stop_sequence itself.
+                    val liveStopSequence = vehiclePosition?.currentStopSequence
+                        ?: vehiclePosition?.position?.let { pos ->
+                            matchCurrentStopByProximity(
+                                stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(), lastMatchedStopSequence,
+                            )
+                        }?.stopSequence
+                        ?: tripUpdate?.inferCurrentStopSequence()
+                    lastMatchedStopSequence = liveStopSequence ?: lastMatchedStopSequence
 
-                    // Only worth fetching TripUpdates at all once we actually have a stop to check
-                    // a prediction against.
                     val matchedStop = liveStopSequence?.let { seq -> stops.find { it.stopSequence == seq } }
                     val liveStatus = matchedStop?.let { stop ->
                         val scheduledTime = stop.departureTime ?: stop.arrivalTime ?: return@let null
-                        val rtStopUpdate = tripUpdatesUrl?.let { url ->
-                            try {
-                                GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId]
-                                    ?.updateFor(stop.stopId, stop.stopSequence)
-                            } catch (e: Exception) {
-                                Log.e("TripDetailScreen", "TripUpdates fetch failed for trip $tripId", e)
-                                null
-                            }
-                        }
+                        val rtStopUpdate = tripUpdate?.updateFor(stop.stopId, stop.stopSequence)
                         computeArrivalEta(scheduledTime, today, rtStopUpdate)?.status
                     }
 
@@ -285,6 +304,7 @@ class TripDetailScreen(
         val isBoardedHere = boardedTrip?.tripId == tripId
         val alightStopId = boardedTrip?.takeIf { it.tripId == tripId }?.alightStopId
         val vehicleIcon = lineType.toVehicleIcon()
+        val agency = GtfsAgency.forDbFile(dbFile)
 
         LightTheme(colors = themeColors) {
             Column(
@@ -395,6 +415,13 @@ class TripDetailScreen(
                                     }
                                 }
 
+                                fun openArrivals() {
+                                    val stopAgency = agency ?: return
+                                    navigateTo(screenFactory = { activity ->
+                                        UpcomingArrivalsScreen(activity, dbFile, stopAgency, listOf(stop.stopId), stop.stopName ?: "Stop ${stop.stopId}")
+                                    })
+                                }
+
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -402,10 +429,12 @@ class TripDetailScreen(
                                             if (isBoardedHere) {
                                                 // While boarded, a short tap designates/clears this
                                                 // stop as the alight stop instead -- tap-and-hold is
-                                                // still the way to reach its connections.
-                                                // detectTapGestures specifically (not a hand-rolled
-                                                // awaitEachGesture loop, which an earlier version of
-                                                // this used) -- that version's unconditional
+                                                // still the way to reach its connections, unchanged
+                                                // from before "Tap and hold a stop" existed here for
+                                                // the not-boarded case below. detectTapGestures
+                                                // specifically (not a hand-rolled awaitEachGesture
+                                                // loop, which an earlier version of this used) --
+                                                // that version's unconditional
                                                 // awaitFirstDown().consume() claimed every touch
                                                 // starting on a row, including the start of a swipe,
                                                 // before the LazyColumn's own scroll gesture ever got
@@ -419,7 +448,19 @@ class TripDetailScreen(
                                                     )
                                                 }
                                             } else {
-                                                base.lightClickable { openConnections() }
+                                                // Not boarded: a short tap keeps opening this stop's
+                                                // connections, same as always; tap-and-hold newly
+                                                // opens its actual (live) upcoming arrivals instead --
+                                                // same gesture split as the boarded branch above, just
+                                                // with arrivals in the long-press slot rather than
+                                                // connections, since connections already has the short
+                                                // tap here.
+                                                base.pointerInput(stop.stopId) {
+                                                    detectTapGestures(
+                                                        onTap = { openConnections() },
+                                                        onLongPress = { openArrivals() },
+                                                    )
+                                                }
                                             }
                                         }
                                         .padding(vertical = 8.dp),
@@ -471,6 +512,11 @@ class TripDetailScreen(
                                             text = s.liveStatus?.label() ?: "Live",
                                             variant = LightTextVariant.Detail,
                                             lighten = true,
+                                            // Indented to align under the stop name, not the vehicle
+                                            // icon before it (1.2f size + the icon's own 8dp end
+                                            // padding) -- this is a sibling of that Row above, not a
+                                            // child of it, so it needs its own matching start padding.
+                                            modifier = Modifier.padding(start = 1.2f.gridUnitsAsDp() + 8.dp),
                                         )
                                     }
                                 }

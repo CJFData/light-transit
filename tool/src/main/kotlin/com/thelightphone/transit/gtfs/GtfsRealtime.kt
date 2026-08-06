@@ -7,7 +7,6 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import io.ktor.http.HttpHeaders
-import java.net.URI
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -111,6 +110,20 @@ data class GtfsRtTripUpdate(
     fun updateFor(stopId: String, stopSequence: Int): GtfsRtStopTimeUpdate? =
         stopTimeUpdate.find { it.stopId == stopId }
             ?: stopTimeUpdate.find { it.stopSequence == stopSequence }
+
+    /**
+     * Infers which stop the vehicle currently occupies purely from this TripUpdate's own remaining
+     * [stopTimeUpdate] entries, for agencies whose VehiclePositions feed never populates
+     * current_stop_sequence at all -- confirmed empirically for RIPTA (0 of 64 live vehicles had it
+     * set, hand-decoding real feed bytes), unlike MBTA where it's reliably present. Well-behaved
+     * GTFS-RT producers drop already-passed stops from a TripUpdate's own stop_time_update list as
+     * the trip progresses, so the lowest stop_sequence still present is the next stop the vehicle
+     * hasn't yet reached -- the same stop current_stop_sequence would point to together with an
+     * INCOMING_AT/IN_TRANSIT_TO status. Only ever used as a fallback when VehiclePositions itself
+     * came up empty (see TripDetailScreen/HomeScreen's own callers) -- a real current_stop_sequence
+     * is always preferred when available.
+     */
+    fun inferCurrentStopSequence(): Int? = stopTimeUpdate.mapNotNull { it.stopSequence }.minOrNull()
 }
 
 /**
@@ -171,7 +184,11 @@ object GtfsRealtimeClient {
                     status in 300..399 -> {
                         val location = response.headers[HttpHeaders.Location]
                             ?: throw GtfsRealtimeException("GTFS-RT redirected without a Location header")
-                        currentUrl = secureRealtimeRedirectUrl(currentUrl, location)
+                        currentUrl = if (location.startsWith("http://")) {
+                            "https://" + location.removePrefix("http://")
+                        } else {
+                            location
+                        }
                     }
                     else -> throw GtfsRealtimeException("GTFS-RT fetch failed: HTTP $status")
                 }
@@ -180,16 +197,6 @@ object GtfsRealtimeClient {
         } finally {
             client.close()
         }
-    }
-}
-
-/** Resolves absolute and relative redirects while never following a redirect back to plain HTTP. */
-private fun secureRealtimeRedirectUrl(currentUrl: String, location: String): String {
-    val resolved = URI(currentUrl).resolve(location).toString()
-    return if (resolved.startsWith("http://")) {
-        "https://" + resolved.removePrefix("http://")
-    } else {
-        resolved
     }
 }
 
