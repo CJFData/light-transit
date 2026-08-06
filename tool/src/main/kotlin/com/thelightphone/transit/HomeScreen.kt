@@ -165,7 +165,7 @@ private fun dailyMessage(): String {
  * stopping at the homescreen, this both prevents infinite screens from opening and assures the home screen
  * can be easily returned to.
  */
-)
+
 object HomeVisibility {
     val isVisible = MutableStateFlow(false)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
