@@ -61,6 +61,10 @@ dependencies {
     implementation(project(":sdk:client"))
     // RIPTA's realtime feeds are HTTP-only; netconfig scopes the exception to that host.
     implementation(project(":netconfig"))
+    // InlineLp3Keyboard.kt's rememberInlineLp3KeyboardViewModel calls the viewModel() composable
+    // directly (its own scoped ViewModelProvider.Factory, keyed per screen) rather than going
+    // through sdk/client's own ViewModel plumbing, so it needs this on tool's own classpath.
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     // Only the "org.jetbrains.kotlinx:kotlinx-serialization" prefix is on the SDK plugin's
     // dependency allow-list, but that check is a startsWith match, so this artifact passes too —
     // verified against a live build. No official protobuf/gtfs-realtime-bindings library is
