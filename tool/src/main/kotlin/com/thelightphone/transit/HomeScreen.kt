@@ -37,6 +37,7 @@ import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsIngestor
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
 import com.thelightphone.transit.gtfs.SecondaryGtfsFeed
 import com.thelightphone.transit.gtfs.fetchTripUpdate
 import com.thelightphone.transit.gtfs.fetchVehiclePosition
@@ -281,11 +282,19 @@ class HomeScreenViewModel(
     private val tripStatusRefreshTrigger = Channel<Unit>(Channel.CONFLATED)
     private var tripStatusPollJob: Job? = null
 
+    /** Anchor for [matchCurrentStopByProximity]'s flicker-resistant walk across successive polls --
+     * a local var in [refreshActiveTripStatus] wouldn't persist between calls the way TripDetail's
+     * identical fallback does inside its own poll loop, since this function is re-entered fresh
+     * every cycle. Reset to null on every boarded-trip change so a new trip doesn't inherit the
+     * previous one's anchor. */
+    private var lastMatchedStopSequence: Int? = null
+
     init {
         viewModelScope.launch {
             boardedTripPreferences.boardedTripFlow.collect {
                 boardedTrip.value = it
                 if (it == null) activeTripStatus.value = null
+                lastMatchedStopSequence = null
                 tripStatusRefreshTrigger.trySend(Unit)
             }
         }
@@ -406,20 +415,47 @@ class HomeScreenViewModel(
             val (stop, stops) = alightStop
 
             val vehicle = trip.agency.fetchVehiclePosition(trip.tripId)
+            val tripUpdate = trip.agency.fetchTripUpdate(trip.tripId)
+            // VehiclePositions' own current_stop_sequence is preferred when present; falls back to
+            // GPS-proximity matching, and only as a last resort to inferring it from TripUpdates'
+            // own remaining stops -- same fallback chain as TripDetailScreen's poll loop, needed
+            // since RIPTA's feed never populates current_stop_sequence itself (see
+            // matchCurrentStopByProximity's own doc). Without this, RIPTA's progress bar never
+            // moves even though the same trip's Trip Detail screen shows live movement.
             val currentSeq = vehicle?.currentStopSequence
+                ?: vehicle?.position?.let { pos ->
+                    val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
+                    matchCurrentStopByProximity(
+                        stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(), lastMatchedStopSequence,
+                    )
+                }?.stopSequence
+                ?: tripUpdate?.inferCurrentStopSequence()
+            lastMatchedStopSequence = currentSeq ?: lastMatchedStopSequence
+
             val stopsRemaining = currentSeq?.let { seq -> stops.count { it.stopSequence in seq until stop.stopSequence } }
+            // currentSeq is the stop the vehicle is APPROACHING, not one it's already reached -- true
+            // of VehiclePositions' own current_stop_sequence (paired with an IN_TRANSIT_TO/
+            // INCOMING_AT status per the GTFS-RT spec; STOPPED_AT is the rare exception where it's
+            // actually arrived) and of both fallbacks above (see
+            // GtfsRtTripUpdate.inferCurrentStopSequence's own doc). Crediting currentSeq itself as
+            // "completed" made the marker jump a full stop ahead of the vehicle's real position --
+            // most visibly right after boarding, snapping to "1 stop done" the instant the vehicle
+            // departs, before it's gone anywhere.
+            val stopsCompleted = currentSeq?.let { seq ->
+                if (vehicle?.currentStatus == GtfsRtVehicleStatus.STOPPED_AT) seq else seq - 1
+            }
             // Boarding stop (0f) to alight stop (1f) -- guards against a same-sequence divide (the
             // rider designated their own boarding stop as the alight stop too) by leaving it null
             // rather than producing a NaN/Infinity fraction.
-            val progressFraction = if (currentSeq != null && stop.stopSequence != trip.fromStopSequence) {
-                ((currentSeq - trip.fromStopSequence).toFloat() / (stop.stopSequence - trip.fromStopSequence).toFloat())
+            val progressFraction = if (stopsCompleted != null && stop.stopSequence != trip.fromStopSequence) {
+                ((stopsCompleted - trip.fromStopSequence).toFloat() / (stop.stopSequence - trip.fromStopSequence).toFloat())
                     .coerceIn(0f, 1f)
             } else {
                 null
             }
 
             val today = todayForGtfs(trip.agency.zoneId)
-            val rtStopUpdate = trip.agency.fetchTripUpdate(trip.tripId)?.updateFor(stop.stopId, stop.stopSequence)
+            val rtStopUpdate = tripUpdate?.updateFor(stop.stopId, stop.stopSequence)
             val scheduledTime = stop.arrivalTime ?: stop.departureTime
             val eta = scheduledTime?.let { computeArrivalEta(it, today, rtStopUpdate, trip.agency.zoneId) }
 
