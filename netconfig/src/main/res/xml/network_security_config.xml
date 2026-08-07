@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    REMOVABLE: scoped narrowly to realtime.ripta.com only — no blanket cleartext allowance for
-    the rest of the app. Remove this file (and the whole netconfig/ module) to restore
-    HTTPS-only enforcement everywhere; see netconfig/build.gradle.kts for full removal steps.
--->
+<!-- RIPTA has no HTTPS equivalent for these realtime endpoints. -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">realtime.ripta.com</domain>

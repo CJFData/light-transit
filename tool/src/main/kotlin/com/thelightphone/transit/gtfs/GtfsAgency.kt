@@ -7,11 +7,18 @@ import java.io.File
  * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
  * URL here is the only change a screen-level caller ever needs to make.
  *
- * RIPTA's realtime service (realtime.ripta.com) is plain-HTTP-only with no HTTPS equivalent for
- * either feed, which Android blocks by default. Its URLs below are only reachable because of a
- * REMOVABLE cleartext exception — see the :netconfig module (netconfig/build.gradle.kts) for the
- * full explanation and exact removal steps. To restore HTTPS-only enforcement everywhere, remove
- * that module (per its own instructions) AND set RIPTA's two URLs below back to null.
+ * RIPTA's realtime service is plain-HTTP-only with no HTTPS equivalent. Its two URLs below are
+ * reachable through the narrowly scoped cleartext exception provided by the :netconfig module.
+ *
+ * To add a new agency: append an entry below with a unique [id] (uniqueness is enforced at
+ * class-load time, see the companion `init` block), its [displayName], and its static [feedUrl].
+ * Leave either realtime URL null if that feed doesn't exist. Nothing else needs a matching change
+ * -- every screen and preference store iterates [entries] rather than switching on individual
+ * agencies. Two things worth checking against the agency's *live* feed before trusting a new entry:
+ * (1) all three URLs should be plain HTTPS, or you'll need RIPTA's cleartext exception above; (2)
+ * GtfsRealtime.kt's hand-rolled protobuf schema only declares the specific field numbers seen in
+ * MBTA/RIPTA/RTD's real feeds so far -- an undeclared field on a new agency's feed can fault the
+ * whole GTFS-RT decode (see that file's doc comments), so hand-verify a live sample against it.
  */
 enum class GtfsAgency(
     val id: String,
@@ -19,9 +26,11 @@ enum class GtfsAgency(
     val feedUrl: String,
     val realtimeTripUpdatesUrl: String?,
     val realtimeVehiclePositionsUrl: String?,
-    /** Optional extra data sources beyond the four feed URLs above -- see [AgencyComponent]. Empty
+    /** Optional extra data sources beyond the feed URLs above -- see [AgencyComponent]. Empty
      * for any agency that doesn't have one (e.g. RIPTA, today). */
     val components: List<AgencyComponent> = emptyList(),
+    /** Additional static feeds merged into this agency's database, with IDs namespaced per feed. */
+    val additionalStaticFeedUrls: List<String> = emptyList(),
 ) {
     MBTA(
         "mbta",
@@ -31,25 +40,16 @@ enum class GtfsAgency(
         "https://cdn.mbta.com/realtime/VehiclePositions.pb",
         components = listOf(MbtaV3VehicleSource),
     ),
-<<<<<<< Updated upstream
-=======
     RTD(
         "rtd",
         "RTD Denver",
         "https://www.rtd-denver.com/files/gtfs/google_transit.zip",
         "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/TripUpdate.pb",
         "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/VehiclePosition.pb",
+        additionalStaticFeedUrls = listOf(
+            "https://www.rtd-denver.com/files/gtfs/bustang-co-us.zip",
+        ),
     ),
-    BustangCO(
-        "rtd",
-        "Bustang Colorado",
-        "https://www.rtd-denver.com/files/gtfs/bustang-co-us.zip",
-        "https://open-data.rtd-denver.com/files/gtfs-rt/cdot/Bustang_TripUpdate.pb",
-        "https://open-data.rtd-denver.com/files/gtfs-rt/cdot/Bustang_VehiclePosition.pb",
-    ),
->>>>>>> Stashed changes
-    // REMOVABLE: these two URLs only work because of the :netconfig cleartext exception (see
-    // class doc above). Set both back to null to restore HTTPS-only enforcement for RIPTA.
     RIPTA(
         "ripta",
         "RIPTA",
@@ -65,6 +65,19 @@ enum class GtfsAgency(
     inline fun <reified T : AgencyComponent> component(): T? = components.filterIsInstance<T>().firstOrNull()
 
     companion object {
+        init {
+            // [id] doubles as the "gtfs/{id}/" cache directory name (see [forDbFile]/[gtfsDbFile]) and
+            // the DEFAULT_AGENCY/BOARDED_AGENCY preference value -- a copy-pasted entry with an
+            // unchanged id silently merges its cache and preferences with whichever other agency
+            // already owns that id, rather than failing loudly. Catching it here, at class-load time,
+            // means a bad copy-paste fails immediately instead of surfacing as "why is agency X showing
+            // agency Y's data."
+            val duplicateIds = entries.groupBy { it.id }.filterValues { it.size > 1 }.keys
+            check(duplicateIds.isEmpty()) {
+                "GtfsAgency ids must be unique, got duplicates: $duplicateIds"
+            }
+        }
+
         /**
          * Recovers which agency a screen's [dbFile] belongs to, from the same "gtfs/{id}/transit.db"
          * path convention [gtfsDbFile] builds it with — so a screen only needs to carry [dbFile] (which

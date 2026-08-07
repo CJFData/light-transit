@@ -47,7 +47,7 @@ sealed class DepartureListState {
 class DepartureListViewModel(
     dbFile: File,
     private val routeId: String,
-    private val directionId: Int,
+    private val directionId: Int?,
     private val stopId: String,
 ) : LightViewModel<Unit>() {
 
@@ -80,7 +80,7 @@ class DepartureListScreen(
     private val dbFile: File,
     private val routeId: String,
     private val routeLabel: String,
-    private val directionId: Int,
+    private val directionId: Int?,
     private val directionLabel: String,
     private val stopId: String,
     private val stopLabel: String,
