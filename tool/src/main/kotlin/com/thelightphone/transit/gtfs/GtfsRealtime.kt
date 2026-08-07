@@ -59,16 +59,18 @@ object GtfsRtVehicleStatus {
 }
 
 /**
- * Field numbers here were re-verified by hand-decoding real live bytes from *both* MBTA and RIPTA
- * (not just assumed from the public spec, which turned out to be wrong for field 4): 3 and 4 were
- * confirmed as genuinely distinct fields by finding MBTA messages where both appear at once with
- * clearly different value ranges (3 = larger, sequence-like numbers; 4 = a small 0-2 enum-like
- * range). Neither agency's live feed ever sends a `stop_id` string at the top level — the field the
+ * Field numbers here were re-verified by hand-decoding real live bytes from MBTA, RIPTA, *and* RTD
+ * Denver (not just assumed from the public spec, which turned out to be wrong for field 4): 3 and 4
+ * were confirmed as genuinely distinct fields by finding MBTA messages where both appear at once
+ * with clearly different value ranges (3 = larger, sequence-like numbers; 4 = a small 0-2 enum-like
+ * range). No agency's live feed ever sends a `stop_id` string at the top level — the field the
  * public spec places at 4 — so that property doesn't exist here at all; declaring it as a String
  * there is what caused every previous crash (a real varint on the wire, decoded as a string).
  * Fields 7/8 (a bare vehicle-number string and a [GtfsRtVehicleDescriptor]) are unused by this app
  * but still declared, since an undeclared field previously faulted the whole decode instead of
- * being skipped.
+ * being skipped. Field 9 (occupancy_status) is RTD-specific -- present on ~90% of its live vehicles
+ * but absent from both MBTA's and RIPTA's feeds -- and unused by this app but declared for the same
+ * reason.
  */
 @Serializable
 data class GtfsRtVehiclePosition(
@@ -79,6 +81,7 @@ data class GtfsRtVehiclePosition(
     @ProtoNumber(5) val timestamp: Long? = null,
     @ProtoNumber(7) val vehicleNumber: String? = null,
     @ProtoNumber(8) val vehicle: GtfsRtVehicleDescriptor? = null,
+    @ProtoNumber(9) val occupancyStatus: Int? = null,
 )
 
 @Serializable
@@ -101,10 +104,18 @@ data class GtfsRtPosition(
     @ProtoNumber(5) val speed: Float? = null,
 )
 
+/**
+ * Fields 3 (vehicle descriptor) and 4 (timestamp) are unused by this app but declared anyway --
+ * RTD Denver sends field 4 on every single live TripUpdate (verified by hand-decoding its real
+ * feed bytes), and an undeclared field previously faulted the whole decode instead of being
+ * skipped (see [GtfsRtVehiclePosition]'s doc comment).
+ */
 @Serializable
 data class GtfsRtTripUpdate(
     @ProtoNumber(1) val trip: GtfsRtTripDescriptor = GtfsRtTripDescriptor(),
     @ProtoNumber(2) val stopTimeUpdate: List<GtfsRtStopTimeUpdate> = emptyList(),
+    @ProtoNumber(3) val vehicle: GtfsRtVehicleDescriptor? = null,
+    @ProtoNumber(4) val timestamp: Long? = null,
 ) {
     /** Matches by stop_id first (more specific), falling back to stop_sequence. */
     fun updateFor(stopId: String, stopSequence: Int): GtfsRtStopTimeUpdate? =
@@ -130,22 +141,30 @@ data class GtfsRtTripUpdate(
  * RIPTA's feed also sends start_time/start_date/route_id here (verified by hand-decoding RIPTA's
  * real feed bytes) — declared even though unused, since an undeclared field in a *nested* message
  * desynced the decoder's byte position for everything decoded after it, corrupting the rest of the
- * enclosing VehiclePosition/TripUpdate rather than just being harmlessly skipped.
+ * enclosing VehiclePosition/TripUpdate rather than just being harmlessly skipped. Fields 4
+ * (schedule_relationship) and 6 (direction_id) are RTD-specific -- present on every one of its live
+ * trip descriptors -- and declared for the same reason.
  */
 @Serializable
 data class GtfsRtTripDescriptor(
     @ProtoNumber(1) val tripId: String = "",
     @ProtoNumber(2) val startTime: String? = null,
     @ProtoNumber(3) val startDate: String? = null,
+    @ProtoNumber(4) val scheduleRelationship: Int? = null,
     @ProtoNumber(5) val routeId: String? = null,
+    @ProtoNumber(6) val directionId: Int? = null,
 )
 
+/** Field 5 (schedule_relationship) is RTD-specific -- present on every one of its live stop time
+ * updates -- and declared unused for the same undeclared-field-faults-decode reason as
+ * [GtfsRtTripDescriptor]'s doc comment. */
 @Serializable
 data class GtfsRtStopTimeUpdate(
     @ProtoNumber(1) val stopSequence: Int? = null,
     @ProtoNumber(4) val stopId: String? = null,
     @ProtoNumber(2) val arrival: GtfsRtStopTimeEvent? = null,
     @ProtoNumber(3) val departure: GtfsRtStopTimeEvent? = null,
+    @ProtoNumber(5) val scheduleRelationship: Int? = null,
 )
 
 @Serializable
@@ -157,6 +176,14 @@ data class GtfsRtStopTimeEvent(
 class GtfsRealtimeException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 private const val MAX_REDIRECTS = 5
+
+/** Resolves a redirect Location against the URL that produced it (RFC 3986) and upgrades an
+ * absolute http:// result to https:// -- see GtfsIngestor.kt's identical private helper (of the
+ * same name) for the full explanation of why a relative Location can't just be string-checked. */
+private fun resolveRedirectLocation(currentUrl: String, location: String): String {
+    val resolved = java.net.URI(currentUrl).resolve(location).toString()
+    return if (resolved.startsWith("http://")) "https://" + resolved.removePrefix("http://") else resolved
+}
 
 /**
  * Fetches and decodes a GTFS-RT feed — TripUpdates and VehiclePositions are separate published
@@ -184,11 +211,7 @@ object GtfsRealtimeClient {
                     status in 300..399 -> {
                         val location = response.headers[HttpHeaders.Location]
                             ?: throw GtfsRealtimeException("GTFS-RT redirected without a Location header")
-                        currentUrl = if (location.startsWith("http://")) {
-                            "https://" + location.removePrefix("http://")
-                        } else {
-                            location
-                        }
+                        currentUrl = resolveRedirectLocation(currentUrl, location)
                     }
                     else -> throw GtfsRealtimeException("GTFS-RT fetch failed: HTTP $status")
                 }

@@ -55,6 +55,7 @@ import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightProgressBar
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
@@ -155,7 +156,10 @@ private val DAILY_MESSAGES = listOf(
     "You out here saving the planet, no big deal. 💁🌍",
 )
 
-private fun dailyMessage(): String {
+/** [random] is the Settings screen's own opt-in toggle (off by default) -- see
+ * HomeScreenPreferences.dailyMessageRandomFlow. */
+private fun dailyMessage(random: Boolean): String {
+    if (random) return DAILY_MESSAGES.random()
     val dayOfYear = LocalDate.now().dayOfYear
     return DAILY_MESSAGES[dayOfYear % DAILY_MESSAGES.size]
 }
@@ -250,6 +254,15 @@ class HomeScreenViewModel(
      * HomeScreenPreferences.dailyMessageVisibleFlow. */
     val dailyMessageVisible = MutableStateFlow(true)
 
+    /** Settings screen's "Randomize daily message" toggle (off by default) -- see
+     * HomeScreenPreferences.dailyMessageRandomFlow. */
+    val dailyMessageRandom = MutableStateFlow(false)
+
+    /** The message text itself, re-rolled once per [onScreenShow] rather than computed fresh on
+     * every recomposition, so a random pick (when [dailyMessageRandom] is on) stays put for the
+     * rest of this visit instead of changing under the rider on every recomposition. */
+    val dailyMessageText = MutableStateFlow(dailyMessage(random = false))
+
     /** One-shot signal: non-null exactly when the rider has just dismissed the "you've arrived"
      * modal for the boarded trip's alight stop while HomeScreen was the visible screen -- mirrors
      * TripDetailViewModel's own identical field (see the shared checkReachedAlightStop). Content()
@@ -276,6 +289,9 @@ class HomeScreenViewModel(
         }
         viewModelScope.launch {
             boardedTripPreferences.progressBarVisibleFlow.collect { progressBarVisible.value = it }
+        }
+        viewModelScope.launch {
+            homeScreenPreferences.dailyMessageRandomFlow.collect { dailyMessageRandom.value = it }
         }
         viewModelScope.launch {
             homeScreenPreferences.dailyMessageVisibleFlow.collect { dailyMessageVisible.value = it }
@@ -314,9 +330,20 @@ class HomeScreenViewModel(
      * previous agency can't flash the link before this agency's own check completes. */
     val agencyHasStations = MutableStateFlow(false)
 
+    /** The currently-selected agency's own GTFS-feed attribution -- see
+     * GtfsRepository.getFeedAttribution's own doc for the fallback chain. Reset to null the moment
+     * a new agency is selected, same reasoning as [agencyHasStations]: a stale value from the
+     * previous agency shouldn't flash under the new one before its own check completes. */
+    val feedAttribution = MutableStateFlow<FeedAttribution?>(null)
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         HomeVisibility.isVisible.value = true
+        // Re-rolled every time this screen becomes visible again (not just once per process) so
+        // "Randomize daily message" actually delivers a fresh pick on each return trip, per its own
+        // Settings description -- see dailyMessageText's own doc for why this isn't just computed
+        // inline in Content() instead.
+        dailyMessageText.value = dailyMessage(dailyMessageRandom.value)
         tripStatusPollJob?.cancel()
         tripStatusPollJob = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -432,6 +459,7 @@ class HomeScreenViewModel(
         status.value = null
         syncingAgency.value = agency
         agencyHasStations.value = false
+        feedAttribution.value = null
         Log.d("HomeScreen", "Selected agency: ${agency.displayName}")
 
         agencyIngestJob = viewModelScope.launch(Dispatchers.IO) {
@@ -446,12 +474,6 @@ class HomeScreenViewModel(
                 // Do not let the older job replace the newer agency's ready state or station check.
                 if (selectedAgency.value != agency) return@launch
                 readyAgency.value = agency
-                val stationRepo = GtfsRepository(gtfsDbFile(filesDir, agency))
-                try {
-                    agencyHasStations.value = stationRepo.getAllStations().isNotEmpty()
-                } finally {
-                    stationRepo.close()
-                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -460,6 +482,22 @@ class HomeScreenViewModel(
                     syncingAgency.value = null
                     status.value = "Unable to load ${agency.displayName} data."
                 }
+                return@launch
+            }
+
+            // Best-effort enrichment, not core to the agency being usable -- Schedule/Station/
+            // Explore are already available from readyAgency above regardless of whether this
+            // succeeds. A failure here (e.g. a schema addition an already-cached database hasn't
+            // picked up yet -- see GtfsIngestor's own "upToDate" doc comment) shouldn't blank a
+            // successfully-loaded agency out with a scary "unable to load" message.
+            val stationRepo = GtfsRepository(gtfsDbFile(filesDir, agency))
+            try {
+                agencyHasStations.value = stationRepo.getAllStations().isNotEmpty()
+                feedAttribution.value = stationRepo.getFeedAttribution()
+            } catch (e: Exception) {
+                Log.e("HomeScreen", "Station/attribution lookup failed for ${agency.displayName}", e)
+            } finally {
+                stationRepo.close()
             }
         }
     }
@@ -489,10 +527,12 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val cachedAgencies by viewModel.cachedAgencies.collectAsState()
         val syncingAgency by viewModel.syncingAgency.collectAsState()
         val agencyHasStations by viewModel.agencyHasStations.collectAsState()
+        val feedAttribution by viewModel.feedAttribution.collectAsState()
         val boardedTrip by viewModel.boardedTrip.collectAsState()
         val activeTripStatus by viewModel.activeTripStatus.collectAsState()
         val progressBarVisible by viewModel.progressBarVisible.collectAsState()
         val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
+        val dailyMessageText by viewModel.dailyMessageText.collectAsState()
         val reachedAlightStop by viewModel.reachedAlightStop.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
@@ -627,8 +667,14 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                     // Hidden entirely while a trip is boarded -- the active-trip status above (and
                     // its progress bar) takes this space instead. Reappears the moment the trip is
                     // alighted, same as the heading reverting above.
+                    //
+                    // Wrapped in LightScrollView (weighted, so it only claims what's left after the
+                    // heading/status text above) rather than a plain Column -- with three agencies
+                    // today every entry fits on screen, but a plain Column has no way to reach
+                    // entries once the list grows past that, same as [SettingsScreen]'s own
+                    // default-agency list.
                     if (boardedTrip == null) {
-                    Column {
+                    LightScrollView(modifier = Modifier.weight(1f)) {
                         GtfsAgency.entries.forEach { agency ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -693,9 +739,20 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                 // LightOS ActionBar" convention (see its doc comment) rather than the previous
                 // ad-hoc Alignment.BottomStart/BottomEnd pair.
                 Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                    // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's
+                    // own doc for exactly which GTFS file this comes from. Tied to whichever agency is
+                    // currently selected (not just "ready"), so it reads correctly even mid-sync.
+                    feedAttribution?.let { attribution ->
+                        LightText(
+                            text = "Transit data © ${attribution.name}",
+                            variant = LightTextVariant.Detail,
+                            lighten = true,
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
+                        )
+                    }
                     if (dailyMessageVisible) {
                         LightText(
-                            text = dailyMessage(),
+                            text = dailyMessageText,
                             variant = LightTextVariant.Detail,
                             lighten = true,
                             modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),

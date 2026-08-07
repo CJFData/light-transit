@@ -40,6 +40,13 @@ enum class GtfsAgency(
         "https://cdn.mbta.com/realtime/VehiclePositions.pb",
         components = listOf(MbtaV3VehicleSource),
     ),
+    RIPTA(
+        "ripta",
+        "RIPTA",
+        "https://ripta.com/RIPTA-GTFS.zip",
+        "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
+        "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
+    ),
     RTD(
         "rtd",
         "RTD Denver",
@@ -49,13 +56,6 @@ enum class GtfsAgency(
         additionalStaticFeedUrls = listOf(
             "https://www.rtd-denver.com/files/gtfs/bustang-co-us.zip",
         ),
-    ),
-    RIPTA(
-        "ripta",
-        "RIPTA",
-        "https://ripta.com/RIPTA-GTFS.zip",
-        "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
-        "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
     ),
     ;
 

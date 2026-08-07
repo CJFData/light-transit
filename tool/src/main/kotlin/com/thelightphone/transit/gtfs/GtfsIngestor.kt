@@ -232,7 +232,13 @@ class GtfsIngestor(private val filesDir: File) {
     }
 }
 
-/** Resolves absolute and relative redirects while never following a redirect back to plain HTTP. */
+/**
+ * Resolves absolute and relative redirects while never following a redirect back to plain HTTP.
+ * Needed because some feeds (e.g. RTD Denver's static GTFS feed, which 308s every request to a bare
+ * "/api/download?..." path) send a *relative* Location -- a plain `startsWith("http://")` check let
+ * that through unresolved, straight to the HTTP client, which parsed the bare path as a request to
+ * https://localhost/... and failed with a cleartext error.
+ */
 private fun secureRedirectUrl(currentUrl: String, location: String): String {
     val resolved = URI(currentUrl).resolve(location).toString()
     return if (resolved.startsWith("http://")) {
