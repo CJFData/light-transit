@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -169,10 +170,25 @@ class StationListScreen(
      * STATION_SEARCH_MIN_COUNT). Docks Light's own public `light-keyboard` library directly (see
      * [InlineTextFieldKeyboardCallback]'s own doc) alongside a live-filtered [LazyColumn], instead of
      * sdk/ui's full-screen `LightTextInputEditor` (which has no room for a results list of its own).
+     *
+     * [textFieldState] is passed in (hoisted to [Content], not created here) rather than via its
+     * own `rememberTextFieldState` -- this composable is only ever in composition while search is
+     * active, so a state created locally would be a brand new instance every time search reopens.
+     * `viewModel(key = "StationSearchKeyboard", ...)` below only calls its factory (and so only
+     * ever captures ONE callback/state pair) the very first time this screen's ViewModelStore sees
+     * that key -- every later reopen would silently keep typing into the *first* session's
+     * already-discarded [TextFieldState] while this composable displays a new, empty one, which is
+     * exactly the "stops accepting input until I back all the way out" bug this fixes. Hoisting the
+     * state keeps it the same single instance across every reopen, so the one callback captured on
+     * the first open stays correctly wired for the screen's entire lifetime.
      */
     @Composable
-    private fun SearchContent(stations: List<StopLocation>, tapHoldArrivalsEnabled: Boolean, onBack: () -> Unit) {
-        val textFieldState = rememberTextFieldState("")
+    private fun SearchContent(
+        stations: List<StopLocation>,
+        tapHoldArrivalsEnabled: Boolean,
+        textFieldState: TextFieldState,
+        onBack: () -> Unit,
+    ) {
         val keyboardOptionsFlow = rememberKeyboardOptions()
         val keyboardCallback = remember(textFieldState) {
             InlineTextFieldKeyboardCallback(state = textFieldState)
@@ -229,6 +245,9 @@ class StationListScreen(
         val tapHoldArrivalsEnabled by viewModel.tapHoldArrivalsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
         var searchActive by remember { mutableStateOf(false) }
+        // See SearchContent's own doc -- hoisted here (not created inside SearchContent) so it
+        // stays the same instance across every close/reopen of search, not a fresh one each time.
+        val searchTextFieldState = rememberTextFieldState("")
 
         LightTheme(colors = themeColors) {
             val loadedStations = (state as? StationListState.Loaded)?.stations.orEmpty()
@@ -238,7 +257,7 @@ class StationListScreen(
                         .fillMaxSize()
                         .background(LightThemeTokens.colors.background)
                 ) {
-                    SearchContent(loadedStations, tapHoldArrivalsEnabled, onBack = { searchActive = false })
+                    SearchContent(loadedStations, tapHoldArrivalsEnabled, searchTextFieldState, onBack = { searchActive = false })
                 }
                 return@LightTheme
             }

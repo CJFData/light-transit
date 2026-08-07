@@ -1,6 +1,7 @@
 package com.thelightphone.transit.gtfs
 
 import java.io.File
+import java.time.ZoneId
 
 /**
  * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] are null when an agency has no realtime
@@ -11,14 +12,18 @@ import java.io.File
  * reachable through the narrowly scoped cleartext exception provided by the :netconfig module.
  *
  * To add a new agency: append an entry below with a unique [id] (uniqueness is enforced at
- * class-load time, see the companion `init` block), its [displayName], and its static [feedUrl].
- * Leave either realtime URL null if that feed doesn't exist. Nothing else needs a matching change
- * -- every screen and preference store iterates [entries] rather than switching on individual
- * agencies. Two things worth checking against the agency's *live* feed before trusting a new entry:
- * (1) all three URLs should be plain HTTPS, or you'll need RIPTA's cleartext exception above; (2)
- * GtfsRealtime.kt's hand-rolled protobuf schema only declares the specific field numbers seen in
- * MBTA/RIPTA/RTD's real feeds so far -- an undeclared field on a new agency's feed can fault the
- * whole GTFS-RT decode (see that file's doc comments), so hand-verify a live sample against it.
+ * class-load time, see the companion `init` block), its [displayName], its static [feedUrl], and
+ * its [timeZoneId] (copy it straight from that feed's own agency.txt `agency_timezone` column --
+ * don't guess from the city name). Leave either realtime URL null if that feed doesn't exist.
+ * Nothing else needs a matching change -- every screen and preference store iterates [entries]
+ * rather than switching on individual agencies. Three things worth checking against the agency's
+ * *live* feed before trusting a new entry: (1) all three URLs should be plain HTTPS, or you'll
+ * need RIPTA's cleartext exception above; (2) GtfsRealtime.kt's hand-rolled protobuf schema only
+ * declares the specific field numbers seen in MBTA/RIPTA/RTD's real feeds so far -- an undeclared
+ * field on a new agency's feed can fault the whole GTFS-RT decode (see that file's doc comments),
+ * so hand-verify a live sample against it; (3) [timeZoneId] only matters once it differs from
+ * every agency added before it -- verify it against the feed's own agency.txt regardless, since a
+ * wrong value fails silently (no crash, just wrong ETAs) rather than loudly.
  */
 enum class GtfsAgency(
     val id: String,
@@ -26,11 +31,21 @@ enum class GtfsAgency(
     val feedUrl: String,
     val realtimeTripUpdatesUrl: String?,
     val realtimeVehiclePositionsUrl: String?,
+    /** This agency's own IANA timezone, exactly as declared in its GTFS feed's agency.txt
+     * `agency_timezone` column (verified against each agency's real feed, not assumed) -- every
+     * GTFS scheduled time is only meaningful relative to the agency's OWN clock, not the rider's
+     * device's, so this (not `ZoneId.systemDefault()`) is what [todayForGtfs]/
+     * [currentGtfsTimeOfDay]/[gtfsTimeToEpochSeconds] must be anchored to. This only differs from
+     * the device's own zone when the rider's phone isn't physically in the agency's own timezone
+     * (checking a schedule remotely, or a manually-overridden clock) -- MBTA/RIPTA/LTC all happen
+     * to share Eastern with this project's own test devices, which is why RTD (the first
+     * Mountain-zone agency added) was the first to expose this having been wrong. */
+    val timeZoneId: String,
     /** Optional extra data sources beyond the feed URLs above -- see [AgencyComponent]. Empty
-     * for any agency that doesn't have one (e.g. RIPTA, today). */
+     * for any agency that doesn't have one (e.g. RIPTA, today). A [SecondaryGtfsFeed] entry here
+     * is how an agency merges in another feed's static (and, if it ever publishes one, realtime)
+     * data -- see [GtfsAgency.RTD]'s Bustang entry. */
     val components: List<AgencyComponent> = emptyList(),
-    /** Additional static feeds merged into this agency's database, with IDs namespaced per feed. */
-    val additionalStaticFeedUrls: List<String> = emptyList(),
 ) {
     MBTA(
         "mbta",
@@ -38,6 +53,7 @@ enum class GtfsAgency(
         "https://cdn.mbta.com/MBTA_GTFS.zip",
         "https://cdn.mbta.com/realtime/TripUpdates.pb",
         "https://cdn.mbta.com/realtime/VehiclePositions.pb",
+        timeZoneId = "America/New_York",
         components = listOf(MbtaV3VehicleSource),
     ),
     RIPTA(
@@ -46,6 +62,7 @@ enum class GtfsAgency(
         "https://ripta.com/RIPTA-GTFS.zip",
         "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
         "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
+        timeZoneId = "America/New_York",
     ),
     RTD(
         "rtd",
@@ -53,11 +70,24 @@ enum class GtfsAgency(
         "https://www.rtd-denver.com/files/gtfs/google_transit.zip",
         "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/TripUpdate.pb",
         "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/VehiclePosition.pb",
-        additionalStaticFeedUrls = listOf(
-            "https://www.rtd-denver.com/files/gtfs/bustang-co-us.zip",
-        ),
+        timeZoneId = "America/Denver",
+        components = listOf(BustangSecondaryFeed),
     ),
+    LTC(
+        "ltc",
+        "LTC Ontario-testing",
+        "https://www.londontransit.ca/gtfsfeed/google_transit.zip",
+        "http://gtfs.ltconline.ca/TripUpdate/TripUpdates.pb",
+        "http://gtfs.ltconline.ca/Vehicle/VehiclePositions.pb",
+        timeZoneId = "America/Toronto",
+        components = listOf(LtcTrustAnchor),
+    ),
+
     ;
+
+    /** Cached lookup -- [ZoneId.of] parses/interns the zone's rules, no need to redo that on every
+     * "what time is it right now for this agency" call. */
+    val zoneId: ZoneId by lazy { ZoneId.of(timeZoneId) }
 
     /** Fetches this agency's own instance of a given [AgencyComponent] type, if it has one -- e.g.
      * `agency.component<PlatformAssignmentSource>()`. Null for any agency/type combination that

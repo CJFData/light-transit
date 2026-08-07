@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.StopConnection
@@ -84,6 +85,7 @@ class StopConnectionsViewModel(
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
+    private val agency = GtfsAgency.forDbFile(dbFile)
 
     private val _state = MutableStateFlow<StopConnectionsState>(StopConnectionsState.Loading)
     val state: StateFlow<StopConnectionsState> = _state
@@ -110,7 +112,7 @@ class StopConnectionsViewModel(
                 isStation.value = station != null
                 val stopIds = station?.memberStopIds ?: listOf(stopId)
 
-                val today = todayForGtfs()
+                val today = todayForGtfs(agency?.zoneId ?: java.time.ZoneId.systemDefault())
                 val connections = repository.getNextConnections(stopIds, afterTime, excludeTripId, today)
                 // What's already offered right here -- a nearby stop repeating one of these isn't
                 // telling you anything new, so it's left out of that stop's list entirely.

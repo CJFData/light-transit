@@ -40,6 +40,12 @@ import java.io.File
 sealed class DirectionSelectionState {
     object Loading : DirectionSelectionState()
     data class Loaded(val directions: List<DirectionOption>) : DirectionSelectionState()
+    /** Distinguished from [Loaded] with an empty list -- see [GtfsRepository.routeHasTrips]'s own
+     * doc. This route genuinely has no trips scheduled at all, so there's nowhere useful to
+     * auto-skip to (unlike an empty-but-has-trips [Loaded], which auto-advances straight to stop
+     * selection). Rendered here instead, so back navigation behaves normally rather than bouncing
+     * straight back into a dead-end "No stops found" screen every time. */
+    object NoTrips : DirectionSelectionState()
     data class Error(val message: String) : DirectionSelectionState()
 }
 
@@ -65,7 +71,12 @@ class DirectionSelectionViewModel(dbFile: File, private val routeId: String) : L
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
-                DirectionSelectionState.Loaded(repository.getDirections(routeId))
+                val directions = repository.getDirections(routeId)
+                if (directions.isEmpty() && !repository.routeHasTrips(routeId)) {
+                    DirectionSelectionState.NoTrips
+                } else {
+                    DirectionSelectionState.Loaded(directions)
+                }
             } catch (e: Exception) {
                 Log.e("DirectionSelectionScreen", "Failed to load directions for route $routeId", e)
                 DirectionSelectionState.Error("Unable to load directions.")
@@ -96,8 +107,13 @@ class DirectionSelectionScreen(
         val state by viewModel.state.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
+        // Only reachable when this route DOES have trips (see DirectionSelectionState.NoTrips's
+        // own doc) -- every one of them just has a null direction_id, so there's nothing
+        // meaningful to distinguish here; skip straight to stop selection instead of showing an
+        // empty list with nothing to tap.
         LaunchedEffect(state) {
-            if (state is DirectionSelectionState.Loaded && (state as DirectionSelectionState.Loaded).directions.isEmpty()) {
+            val loaded = state as? DirectionSelectionState.Loaded ?: return@LaunchedEffect
+            if (loaded.directions.isEmpty()) {
                 navigateTo(screenFactory = { activity ->
                     FirstStopSelectionScreen(activity, dbFile, routeId, routeLabel, null, "Route")
                 })
@@ -138,13 +154,13 @@ class DirectionSelectionScreen(
                         lighten = true,
                     )
 
-                    is DirectionSelectionState.Loaded -> if (s.directions.isEmpty()) {
-                        LightText(
-                            text = "No directions found.",
-                            variant = LightTextVariant.Copy,
-                            lighten = true,
-                        )
-                    } else {
+                    is DirectionSelectionState.NoTrips -> LightText(
+                        text = "No trips currently scheduled for this route.",
+                        variant = LightTextVariant.Copy,
+                        lighten = true,
+                    )
+
+                    is DirectionSelectionState.Loaded -> {
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.directions) { direction ->
                                 LightText(

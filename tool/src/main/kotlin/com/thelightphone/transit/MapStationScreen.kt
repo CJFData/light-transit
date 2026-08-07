@@ -12,11 +12,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.GtfsAgency
-import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.MapTileClient
 import com.thelightphone.transit.gtfs.MapTiles
+import com.thelightphone.transit.gtfs.fetchMergedTripUpdates
+import com.thelightphone.transit.gtfs.fetchMergedVehiclePositions
 import com.thelightphone.transit.gtfs.fitBoundsZoom
 import com.thelightphone.transit.gtfs.metersPerPixel
 import com.thelightphone.transit.gtfs.platformLabelFromStopDesc
@@ -241,27 +242,15 @@ class MapStationViewModel(
             _state.value = stationLoaded(context, emptyList())
             return
         }
-        val vehiclePositionsFeed = try {
-            GtfsRealtimeClient.fetchFeed(agency.realtimeVehiclePositionsUrl)
-        } catch (e: Exception) {
-            Log.e("MapStationScreen", "VehiclePositions fetch failed for ${agency.displayName}", e)
-            null
-        }
-        if (vehiclePositionsFeed == null) {
+        val vehiclePositions = agency.fetchMergedVehiclePositions("MapStationScreen")
+        if (vehiclePositions.primary == null) {
             _state.value = stationLoaded(context, emptyList())
             return
         }
-        val tripUpdatesFeed = agency.realtimeTripUpdatesUrl?.let { url ->
-            try {
-                GtfsRealtimeClient.fetchFeed(url)
-            } catch (e: Exception) {
-                Log.e("MapStationScreen", "TripUpdates fetch failed for ${agency.displayName}", e)
-                null
-            }
-        }
+        val tripUpdatesByTripId = agency.fetchMergedTripUpdates("MapStationScreen").byTripId
         val buses = buildSeeEverythingBuses(
             repository, context.centerLat, context.centerLon, context.zoom,
-            vehiclePositionsFeed, tripUpdatesFeed, todayForGtfs(), System.currentTimeMillis() / 1000,
+            vehiclePositions.byTripId, tripUpdatesByTripId, todayForGtfs(agency.zoneId), agency.zoneId, System.currentTimeMillis() / 1000,
             expandedStopIds.value.toList(), context.filterByStopEnabled, memberStopIds.first(),
             context.seeEverythingShowBus, context.seeEverythingShowSubway, context.seeEverythingShowCommuterRail,
         )

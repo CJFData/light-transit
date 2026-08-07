@@ -52,11 +52,11 @@ class SettingsViewModel(
 
     val darkMapEnabled: StateFlow<Boolean>
         get() = _darkMapEnabled
-    private val _darkMapEnabled = MutableStateFlow(false)
+    private val _darkMapEnabled = MutableStateFlow(true)
 
     val tapHoldArrivalsEnabled: StateFlow<Boolean>
         get() = _tapHoldArrivalsEnabled
-    private val _tapHoldArrivalsEnabled = MutableStateFlow(false)
+    private val _tapHoldArrivalsEnabled = MutableStateFlow(true)
 
     val tapHoldScheduleArrivalsEnabled: StateFlow<Boolean>
         get() = _tapHoldScheduleArrivalsEnabled
@@ -72,7 +72,7 @@ class SettingsViewModel(
 
     val doubleTapStationEnabled: StateFlow<Boolean>
         get() = _doubleTapStationEnabled
-    private val _doubleTapStationEnabled = MutableStateFlow(false)
+    private val _doubleTapStationEnabled = MutableStateFlow(true)
 
     val trackTappedStopsEnabled: StateFlow<Boolean>
         get() = _trackTappedStopsEnabled
@@ -80,7 +80,7 @@ class SettingsViewModel(
 
     val seeEverythingEnabled: StateFlow<Boolean>
         get() = _seeEverythingEnabled
-    private val _seeEverythingEnabled = MutableStateFlow(false)
+    private val _seeEverythingEnabled = MutableStateFlow(true)
 
     val filterByStopEnabled: StateFlow<Boolean>
         get() = _filterByStopEnabled
@@ -109,6 +109,10 @@ class SettingsViewModel(
     val dailyMessageRandom: StateFlow<Boolean>
         get() = _dailyMessageRandom
     private val _dailyMessageRandom = MutableStateFlow(false)
+
+    val mergeFeedStationsEnabled: StateFlow<Boolean>
+        get() = _mergeFeedStationsEnabled
+    private val _mergeFeedStationsEnabled = MutableStateFlow(false)
 
     init {
         viewModelScope.launch {
@@ -158,6 +162,9 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             homeScreenPreferences.dailyMessageRandomFlow.collect { _dailyMessageRandom.value = it }
+        }
+        viewModelScope.launch {
+            agencyPreferences.mergeFeedStationsEnabledFlow.collect { _mergeFeedStationsEnabled.value = it }
         }
     }
 
@@ -228,6 +235,10 @@ class SettingsViewModel(
     fun setDailyMessageRandom(random: Boolean) {
         viewModelScope.launch { homeScreenPreferences.setDailyMessageRandom(random) }
     }
+
+    fun setMergeFeedStationsEnabled(enabled: Boolean) {
+        viewModelScope.launch { agencyPreferences.setMergeFeedStationsEnabled(enabled) }
+    }
 }
 
 class SettingsScreen(
@@ -285,6 +296,7 @@ class SettingsScreen(
         val progressBarVisible by viewModel.progressBarVisible.collectAsState()
         val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
         val dailyMessageRandom by viewModel.dailyMessageRandom.collectAsState()
+        val mergeFeedStationsEnabled by viewModel.mergeFeedStationsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -330,6 +342,22 @@ class SettingsScreen(
                 }
 
                 LightText(
+                    text = "Merge feed stations",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, a merged secondary feed's stops at the same physical station as " +
+                        "one of its parent agency's own are grouped into that station -- e.g. Bustang's " +
+                        "gates at RTD Denver's Union Station.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Merge feed stations", mergeFeedStationsEnabled, viewModel::setMergeFeedStationsEnabled)
+
+                LightText(
                     text = "Map style",
                     variant = LightTextVariant.Copy,
                     lighten = true,
@@ -365,51 +393,27 @@ class SettingsScreen(
                 }
 
                 LightText(
-                    text = "Tap and hold a stop",
+                    text = "Tap and hold to view arrivals",
                     variant = LightTextVariant.Copy,
                     lighten = true,
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, tap and hold any stop on the Map screen to jump straight to its upcoming " +
-                        "arrivals. Also applies to a station's own name while viewing its Station map -- tap " +
-                        "and hold it for the whole station's own upcoming arrivals.",
+                    text = "When on (the default for all three below), tap and hold a stop or station to " +
+                        "jump straight to its live upcoming arrivals instead of whatever a plain tap would " +
+                        "open there. Three separate toggles since each covers a different screen: Map (any " +
+                        "stop marker, or a station's own name while already viewing its platform map), " +
+                        "Schedules (a stop while choosing where to board, after picking a route and " +
+                        "direction -- a plain tap there still shows that route's scheduled times either " +
+                        "way), and Stations (a row in the Stations list -- a plain tap there still opens " +
+                        "its platform map either way).",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
-                ToggleRow("Tap and hold a stop", tapHoldArrivalsEnabled, viewModel::setTapHoldArrivalsEnabled)
-
-                LightText(
-                    text = "Tap and hold -- Schedules",
-                    variant = LightTextVariant.Copy,
-                    lighten = true,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
-                LightText(
-                    text = "When on, tap and hold a stop while choosing where to board (after picking " +
-                        "a route and direction) to jump to its actual live upcoming arrivals. A plain " +
-                        "tap still shows that route's scheduled times either way.",
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(bottom = 16.dp),
-                )
-                ToggleRow("Tap and hold -- Schedules", tapHoldScheduleArrivalsEnabled, viewModel::setTapHoldScheduleArrivalsEnabled)
-
-                LightText(
-                    text = "Tap and hold -- Stations",
-                    variant = LightTextVariant.Copy,
-                    lighten = true,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
-                LightText(
-                    text = "When on, tap and hold a station in the Stations list to jump straight to " +
-                        "its live upcoming arrivals. A plain tap still opens its platform map either way.",
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(bottom = 16.dp),
-                )
-                ToggleRow("Tap and hold -- Stations", tapHoldStationArrivalsEnabled, viewModel::setTapHoldStationArrivalsEnabled)
+                ToggleRow("Map", tapHoldArrivalsEnabled, viewModel::setTapHoldArrivalsEnabled)
+                ToggleRow("Schedules", tapHoldScheduleArrivalsEnabled, viewModel::setTapHoldScheduleArrivalsEnabled)
+                ToggleRow("Stations", tapHoldStationArrivalsEnabled, viewModel::setTapHoldStationArrivalsEnabled)
 
                 LightText(
                     text = "Tap and hold -- Vehicles",
@@ -465,9 +469,12 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, the Map screen and Station map show every live vehicle in view, not " +
-                        "just ones actually relevant to the stop you're looking at -- each labeled with just " +
-                        "its route until tapped, which shows its full details.",
+                    text = "When on (the default), the Map screen and Station map show every live vehicle " +
+                        "in view, not just ones actually relevant to the stop you're looking at -- each " +
+                        "labeled with just its route until tapped, which shows its full details. When off, " +
+                        "the map shows only vehicles whose own trip is scheduled to serve a stop currently " +
+                        "in view, matched against that stop's own upcoming departures -- fewer markers, but " +
+                        "each one is guaranteed relevant to a stop on screen.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),

@@ -45,3 +45,34 @@ data class LiveVehicleInfo(
 fun interface LiveVehicleSource : AgencyComponent {
     suspend fun vehiclesByRoute(routeIds: Set<String>): Map<String, LiveVehicleInfo>
 }
+
+/**
+ * An extra GTFS feed merged into an agency's own database alongside its primary feed, under its
+ * own id-prefixed namespace (see [GtfsIngestor]'s `idPrefix` handling) -- e.g. Bustang, CDOT's
+ * intercity coach service, whose static schedule RTD Denver re-hosts and this app merges into
+ * RTD's own on-device database so a single "RTD Denver" schedule lookup covers both without the
+ * rider needing to pick a separate agency (see [GtfsAgency.RTD]). An [AgencyComponent] like
+ * [LiveVehicleSource], so a future second merged feed for some other agency is just another entry
+ * in that agency's own `components` list, not a change to [GtfsAgency]'s shape.
+ *
+ * [name] is this feed's own short, rider-facing label (e.g. "Bustang") -- used two places: (1)
+ * appended to one of this feed's own routes/stops whose name doesn't already mention it (see
+ * [GtfsIngestor]'s `disambiguatedName`), so a merged route/stop reads as e.g. "West Line -
+ * Bustang" rather than looking like one of the parent agency's own; (2) folded into the parent
+ * agency's own feed attribution line alongside the primary feed's, so both sources get credited
+ * (see HomeScreen's own feed-attribution handling).
+ *
+ * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] carry this feed's OWN live vehicle data,
+ * distinct from the parent agency's -- null when this feed has no realtime data of its own
+ * (verify this the same way every other agency's realtime URL is verified before trusting it --
+ * see [GtfsAgency]'s own doc comment). A caller polling an agency's live data should treat a
+ * [SecondaryGtfsFeed] with non-null realtime URLs as a second feed to fetch and merge in, keyed by
+ * trip_id the same way the primary feed already is -- this feed's trip_ids are prefixed the same
+ * way its static data's are, so the two never collide.
+ */
+class SecondaryGtfsFeed(
+    val name: String,
+    val feedUrl: String,
+    val realtimeTripUpdatesUrl: String? = null,
+    val realtimeVehiclePositionsUrl: String? = null,
+) : AgencyComponent

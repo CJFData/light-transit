@@ -184,6 +184,16 @@ class GtfsRepository(dbFile: File) {
             }
         }
 
+    /** [getDirections] returning empty is ambiguous on its own: either every one of this route's
+     * trips has a null direction_id (a real, common case -- e.g. a loop route with no meaningful
+     * "direction" to distinguish, where skipping straight to stop selection is the right call), or
+     * the route has no trips scheduled at all (confirmed to genuinely happen -- e.g. LTC's own feed
+     * publishes some routes with zero currently-active trips), where skipping ahead just lands on a
+     * dead-end "No stops found" screen. Callers use this to tell the two apart before deciding
+     * whether to auto-skip direction selection. */
+    fun routeHasTrips(routeId: String): Boolean =
+        db.rawQuery("SELECT 1 FROM trips WHERE route_id = ? LIMIT 1", arrayOf(routeId)).use { it.moveToFirst() }
+
     /**
      * Every distinct stop served by any trip on [routeId]+[directionId], ordered by each stop's
      * earliest stop_sequence across those trips — an approximation of physical route order,
@@ -943,11 +953,15 @@ private fun activeTodayClause(dayColumn: String): String = """
     )
 """.trimIndent()
 
-fun todayForGtfs(): LocalDate = LocalDate.now()
+/** [zoneId] should always be the specific agency's own [GtfsAgency.zoneId] -- GTFS service days
+ * are defined relative to the agency's own clock, not the rider's device's, which only coincides
+ * with the device's default zone when the rider happens to be physically in that timezone. */
+fun todayForGtfs(zoneId: java.time.ZoneId): LocalDate = LocalDate.now(zoneId)
 
-/** Current wall-clock time as a GTFS "HH:MM:SS" string, for bounding "departures from now on". */
-fun currentGtfsTimeOfDay(): String {
-    val now = java.time.LocalTime.now()
+/** Current wall-clock time as a GTFS "HH:MM:SS" string, for bounding "departures from now on" --
+ * see [todayForGtfs]'s own doc for why [zoneId] must be the agency's own, not the device's. */
+fun currentGtfsTimeOfDay(zoneId: java.time.ZoneId): String {
+    val now = java.time.LocalTime.now(zoneId)
     return "%02d:%02d:%02d".format(now.hour, now.minute, now.second)
 }
 

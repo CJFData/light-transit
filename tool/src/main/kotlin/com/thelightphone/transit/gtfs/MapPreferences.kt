@@ -19,30 +19,30 @@ private val seeEverythingShowCommuterRailKey = booleanPreferencesKey("MAP_SEE_EV
 
 /**
  * The user's Map screen tile style (Settings screen), persisted the same way [AgencyPreferences]
- * persists the default agency. When enabled, the Map screen fetches CARTO's Dark Matter tiles
- * instead of its default (Voyager, brighter/more legible) tiles -- see [MapTileClient].
+ * persists the default agency. On by default -- the Map screen fetches CARTO's Dark Matter tiles;
+ * off falls back to Voyager (brighter/more legible in direct sunlight) -- see [MapTileClient].
  */
 class MapPreferences(private val dataStore: DataStore<Preferences>) {
 
-    val darkMapEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[darkMapKey] ?: false }
+    val darkMapEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[darkMapKey] ?: true }
 
     suspend fun setDarkMapEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[darkMapKey] = enabled }
     }
 
-    /** Off by default -- tap-and-hold on a stop marker is an extra gesture on top of the Map
-     * screen's existing tap-to-expand behavior, so it's opt-in rather than silently changing what
-     * a long press on the map already does for existing users. */
-    val tapHoldArrivalsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[tapHoldArrivalsKey] ?: false }
+    /** On by default, matching the other two "tap and hold to view arrivals" toggles (Settings
+     * screen's Schedules/Stations, see TapHoldPreferences) -- all three share one on-by-default
+     * rule now rather than this one alone starting opt-in. */
+    val tapHoldArrivalsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[tapHoldArrivalsKey] ?: true }
 
     suspend fun setTapHoldArrivalsEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[tapHoldArrivalsKey] = enabled }
     }
 
-    /** Off by default, same reasoning as [tapHoldArrivalsEnabledFlow] -- double-tapping a station
-     * marker to open its Station sub-map is an extra gesture layered on top of the Map screen's
-     * existing tap/tap-hold behavior, so it's opt-in. */
-    val doubleTapStationEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[doubleTapStationKey] ?: false }
+    /** On by default -- zooming into a station's own platform view is common enough (and harmless
+     * enough alongside the Map screen's existing tap/tap-hold behavior, which uses a different
+     * gesture) that it isn't worth making riders opt in first. */
+    val doubleTapStationEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[doubleTapStationKey] ?: true }
 
     suspend fun setDoubleTapStationEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[doubleTapStationKey] = enabled }
@@ -59,12 +59,15 @@ class MapPreferences(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { prefs -> prefs[trackTappedStopsKey] = enabled }
     }
 
-    /** Off by default -- when on, the Map screen and Station sub-map drop the usual schedule-
-     * anchored vehicle matching entirely and instead plot EVERY live vehicle (any route, any
-     * agency feed) whose position falls within the map's own rendered radius, labeled with just
-     * its route short name until tapped (see BusMarker.shortLabel/tripDescription). A materially
-     * different, much broader view than the default "vehicles actually relevant to this stop" one. */
-    val seeEverythingEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[seeEverythingKey] ?: false }
+    /** On by default -- the Map screen and Station sub-map drop the usual schedule-anchored
+     * vehicle matching entirely and instead plot EVERY live vehicle (any route, any agency feed)
+     * whose position falls within the map's own rendered radius, labeled with just its route
+     * short name until tapped (see BusMarker.shortLabel/tripDescription). Turned off, the map
+     * reverts to the narrower default: only vehicles whose own trip is actually scheduled to
+     * serve a stop currently in view, matched against that stop's own upcoming departures rather
+     * than shown by raw position alone -- fewer markers, but each one is guaranteed relevant to
+     * a stop on screen. */
+    val seeEverythingEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[seeEverythingKey] ?: true }
 
     suspend fun setSeeEverythingEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[seeEverythingKey] = enabled }

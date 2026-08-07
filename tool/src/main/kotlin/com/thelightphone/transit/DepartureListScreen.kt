@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.Departure
+import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.formatGtfsTime
 import com.thelightphone.transit.gtfs.todayForGtfs
@@ -52,6 +53,7 @@ class DepartureListViewModel(
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
+    private val agency = GtfsAgency.forDbFile(dbFile)
 
     private val _state = MutableStateFlow<DepartureListState>(DepartureListState.Loading)
     val state: StateFlow<DepartureListState> = _state
@@ -60,7 +62,7 @@ class DepartureListViewModel(
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
-                val today = todayForGtfs()
+                val today = todayForGtfs(agency?.zoneId ?: java.time.ZoneId.systemDefault())
                 DepartureListState.Loaded(repository.getDepartures(routeId, directionId, stopId, today))
             } catch (e: Exception) {
                 Log.e("DepartureListScreen", "Failed to load departures for stop $stopId", e)

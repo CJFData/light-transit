@@ -59,8 +59,13 @@ kotlin {
 
 dependencies {
     implementation(project(":sdk:client"))
-    // RIPTA's realtime feeds are HTTP-only; netconfig scopes the exception to that host.
+    // --- BEGIN removable cleartext exception for RIPTA/LTC realtime feeds ---
+    //
+    // RIPTA's and LTC London's realtime feeds are HTTP-only; netconfig scopes the exception to
+    // just those hosts (see netconfig/build.gradle.kts and its own network_security_config.xml
+    // for the full explanation, and why this is a separate module rather than inline here).
     implementation(project(":netconfig"))
+    // --- END removable cleartext exception for RIPTA/LTC realtime feeds ---
     // sdk:client/sdk:ui only depend on this internally (implementation, not api), so it isn't
     // exposed transitively -- InlineLp3Keyboard.kt's rememberInlineLp3KeyboardViewModel (used by
     // both StationListScreen's live-filter search and its own scoped ViewModelProvider.Factory)

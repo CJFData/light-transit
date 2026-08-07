@@ -37,10 +37,12 @@ import androidx.compose.ui.graphics.Canvas as ComposeCanvas
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.GtfsAgency
-import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
-import com.thelightphone.transit.gtfs.GtfsRtFeedMessage
+import com.thelightphone.transit.gtfs.GtfsRtTripUpdate
+import com.thelightphone.transit.gtfs.GtfsRtVehiclePosition
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
+import com.thelightphone.transit.gtfs.fetchMergedTripUpdates
+import com.thelightphone.transit.gtfs.fetchMergedVehiclePositions
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.TapHoldPreferences
@@ -428,7 +430,7 @@ class MapViewModel(
                 // scheduled at screen-open time won't appear mid-session.
                 for (id in primaryStopIds) {
                     scheduledArrivalsByStopId[id] = repository.getScheduledArrivals(
-                        id, currentGtfsTimeOfDay(), todayForGtfs(), SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS,
+                        id, currentGtfsTimeOfDay(agency.zoneId), todayForGtfs(agency.zoneId), SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS,
                     )
                 }
                 val streetContext = try {
@@ -524,7 +526,7 @@ class MapViewModel(
 
     private suspend fun refresh() {
         val context = loadedContext ?: return
-        val today = todayForGtfs()
+        val today = todayForGtfs(agency.zoneId)
         val nowEpochSeconds = System.currentTimeMillis() / 1000
 
         // Active stops: always the primary one -- every member platform when it's a station (see
@@ -541,7 +543,7 @@ class MapViewModel(
         for (id in activeStopIds) {
             if (id !in scheduledArrivalsByStopId) {
                 scheduledArrivalsByStopId[id] = repository.getScheduledArrivals(
-                    id, currentGtfsTimeOfDay(), today, SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS,
+                    id, currentGtfsTimeOfDay(agency.zoneId), today, SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS,
                 )
             }
         }
@@ -556,13 +558,11 @@ class MapViewModel(
             return
         }
 
-        val vehiclePositionsFeed = try {
-            GtfsRealtimeClient.fetchFeed(agency.realtimeVehiclePositionsUrl)
-        } catch (e: Exception) {
-            Log.e("MapScreen", "VehiclePositions fetch failed for ${agency.displayName}", e)
-            null
-        }
-        if (vehiclePositionsFeed == null) {
+        // Merged with any SecondaryGtfsFeed component's own realtime feed (e.g. Bustang under RTD
+        // Denver) -- see MergedRealtimeFeed's own doc. Status below is still keyed off the primary
+        // feed only, unchanged from before secondary feeds existed.
+        val vehiclePositions = agency.fetchMergedVehiclePositions("MapScreen")
+        if (vehiclePositions.primary == null) {
             _state.value = MapState.Loaded(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.UNAVAILABLE,
@@ -571,15 +571,9 @@ class MapViewModel(
             )
             return
         }
+        val vehiclePositionsByTripId = vehiclePositions.byTripId
 
-        val tripUpdatesFeed = agency.realtimeTripUpdatesUrl?.let { url ->
-            try {
-                GtfsRealtimeClient.fetchFeed(url)
-            } catch (e: Exception) {
-                Log.e("MapScreen", "TripUpdates fetch failed for ${agency.displayName}", e)
-                null
-            }
-        }
+        val tripUpdatesByTripId = agency.fetchMergedTripUpdates("MapScreen").byTripId
 
         // Only trips that are BOTH scheduled to arrive at an active stop AND currently reporting a
         // live vehicle position ever become a marker — no scheduled-only approximation. Each active
@@ -644,7 +638,7 @@ class MapViewModel(
         val knownPrimaryTripIds = primaryStopIds.flatMapTo(mutableSetOf()) { id ->
             scheduledArrivalsByStopId[id].orEmpty().map { it.tripId }
         }
-        val missingLiveTripIds = (vehiclePositionsFeed.vehiclePositionsByTripId.keys + mbtaV3VehiclesByTripId.keys) - knownPrimaryTripIds
+        val missingLiveTripIds = (vehiclePositionsByTripId.keys + mbtaV3VehiclesByTripId.keys) - knownPrimaryTripIds
         if (missingLiveTripIds.isNotEmpty()) {
             repository.getScheduledArrivalsForTrips(missingLiveTripIds, primaryStopIds).forEach { arrival ->
                 val existing = scheduledArrivalsByStopId[arrival.stopId].orEmpty()
@@ -675,7 +669,7 @@ class MapViewModel(
                     currentStatus = v3Vehicle.currentStatus
                     currentSeq = v3Vehicle.currentStopSequence
                 } else {
-                    val vehicle = vehiclePositionsFeed.vehiclePositionsByTripId[arrival.tripId] ?: return@mapNotNull null
+                    val vehicle = vehiclePositionsByTripId[arrival.tripId] ?: return@mapNotNull null
                     val position = vehicle.position ?: return@mapNotNull null
                     lat = position.latitude.toDouble()
                     lon = position.longitude.toDouble()
@@ -690,9 +684,9 @@ class MapViewModel(
                 // past (real-world dwell time is naturally a bit fuzzy).
                 val isArrived = currentStatus == GtfsRtVehicleStatus.STOPPED_AT && currentSeq == arrival.stopSequence
 
-                val rtStopUpdate = tripUpdatesFeed?.tripUpdatesByTripId?.get(arrival.tripId)
+                val rtStopUpdate = tripUpdatesByTripId[arrival.tripId]
                     ?.updateFor(activeStopId, arrival.stopSequence)
-                val eta = computeArrivalEta(arrival.departureTime, today, rtStopUpdate) ?: return@mapNotNull null
+                val eta = computeArrivalEta(arrival.departureTime, today, rtStopUpdate, agency.zoneId) ?: return@mapNotNull null
 
                 // Departed: either its own GPS-based progress has moved past this stop, or (a
                 // fallback for when current_stop_sequence is stale/missing) its predicted/actual
@@ -780,7 +774,7 @@ class MapViewModel(
         val displayedBuses = if (context.seeEverythingEnabled) {
             buildSeeEverythingBuses(
                 repository, context.stop.lat, context.stop.lon, context.zoom,
-                vehiclePositionsFeed, tripUpdatesFeed, today, nowEpochSeconds,
+                vehiclePositionsByTripId, tripUpdatesByTripId, today, agency.zoneId, nowEpochSeconds,
                 expandedStopIds.value.toList(), context.filterByStopEnabled, stopId,
                 context.seeEverythingShowBus, context.seeEverythingShowSubway, context.seeEverythingShowCommuterRail,
             )
@@ -831,9 +825,10 @@ internal fun buildSeeEverythingBuses(
     centerLat: Double,
     centerLon: Double,
     zoom: Int,
-    vehiclePositionsFeed: GtfsRtFeedMessage,
-    tripUpdatesFeed: GtfsRtFeedMessage?,
+    vehiclePositionsByTripId: Map<String, GtfsRtVehiclePosition>,
+    tripUpdatesByTripId: Map<String, GtfsRtTripUpdate>,
     today: LocalDate,
+    zoneId: ZoneId,
     nowEpochSeconds: Long,
     selectedStopIds: List<String>,
     filterByStopEnabled: Boolean,
@@ -848,7 +843,7 @@ internal fun buildSeeEverythingBuses(
     showCommuterRail: Boolean = true,
 ): List<BusMarker> {
     val fetchRadiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(centerLat, zoom)
-    val inBounds = vehiclePositionsFeed.vehiclePositionsByTripId.filterValues { vehicle ->
+    val inBounds = vehiclePositionsByTripId.filterValues { vehicle ->
         val position = vehicle.position ?: return@filterValues false
         haversineMeters(centerLat, centerLon, position.latitude.toDouble(), position.longitude.toDouble()) <= fetchRadiusMeters
     }
@@ -886,8 +881,8 @@ internal fun buildSeeEverythingBuses(
                 currentSeq != null && currentSeq > stopTime.stopSequence -> StopRelation.FROM
                 else -> StopRelation.TO
             }
-            val rtStopUpdate = tripUpdatesFeed?.tripUpdatesByTripId?.get(tripId)?.updateFor(stopTime.stopId, stopTime.stopSequence)
-            val eta = computeArrivalEta(stopTime.departureTime, today, rtStopUpdate)
+            val rtStopUpdate = tripUpdatesByTripId[tripId]?.updateFor(stopTime.stopId, stopTime.stopSequence)
+            val eta = computeArrivalEta(stopTime.departureTime, today, rtStopUpdate, zoneId)
             BusMarker(
                 tripId = tripId,
                 targetStopId = stopTime.stopId,

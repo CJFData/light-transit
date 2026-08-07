@@ -18,11 +18,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.GtfsAgency
-import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.computeArrivalEta
 import com.thelightphone.transit.gtfs.currentGtfsTimeOfDay
+import com.thelightphone.transit.gtfs.fetchMergedTripUpdates
 import com.thelightphone.transit.gtfs.formatGtfsTime
 import com.thelightphone.transit.gtfs.isStale
 import com.thelightphone.transit.gtfs.todayForGtfs
@@ -143,25 +143,22 @@ class UpcomingArrivalsViewModel(
                 Log.e("UpcomingArrivalsScreen", "getStationContaining failed for stops $stopIds", e)
             }
             _state.value = try {
-                val today = todayForGtfs()
-                val scheduled = repository.getScheduledArrivals(stopIds, currentGtfsTimeOfDay(), today)
+                val today = todayForGtfs(agency.zoneId)
+                val scheduled = repository.getScheduledArrivals(stopIds, currentGtfsTimeOfDay(agency.zoneId), today)
 
-                val feed = agency.realtimeTripUpdatesUrl?.let { url ->
-                    try {
-                        GtfsRealtimeClient.fetchFeed(url)
-                    } catch (e: Exception) {
-                        Log.e("UpcomingArrivalsScreen", "Realtime fetch failed for ${agency.displayName}", e)
-                        null
-                    }
-                }
+                // Merged with any SecondaryGtfsFeed component's own realtime feed (e.g. Bustang
+                // under RTD Denver) -- see MergedRealtimeFeed's own doc. [feed.primary] (used below
+                // for staleness/offline) stays keyed off the agency's own primary feed only,
+                // unchanged from before secondary feeds existed.
+                val feed = agency.fetchMergedTripUpdates("UpcomingArrivalsScreen")
 
                 val rows = scheduled.mapNotNull { arrival ->
                     // Matched against this specific arrival's own platform (arrival.stopId), not
                     // just whichever platform the screen was originally opened for -- a grouped
                     // station's live predictions are per-platform, same as its static schedule.
-                    val rtStopUpdate = feed?.tripUpdatesByTripId?.get(arrival.tripId)
+                    val rtStopUpdate = feed.byTripId[arrival.tripId]
                         ?.updateFor(arrival.stopId, arrival.stopSequence)
-                    val eta = computeArrivalEta(arrival.departureTime, today, rtStopUpdate) ?: return@mapNotNull null
+                    val eta = computeArrivalEta(arrival.departureTime, today, rtStopUpdate, agency.zoneId) ?: return@mapNotNull null
                     ArrivalRow(
                         tripId = arrival.tripId,
                         stopSequence = arrival.stopSequence,
@@ -175,11 +172,11 @@ class UpcomingArrivalsViewModel(
                     )
                 }.sortedBy { it.etaEpochSeconds }
 
-                val stale = feed?.header?.isStale(System.currentTimeMillis() / 1000) ?: false
+                val stale = feed.primary?.header?.isStale(System.currentTimeMillis() / 1000) ?: false
                 // Offline means "no live prediction at all" — a feed that fetched fine but simply
                 // has zero matches among currently-scheduled trips still counts as offline, while
                 // even one live match means we're genuinely getting live data.
-                val isOffline = feed == null || (rows.isNotEmpty() && rows.none { it.isLive })
+                val isOffline = feed.primary == null || (rows.isNotEmpty() && rows.none { it.isLive })
                 UpcomingArrivalsState.Loaded(rows, isOffline = isOffline, realtimeStale = stale)
             } catch (e: Exception) {
                 Log.e("UpcomingArrivalsScreen", "Failed to load arrivals for stops $stopIds", e)

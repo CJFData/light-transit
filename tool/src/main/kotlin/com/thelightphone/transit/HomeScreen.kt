@@ -36,8 +36,10 @@ import com.thelightphone.transit.gtfs.FeedAttribution
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsIngestor
-import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.SecondaryGtfsFeed
+import com.thelightphone.transit.gtfs.fetchTripUpdate
+import com.thelightphone.transit.gtfs.fetchVehiclePosition
 import com.thelightphone.transit.gtfs.matchCurrentStopByProximity
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.TripStopRow
@@ -330,11 +332,14 @@ class HomeScreenViewModel(
      * previous agency can't flash the link before this agency's own check completes. */
     val agencyHasStations = MutableStateFlow(false)
 
-    /** The currently-selected agency's own GTFS-feed attribution -- see
-     * GtfsRepository.getFeedAttribution's own doc for the fallback chain. Reset to null the moment
-     * a new agency is selected, same reasoning as [agencyHasStations]: a stale value from the
-     * previous agency shouldn't flash under the new one before its own check completes. */
-    val feedAttribution = MutableStateFlow<FeedAttribution?>(null)
+    /** The currently-selected agency's own GTFS-feed attribution, plus one entry for every
+     * [SecondaryGtfsFeed] component it has (see that class's own doc) -- e.g. RTD Denver's own
+     * attribution followed by "Bustang", so a merged feed's data source gets credited too, not
+     * just the primary agency's. See GtfsRepository.getFeedAttribution's own doc for the primary
+     * entry's fallback chain. Reset to empty the moment a new agency is selected, same reasoning
+     * as [agencyHasStations]: a stale value from the previous agency shouldn't flash under the new
+     * one before its own check completes. */
+    val feedAttribution = MutableStateFlow<List<FeedAttribution>>(emptyList())
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
@@ -400,15 +405,7 @@ class HomeScreenViewModel(
             }
             val (stop, stops) = alightStop
 
-            val vehiclePositionsUrl = trip.agency.realtimeVehiclePositionsUrl
-            val vehicle = vehiclePositionsUrl?.let { url ->
-                try {
-                    GtfsRealtimeClient.fetchFeed(url).vehiclePositionsByTripId[trip.tripId]
-                } catch (e: Exception) {
-                    Log.e("HomeScreen", "VehiclePositions fetch failed for ${trip.agency.displayName}", e)
-                    null
-                }
-            }
+            val vehicle = trip.agency.fetchVehiclePosition(trip.tripId)
             val currentSeq = vehicle?.currentStopSequence
             val stopsRemaining = currentSeq?.let { seq -> stops.count { it.stopSequence in seq until stop.stopSequence } }
             // Boarding stop (0f) to alight stop (1f) -- guards against a same-sequence divide (the
@@ -421,17 +418,10 @@ class HomeScreenViewModel(
                 null
             }
 
-            val today = todayForGtfs()
-            val rtStopUpdate = trip.agency.realtimeTripUpdatesUrl?.let { url ->
-                try {
-                    GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[trip.tripId]?.updateFor(stop.stopId, stop.stopSequence)
-                } catch (e: Exception) {
-                    Log.e("HomeScreen", "TripUpdates fetch failed for ${trip.agency.displayName}", e)
-                    null
-                }
-            }
+            val today = todayForGtfs(trip.agency.zoneId)
+            val rtStopUpdate = trip.agency.fetchTripUpdate(trip.tripId)?.updateFor(stop.stopId, stop.stopSequence)
             val scheduledTime = stop.arrivalTime ?: stop.departureTime
-            val eta = scheduledTime?.let { computeArrivalEta(it, today, rtStopUpdate) }
+            val eta = scheduledTime?.let { computeArrivalEta(it, today, rtStopUpdate, trip.agency.zoneId) }
 
             activeTripStatus.value = ActiveTripStatus(
                 routeLabel = trip.routeLabel,
@@ -459,7 +449,7 @@ class HomeScreenViewModel(
         status.value = null
         syncingAgency.value = agency
         agencyHasStations.value = false
-        feedAttribution.value = null
+        feedAttribution.value = emptyList()
         Log.d("HomeScreen", "Selected agency: ${agency.displayName}")
 
         agencyIngestJob = viewModelScope.launch(Dispatchers.IO) {
@@ -493,7 +483,8 @@ class HomeScreenViewModel(
             val stationRepo = GtfsRepository(gtfsDbFile(filesDir, agency))
             try {
                 agencyHasStations.value = stationRepo.getAllStations().isNotEmpty()
-                feedAttribution.value = stationRepo.getFeedAttribution()
+                feedAttribution.value = listOfNotNull(stationRepo.getFeedAttribution()) +
+                    agency.components.filterIsInstance<SecondaryGtfsFeed>().map { FeedAttribution(it.name, url = null) }
             } catch (e: Exception) {
                 Log.e("HomeScreen", "Station/attribution lookup failed for ${agency.displayName}", e)
             } finally {
@@ -664,6 +655,22 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                         )
                     }
 
+                    // Lives here -- directly under the heading/status block, in the same spot
+                    // whether boarded (below the progress bar) or not (below the agency-picker
+                    // heading) -- rather than pinned to the bottom alongside the feed attribution
+                    // below. Pinned to the bottom, it would scroll underneath (and become
+                    // unreadable behind) the agency list once that list is long enough to need
+                    // scrolling -- unlike attribution, which is *meant* to float over the list that
+                    // way, this message has no such reason to compete with it for the same space.
+                    if (dailyMessageVisible) {
+                        LightText(
+                            text = dailyMessageText,
+                            variant = LightTextVariant.Detail,
+                            lighten = true,
+                            modifier = Modifier.padding(bottom = 16.dp),
+                        )
+                    }
+
                     // Hidden entirely while a trip is boarded -- the active-trip status above (and
                     // its progress bar) takes this space instead. Reappears the moment the trip is
                     // alighted, same as the heading reverting above.
@@ -734,28 +741,25 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
 
                 }
 
-                // Message sits directly above the icon row (not at the very bottom edge) so
+                // Attribution sits directly above the icon row (not at the very bottom edge) so
                 // nothing competes for the same space -- matches LightBottomBar's own "matching
                 // LightOS ActionBar" convention (see its doc comment) rather than the previous
-                // ad-hoc Alignment.BottomStart/BottomEnd pair.
+                // ad-hoc Alignment.BottomStart/BottomEnd pair. Deliberately a sibling of (not
+                // nested inside) the agency list's own Column above -- Box stacks them, so once the
+                // agency list is long enough to need scrolling, this bottom-pinned attribution
+                // floats over its tail end rather than pushing it up or being pushed off itself.
                 Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                     // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's
-                    // own doc for exactly which GTFS file this comes from. Tied to whichever agency is
-                    // currently selected (not just "ready"), so it reads correctly even mid-sync.
-                    feedAttribution?.let { attribution ->
+                    // own doc for exactly which GTFS file this comes from, plus one name per
+                    // SecondaryGtfsFeed component (e.g. "Bustang" alongside RTD Denver's own). Tied
+                    // to whichever agency is currently selected (not just "ready"), so it reads
+                    // correctly even mid-sync.
+                    if (feedAttribution.isNotEmpty()) {
                         LightText(
-                            text = "Transit data © ${attribution.name}",
+                            text = "Transit data © " + feedAttribution.joinToString(", ") { it.name },
                             variant = LightTextVariant.Detail,
                             lighten = true,
                             modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
-                        )
-                    }
-                    if (dailyMessageVisible) {
-                        LightText(
-                            text = dailyMessageText,
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
                         )
                     }
                     // Settings, About first, then whichever of Schedule/Station/Explore are

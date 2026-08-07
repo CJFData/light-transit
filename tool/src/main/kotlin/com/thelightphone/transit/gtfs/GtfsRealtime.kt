@@ -2,6 +2,7 @@
 
 package com.thelightphone.transit.gtfs
 
+import android.util.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
@@ -108,7 +109,11 @@ data class GtfsRtPosition(
  * Fields 3 (vehicle descriptor) and 4 (timestamp) are unused by this app but declared anyway --
  * RTD Denver sends field 4 on every single live TripUpdate (verified by hand-decoding its real
  * feed bytes), and an undeclared field previously faulted the whole decode instead of being
- * skipped (see [GtfsRtVehiclePosition]'s doc comment).
+ * skipped (see [GtfsRtVehiclePosition]'s doc comment). Fields 6-8 are LTC London-specific --
+ * verified by hand-decoding its live feed, present on every one of its TripUpdates: field 6 is a
+ * vendor bundle re-nesting trip_id/start_date/start_time/shape_id plus translated headsign
+ * strings; field 7 is always zero-length; field 8 is a short numeric id (block/run-like). All
+ * three decode as valid UTF-8 in every sample seen, so String is a safe unused-field type here.
  */
 @Serializable
 data class GtfsRtTripUpdate(
@@ -116,6 +121,9 @@ data class GtfsRtTripUpdate(
     @ProtoNumber(2) val stopTimeUpdate: List<GtfsRtStopTimeUpdate> = emptyList(),
     @ProtoNumber(3) val vehicle: GtfsRtVehicleDescriptor? = null,
     @ProtoNumber(4) val timestamp: Long? = null,
+    @ProtoNumber(6) val vendorTripPropertiesUnused: String? = null,
+    @ProtoNumber(7) val unusedField7: String? = null,
+    @ProtoNumber(8) val vendorRunIdUnused: String? = null,
 ) {
     /** Matches by stop_id first (more specific), falling back to stop_sequence. */
     fun updateFor(stopId: String, stopSequence: Int): GtfsRtStopTimeUpdate? =
@@ -167,10 +175,15 @@ data class GtfsRtStopTimeUpdate(
     @ProtoNumber(5) val scheduleRelationship: Int? = null,
 )
 
+/** Field 4 is LTC London-specific -- a second timestamp-shaped varint present on nearly every
+ * arrival/departure event in its live feed, hand-verified to genuinely differ from [time] in most
+ * samples (not just a duplicate encoding of it) -- purpose unconfirmed, declared unused for the
+ * same undeclared-field-faults-decode reason as [GtfsRtTripUpdate]'s doc comment. */
 @Serializable
 data class GtfsRtStopTimeEvent(
     @ProtoNumber(1) val delay: Int? = null,
     @ProtoNumber(2) val time: Long? = null,
+    @ProtoNumber(4) val unusedField4: Long? = null,
 )
 
 class GtfsRealtimeException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -223,6 +236,120 @@ object GtfsRealtimeClient {
     }
 }
 
+/** The trip_id prefix [GtfsIngestor] applies to the [index]-th [SecondaryGtfsFeed] component's
+ * *static* data when loading it into the shared database (see that file's own `idPrefix`
+ * handling) -- every function below relies on this exact same convention to know which live feed
+ * a given trip_id's realtime data actually lives in. */
+private fun secondaryFeedPrefix(index: Int) = "feed${index + 1}:"
+
+/**
+ * Looks up a single trip's live TripUpdate from whichever of this agency's realtime feeds
+ * actually owns [tripId] -- its own primary feed for an unprefixed id, or the matching
+ * [SecondaryGtfsFeed]'s own feed for a "feed{n}:"-prefixed one (see [secondaryFeedPrefix]) --
+ * fetching only that ONE feed rather than every feed the agency has, since a caller here always
+ * already knows exactly which trip it wants (typically a boarded trip's own id, polled in a
+ * loop). Null for a trip_id whose owning feed has no realtime URL, or whose fetch fails or has no
+ * matching entry -- identical to every other "not currently live" case this app already treats
+ * uniformly.
+ */
+suspend fun GtfsAgency.fetchTripUpdate(tripId: String): GtfsRtTripUpdate? {
+    components.filterIsInstance<SecondaryGtfsFeed>().forEachIndexed { index, feed ->
+        val prefix = secondaryFeedPrefix(index)
+        if (tripId.startsWith(prefix)) {
+            val url = feed.realtimeTripUpdatesUrl ?: return null
+            return try {
+                GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId.removePrefix(prefix)]
+            } catch (e: Exception) {
+                Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName's secondary feed", e)
+                null
+            }
+        }
+    }
+    val url = realtimeTripUpdatesUrl ?: return null
+    return try {
+        GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId]
+    } catch (e: Exception) {
+        Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName", e)
+        null
+    }
+}
+
+/** Same lookup as [fetchTripUpdate], for VehiclePositions instead of TripUpdates. */
+suspend fun GtfsAgency.fetchVehiclePosition(tripId: String): GtfsRtVehiclePosition? {
+    components.filterIsInstance<SecondaryGtfsFeed>().forEachIndexed { index, feed ->
+        val prefix = secondaryFeedPrefix(index)
+        if (tripId.startsWith(prefix)) {
+            val url = feed.realtimeVehiclePositionsUrl ?: return null
+            return try {
+                GtfsRealtimeClient.fetchFeed(url).vehiclePositionsByTripId[tripId.removePrefix(prefix)]
+            } catch (e: Exception) {
+                Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName's secondary feed", e)
+                null
+            }
+        }
+    }
+    val url = realtimeVehiclePositionsUrl ?: return null
+    return try {
+        GtfsRealtimeClient.fetchFeed(url).vehiclePositionsByTripId[tripId]
+    } catch (e: Exception) {
+        Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName", e)
+        null
+    }
+}
+
+/**
+ * Result of polling an agency's own realtime feed together with every [SecondaryGtfsFeed]
+ * component's -- [primary] is the agency's own fetched [GtfsRtFeedMessage] (null if it has no
+ * realtime URL at all, or its fetch failed), kept around so a caller's existing status/staleness
+ * handling (offline banners, [GtfsRtFeedHeader.isStale]) stays keyed off the primary feed exactly
+ * as it was before secondary feeds existed -- a secondary feed's own freshness isn't surfaced
+ * separately today. [byTripId] additionally folds in every reachable secondary feed's own
+ * trip_id -> value map, prefixed to match the shared database's trip_ids (see
+ * [secondaryFeedPrefix]), so a caller iterating scheduled trips finds live data for a merged
+ * secondary-feed trip (e.g. a Bustang trip under RTD Denver) exactly the same way it finds the
+ * primary agency's own.
+ */
+class MergedRealtimeFeed<T>(val primary: GtfsRtFeedMessage?, val byTripId: Map<String, T>)
+
+private suspend fun <T> GtfsAgency.fetchMerged(
+    primaryUrl: String?,
+    secondaryUrl: (SecondaryGtfsFeed) -> String?,
+    byTripId: (GtfsRtFeedMessage) -> Map<String, T>,
+    logTag: String,
+): MergedRealtimeFeed<T> {
+    val primaryFeed = primaryUrl?.let { url ->
+        try {
+            GtfsRealtimeClient.fetchFeed(url)
+        } catch (e: Exception) {
+            Log.e(logTag, "Realtime fetch failed for $displayName", e)
+            null
+        }
+    }
+    val merged = buildMap {
+        primaryFeed?.let { putAll(byTripId(it)) }
+        components.filterIsInstance<SecondaryGtfsFeed>().forEachIndexed { index, feed ->
+            val url = secondaryUrl(feed) ?: return@forEachIndexed
+            try {
+                val prefix = secondaryFeedPrefix(index)
+                byTripId(GtfsRealtimeClient.fetchFeed(url)).forEach { (tripId, value) -> put("$prefix$tripId", value) }
+            } catch (e: Exception) {
+                Log.e(logTag, "Realtime fetch failed for $displayName's secondary feed", e)
+            }
+        }
+    }
+    return MergedRealtimeFeed(primaryFeed, merged)
+}
+
+/** See [MergedRealtimeFeed]. [logTag] is the calling screen's own logcat tag, so a fetch failure
+ * here still shows up attributed to the screen that triggered it, same as before this helper
+ * existed. */
+suspend fun GtfsAgency.fetchMergedTripUpdates(logTag: String): MergedRealtimeFeed<GtfsRtTripUpdate> =
+    fetchMerged(realtimeTripUpdatesUrl, { it.realtimeTripUpdatesUrl }, { it.tripUpdatesByTripId }, logTag)
+
+/** See [MergedRealtimeFeed]. */
+suspend fun GtfsAgency.fetchMergedVehiclePositions(logTag: String): MergedRealtimeFeed<GtfsRtVehiclePosition> =
+    fetchMerged(realtimeVehiclePositionsUrl, { it.realtimeVehiclePositionsUrl }, { it.vehiclePositionsByTripId }, logTag)
+
 /** Default +/- window (seconds) within which a live prediction still counts as "On time". */
 const val ARRIVAL_STATUS_TOLERANCE_SECONDS = 90L
 
@@ -244,29 +371,34 @@ data class ArrivalEta(
 /**
  * Converts a GTFS scheduled "HH:MM:SS" time (hour may exceed 24 for a post-midnight trip on
  * [serviceDate]'s service day) to an absolute Unix epoch-seconds instant, for comparison against
- * GTFS-RT's absolute timestamps.
+ * GTFS-RT's absolute timestamps. [zoneId] must be the specific agency's own -- see
+ * [todayForGtfs]'s doc comment, the same reasoning applies here: a GTFS time string is only
+ * meaningful relative to the agency's own clock, not whatever zone the rider's device happens to
+ * be in.
  */
-fun gtfsTimeToEpochSeconds(rawTime: String, serviceDate: LocalDate): Long? {
+fun gtfsTimeToEpochSeconds(rawTime: String, serviceDate: LocalDate, zoneId: ZoneId): Long? {
     val parts = rawTime.split(":")
     val hour = parts.getOrNull(0)?.toLongOrNull() ?: return null
     val minute = parts.getOrNull(1)?.toLongOrNull() ?: return null
     val second = parts.getOrNull(2)?.toLongOrNull() ?: 0L
-    val midnightEpoch = serviceDate.atStartOfDay(ZoneId.systemDefault()).toEpochSecond()
+    val midnightEpoch = serviceDate.atStartOfDay(zoneId).toEpochSecond()
     return midnightEpoch + hour * 3600 + minute * 60 + second
 }
 
 /**
  * Combines a static scheduled time with a matching GTFS-RT StopTimeUpdate (if any) into an ETA
  * and status. With no realtime match, returns a non-live ETA with a null status — callers should
- * render that as "just the scheduled time, no badge" per spec.
+ * render that as "just the scheduled time, no badge" per spec. [zoneId] should always be the
+ * specific trip's own agency's [GtfsAgency.zoneId] -- see [gtfsTimeToEpochSeconds]'s own doc.
  */
 fun computeArrivalEta(
     scheduledTime: String,
     serviceDate: LocalDate,
     realtimeUpdate: GtfsRtStopTimeUpdate?,
+    zoneId: ZoneId,
     toleranceSeconds: Long = ARRIVAL_STATUS_TOLERANCE_SECONDS,
 ): ArrivalEta? {
-    val scheduledEpoch = gtfsTimeToEpochSeconds(scheduledTime, serviceDate) ?: return null
+    val scheduledEpoch = gtfsTimeToEpochSeconds(scheduledTime, serviceDate, zoneId) ?: return null
     val event = realtimeUpdate?.departure ?: realtimeUpdate?.arrival
         ?: return ArrivalEta(etaEpochSeconds = scheduledEpoch, isLive = false, status = null)
 

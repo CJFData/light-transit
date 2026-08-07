@@ -8,13 +8,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
@@ -25,12 +21,9 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
-import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
-import com.thelightphone.sdk.ui.LightTextField
-import com.thelightphone.sdk.ui.LightTextInputEditor
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightThemeController
@@ -90,27 +83,8 @@ class RouteSelectionScreen(
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
-        val keyboardOptionsFlow = rememberKeyboardOptions()
-        var searchEditorOpen by remember { mutableStateOf(false) }
-        var routeQuery by remember { mutableStateOf("") }
-        val searchTextState = rememberTextFieldState(routeQuery)
 
-        if (searchEditorOpen) {
-            LightTheme(colors = themeColors) {
-                LightTextInputEditor(
-                    title = "Search Routes",
-                    state = searchTextState,
-                    onSubmit = {
-                        routeQuery = it.toString().trim()
-                        searchEditorOpen = false
-                    },
-                    onBack = { searchEditorOpen = false },
-                    keyboardOptionsFlow = keyboardOptionsFlow,
-                    submitIcon = LightIcons.SEARCH,
-                    singleLine = true,
-                )
-            }
-        } else LightTheme(colors = themeColors) {
+        LightTheme(colors = themeColors) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -151,27 +125,8 @@ class RouteSelectionScreen(
                             lighten = true,
                         )
                     } else {
-                        val filteredRoutes = s.routes.filter { route ->
-                            routeQuery.isBlank() ||
-                                route.routeId.contains(routeQuery, ignoreCase = true) ||
-                                route.displayName.contains(routeQuery, ignoreCase = true)
-                        }
-                        LightTextField(
-                            label = "Search routes",
-                            value = routeQuery,
-                            placeholder = "All routes",
-                            onClick = { searchEditorOpen = true },
-                            modifier = Modifier.padding(bottom = 20.dp),
-                        )
-                        if (filteredRoutes.isEmpty()) {
-                            LightText(
-                                text = "No matching routes.",
-                                variant = LightTextVariant.Copy,
-                                lighten = true,
-                            )
-                        } else {
-                            LazyColumn(modifier = Modifier.weight(1f)) {
-                                items(filteredRoutes, key = { it.routeId }) { route ->
+                        LazyColumn(modifier = Modifier.weight(1f)) {
+                            items(s.routes, key = { it.routeId }) { route ->
                                 LightText(
                                     text = route.displayName,
                                     variant = LightTextVariant.Copy,
@@ -189,7 +144,6 @@ class RouteSelectionScreen(
                                         }
                                         .padding(vertical = 12.dp),
                                 )
-                                }
                             }
                         }
                     }

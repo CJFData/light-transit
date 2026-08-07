@@ -104,6 +104,57 @@ class GtfsRealtimeTest {
         assertEquals(1, decodedPosition.occupancyStatus)
     }
 
+    @Test
+    fun decodesTripUpdateWithLtcOnlyFields() {
+        val tripDescriptor = ByteArrayOutputStream().apply {
+            writeStringField(1, "2331159")
+        }.toByteArray()
+
+        val arrival = ByteArrayOutputStream().apply {
+            writeVarintField(2, 1786080480L)
+            writeVarintField(4, 1786080123L) // second timestamp -- undeclared before this fix
+        }.toByteArray()
+
+        val stopTimeUpdate = ByteArrayOutputStream().apply {
+            writeVarintField(1, 11)
+            writeMessageField(2, arrival)
+            writeStringField(4, "12535")
+        }.toByteArray()
+
+        // LTC's vendor bundle nests its own trip_id/start_date/start_time/shape_id -- content is
+        // never read by this app, only its presence at TripUpdate field 6 matters for this test.
+        val vendorTripProperties = ByteArrayOutputStream().apply {
+            writeStringField(1, "2331159")
+            writeStringField(4, "0")
+        }.toByteArray()
+
+        val tripUpdate = ByteArrayOutputStream().apply {
+            writeMessageField(1, tripDescriptor)
+            writeMessageField(2, stopTimeUpdate)
+            writeMessageField(6, vendorTripProperties) // undeclared before this fix
+            writeStringField(7, "") // undeclared before this fix
+            writeStringField(8, "974747") // undeclared before this fix
+        }.toByteArray()
+
+        val entity = ByteArrayOutputStream().apply {
+            writeStringField(1, "ltc-entity")
+            writeMessageField(3, tripUpdate)
+        }.toByteArray()
+
+        val feedMessage = ByteArrayOutputStream().apply {
+            writeMessageField(1, minimalHeader())
+            writeMessageField(2, entity)
+        }.toByteArray()
+
+        val decoded = ProtoBuf.decodeFromByteArray(GtfsRtFeedMessage.serializer(), feedMessage)
+
+        val decodedTripUpdate = decoded.tripUpdatesByTripId["2331159"]
+        assertNotNull(decodedTripUpdate, "TripUpdate with LTC-only fields must still decode")
+        assertEquals(1, decodedTripUpdate.stopTimeUpdate.size)
+        assertEquals(1786080480L, decodedTripUpdate.stopTimeUpdate[0].arrival?.time)
+        assertEquals(1786080123L, decodedTripUpdate.stopTimeUpdate[0].arrival?.unusedField4)
+    }
+
     private fun minimalHeader(): ByteArray = ByteArrayOutputStream().apply {
         writeStringField(1, "2.0")
         writeVarintField(2, 0)

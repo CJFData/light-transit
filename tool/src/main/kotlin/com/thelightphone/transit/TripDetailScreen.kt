@@ -26,8 +26,9 @@ import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
-import com.thelightphone.transit.gtfs.GtfsRealtimeClient
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.fetchTripUpdate
+import com.thelightphone.transit.gtfs.fetchVehiclePosition
 import com.thelightphone.transit.gtfs.matchCurrentStopByProximity
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.TripStopRow
@@ -157,26 +158,13 @@ class TripDetailViewModel(
                 // feeds the GPS-proximity fallback below (see matchCurrentStopByProximity's own doc).
                 val stopLocations = repository.getTripStopLocations(tripId, fromStopSequence)
                 var lastMatchedStopSequence: Int? = null
-                val tripUpdatesUrl = agency.realtimeTripUpdatesUrl
-                val today = todayForGtfs()
+                val today = todayForGtfs(agency.zoneId)
 
                 while (isActive) {
-                    val vehiclePosition = try {
-                        GtfsRealtimeClient.fetchFeed(vehiclePositionsUrl).vehiclePositionsByTripId[tripId]
-                    } catch (e: Exception) {
-                        Log.e("TripDetailScreen", "VehiclePositions fetch failed for trip $tripId", e)
-                        null
-                    }
+                    val vehiclePosition = agency.fetchVehiclePosition(tripId)
                     // Fetched unconditionally now (not just once a matched stop is already in hand)
                     // since it also feeds the current-stop fallback below, not just the ETA lookup.
-                    val tripUpdate = tripUpdatesUrl?.let { url ->
-                        try {
-                            GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId]
-                        } catch (e: Exception) {
-                            Log.e("TripDetailScreen", "TripUpdates fetch failed for trip $tripId", e)
-                            null
-                        }
-                    }
+                    val tripUpdate = agency.fetchTripUpdate(tripId)
                     // VehiclePositions' own current_stop_sequence is preferred when present; falls
                     // back to GPS-proximity matching against the vehicle's own raw position (see
                     // matchCurrentStopByProximity's own doc), and only as a last resort to inferring
@@ -197,7 +185,7 @@ class TripDetailViewModel(
                     val liveStatus = matchedStop?.let { stop ->
                         val scheduledTime = stop.departureTime ?: stop.arrivalTime ?: return@let null
                         val rtStopUpdate = tripUpdate?.updateFor(stop.stopId, stop.stopSequence)
-                        computeArrivalEta(scheduledTime, today, rtStopUpdate)?.status
+                        computeArrivalEta(scheduledTime, today, rtStopUpdate, agency.zoneId)?.status
                     }
 
                     _state.value = TripDetailState.Loaded(

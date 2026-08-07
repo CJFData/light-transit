@@ -53,17 +53,20 @@ class GtfsIngestor(private val filesDir: File) {
     private suspend fun ingestInternal(agency: GtfsAgency, onStatus: (GtfsIngestStatus) -> Unit) {
         val agencyDir = File(filesDir, "gtfs/${agency.id}")
         agencyDir.mkdirs()
-        val feedUrls = listOf(agency.feedUrl) + agency.additionalStaticFeedUrls
+        val secondaryFeeds = agency.components.filterIsInstance<SecondaryGtfsFeed>()
+        val feedUrls = listOf(agency.feedUrl) + secondaryFeeds.map { it.feedUrl }
         val zipFiles = feedUrls.mapIndexed { index, _ ->
             File(agencyDir, if (index == 0) "gtfs.zip" else "gtfs-$index.zip")
         }
         val dbFile = gtfsDbFile(filesDir, agency)
         val metaFile = File(agencyDir, "feed_meta.txt")
 
+        val trustAnchor = agency.component<BundledRootTrustAnchor>()
+
         onStatus(GtfsIngestStatus.CheckingForUpdates)
         val cachedMeta = readFeedMeta(metaFile, feedUrls)
         val remoteMeta = try {
-            feedUrls.map { checkForUpdate(it) }.takeIf { metas -> metas.all { it != null } }?.map { it!! }
+            feedUrls.map { checkForUpdate(it, trustAnchor) }.takeIf { metas -> metas.all { it != null } }?.map { it!! }
         } catch (e: Exception) {
             Log.e("GtfsIngestor", "Feed update check failed for ${agency.displayName}, redownloading to be safe", e)
             null
@@ -79,7 +82,7 @@ class GtfsIngestor(private val filesDir: File) {
         }
 
         onStatus(GtfsIngestStatus.Downloading)
-        feedUrls.zip(zipFiles).forEach { (url, zipFile) -> downloadZip(url, zipFile) }
+        feedUrls.zip(zipFiles).forEach { (url, zipFile) -> downloadZip(url, zipFile, trustAnchor) }
 
         onStatus(GtfsIngestStatus.Parsing)
         val tempDbFile = File(agencyDir, "transit.db.tmp")
@@ -88,7 +91,8 @@ class GtfsIngestor(private val filesDir: File) {
         try {
             clearGtfsTables(db)
             zipFiles.forEachIndexed { index, zipFile ->
-                parseAndLoad(zipFile, db, if (index == 0) "" else "feed$index:")
+                val secondaryFeedName = if (index == 0) null else secondaryFeeds[index - 1].name
+                parseAndLoad(zipFile, db, if (index == 0) "" else "feed$index:", secondaryFeedName)
             }
         } finally {
             db.close()
@@ -114,10 +118,15 @@ class GtfsIngestor(private val filesDir: File) {
 
     /** A HEAD request's ETag/Last-Modified, or null if the check couldn't be completed -- follows
      * the same manual redirect handling as [downloadZip], since a HEAD to the same URL can hit the
-     * same http hop. */
-    private suspend fun checkForUpdate(url: String): FeedMeta? {
+     * same http hop. [trustAnchor] is only non-null for an agency whose static feed host needs one
+     * (see [BundledRootTrustAnchor]) -- every other agency's client is left with OkHttp's plain
+     * defaults, untouched by this at all. */
+    private suspend fun checkForUpdate(url: String, trustAnchor: BundledRootTrustAnchor?): FeedMeta? {
         val client = HttpClient(OkHttp) {
             followRedirects = false
+            trustAnchor?.let { anchor ->
+                engine { config { sslSocketFactory(anchor.sslSocketFactory, anchor.trustManager) } }
+            }
         }
         try {
             var currentUrl = url
@@ -167,10 +176,15 @@ class GtfsIngestor(private val filesDir: File) {
      * Android blocks cleartext traffic anyway), so it hands back the original redirect
      * response instead of an error. Redirects are followed manually here, upgrading any
      * http:// hop to https:// rather than ever actually connecting over plain HTTP.
+     *
+     * [trustAnchor] -- see [checkForUpdate]'s matching parameter.
      */
-    private suspend fun downloadZip(url: String, destination: File) {
+    private suspend fun downloadZip(url: String, destination: File, trustAnchor: BundledRootTrustAnchor?) {
         val client = HttpClient(OkHttp) {
             followRedirects = false
+            trustAnchor?.let { anchor ->
+                engine { config { sslSocketFactory(anchor.sslSocketFactory, anchor.trustManager) } }
+            }
         }
         try {
             var currentUrl = url
@@ -197,7 +211,7 @@ class GtfsIngestor(private val filesDir: File) {
         }
     }
 
-    private fun parseAndLoad(zipFile: File, db: SQLiteDatabase, idPrefix: String) {
+    private fun parseAndLoad(zipFile: File, db: SQLiteDatabase, idPrefix: String, secondaryFeedName: String?) {
         db.beginTransaction()
         try {
             ZipFile(zipFile).use { archive ->
@@ -207,7 +221,7 @@ class GtfsIngestor(private val filesDir: File) {
                     val loader = TABLE_LOADERS[entry.name.substringAfterLast('/')]
                     if (loader != null) {
                         archive.getInputStream(entry).reader(Charsets.UTF_8).buffered().use { reader ->
-                            loader(db, reader, idPrefix)
+                            loader(db, reader, idPrefix, secondaryFeedName)
                         }
                     }
                 }
@@ -219,15 +233,18 @@ class GtfsIngestor(private val filesDir: File) {
     }
 
     companion object {
-        private val TABLE_LOADERS: Map<String, (SQLiteDatabase, BufferedReader, String) -> Unit> = mapOf(
+        /** [secondaryFeedName] (see [SecondaryGtfsFeed.name]) is only consulted by [loadRoutes] and
+         * [loadStops] -- every other loader here ignores its fourth parameter entirely, it just
+         * needs to accept one so all eight can share one map's function type. */
+        private val TABLE_LOADERS: Map<String, (SQLiteDatabase, BufferedReader, String, String?) -> Unit> = mapOf(
             "routes.txt" to ::loadRoutes,
-            "trips.txt" to ::loadTrips,
+            "trips.txt" to { db, reader, idPrefix, _ -> loadTrips(db, reader, idPrefix) },
             "stops.txt" to ::loadStops,
-            "stop_times.txt" to ::loadStopTimes,
-            "calendar.txt" to ::loadCalendar,
-            "calendar_dates.txt" to ::loadCalendarDates,
-            "feed_info.txt" to ::loadFeedInfo,
-            "agency.txt" to ::loadAgency,
+            "stop_times.txt" to { db, reader, idPrefix, _ -> loadStopTimes(db, reader, idPrefix) },
+            "calendar.txt" to { db, reader, idPrefix, _ -> loadCalendar(db, reader, idPrefix) },
+            "calendar_dates.txt" to { db, reader, idPrefix, _ -> loadCalendarDates(db, reader, idPrefix) },
+            "feed_info.txt" to { db, reader, idPrefix, _ -> loadFeedInfo(db, reader, idPrefix) },
+            "agency.txt" to { db, reader, idPrefix, _ -> loadAgency(db, reader, idPrefix) },
         )
     }
 }
@@ -261,7 +278,18 @@ private fun clearGtfsTables(db: SQLiteDatabase) {
 
 private fun prefixedId(prefix: String, id: String?): String? = id?.takeIf { it.isNotEmpty() }?.let { prefix + it }
 
-private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
+/** Disambiguates a secondary feed's own route/stop name against the parent agency's -- e.g.
+ * Bustang's "West Line" merged under RTD Denver becomes "West Line - Bustang" so a rider can tell
+ * it's not one of RTD's own, unless [secondaryFeedName] is already part of [name] (some of
+ * Bustang's own text already spells this out, e.g. trip_headsigns like "West - Bustang West
+ * Line"), in which case appending it again would just be redundant. [secondaryFeedName] is null
+ * for the primary feed itself -- nothing is ever appended to an agency's own routes/stops. */
+private fun disambiguatedName(name: String?, secondaryFeedName: String?): String? {
+    if (name == null || secondaryFeedName == null || name.contains(secondaryFeedName, ignoreCase = true)) return name
+    return "$name - $secondaryFeedName"
+}
+
+private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String, secondaryFeedName: String?) {
     val stmt = db.compileStatement(
         """
         INSERT INTO routes
@@ -275,7 +303,7 @@ private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Str
         stmt.bindString(1, routeId)
         stmt.bindStringOrNull(2, header.get(row, "agency_id"))
         stmt.bindStringOrNull(3, header.get(row, "route_short_name"))
-        stmt.bindStringOrNull(4, header.get(row, "route_long_name"))
+        stmt.bindStringOrNull(4, disambiguatedName(header.get(row, "route_long_name"), secondaryFeedName))
         stmt.bindStringOrNull(5, header.get(row, "route_desc"))
         stmt.bindLongOrNull(6, header.get(row, "route_type"))
         stmt.bindStringOrNull(7, header.get(row, "route_url"))
@@ -312,7 +340,7 @@ private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Stri
     }
 }
 
-private fun loadStops(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
+private fun loadStops(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String, secondaryFeedName: String?) {
     val stmt = db.compileStatement(
         """
         INSERT INTO stops
@@ -325,7 +353,7 @@ private fun loadStops(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Stri
         stmt.clearBindings()
         stmt.bindString(1, stopId)
         stmt.bindStringOrNull(2, header.get(row, "stop_code"))
-        stmt.bindStringOrNull(3, header.get(row, "stop_name"))
+        stmt.bindStringOrNull(3, disambiguatedName(header.get(row, "stop_name"), secondaryFeedName))
         stmt.bindStringOrNull(4, header.get(row, "stop_desc"))
         stmt.bindDoubleOrNull(5, header.get(row, "stop_lat"))
         stmt.bindDoubleOrNull(6, header.get(row, "stop_lon"))
