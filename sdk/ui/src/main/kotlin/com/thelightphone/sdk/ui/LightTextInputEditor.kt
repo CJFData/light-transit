@@ -55,6 +55,7 @@ fun LightTextInputEditor(
     submitIcon: LightIconConfiguration? = null,
     showBackButton: Boolean = true,
     singleLine: Boolean = false,
+    initialCaps: Boolean = false,
     editorKey: Any = remember { Any() },
 ) {
     val currentOnSubmit by rememberUpdatedState(onSubmit)
@@ -74,7 +75,7 @@ fun LightTextInputEditor(
 
     val keyboardViewModel: Lp3KeyboardViewModel<*> = viewModel<EnQwertyLp3KeyboardViewModel<*>>(
         key = "LightTextInputEditor-$editorKey",
-        factory = factory(keyboardCallback, keyboardOptionsFlow),
+        factory = factory(keyboardCallback, keyboardOptionsFlow, initialCaps),
     )
 
     LightTextInputEditor(
@@ -215,7 +216,8 @@ fun LightTextInputEditor(
 
 private fun factory(
     callback: Lp3RepeatableKeyboardCallback,
-    keyboardOptionsFlow: StateFlow<KeyboardOptions>
+    keyboardOptionsFlow: StateFlow<KeyboardOptions>,
+    initialCaps: Boolean,
 ): ViewModelProvider.Factory =
     object : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -227,7 +229,9 @@ private fun factory(
                     val showCloseButton = !it.isRootLayout
                     LayoutOptions(showCloseButton)
                 },
-            ) as T
+            ).apply {
+                if (initialCaps) setCapsMode(true)
+            } as T
         }
 
     }
