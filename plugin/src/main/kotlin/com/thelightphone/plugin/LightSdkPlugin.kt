@@ -37,6 +37,7 @@ class LightSdkPlugin : Plugin<Project> {
             "androidx.startup",
             "androidx.media3",
             "io.github.david-allison:anki-android-backend",
+            "org.bouncycastle:bcprov-jdk18on",
         )
 
         val ALLOWED_PLUGINS = setOf(
