@@ -2,9 +2,18 @@
 
 Pico Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a live map that shows exactly where your ride actually is — no ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-Right now Pico Transit knows its way around **MBTA**, **RIPTA**, and **RTD Denver**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
+Right now Pico Transit knows its way around **MBTA**, **RIPTA**, **RTD Denver**, and **LTC Ontario** (London, Ontario), with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
 
 Pico Transit can be used alongside the light phone's directions tool for more context on your commutes, or standalone, covering buses, commuter rail.subway systems, and transit stations.
+
+## 🔄 Recent updates
+
+- 🚍 **Bustang live tracking** — Bustang, Colorado's statewide intercity coach service, now merges right into RTD Denver: its own routes and stops show up alongside RTD's own in schedules and connections, and its live vehicles now track on the map too, not just its static timetable.
+
+## 🔭 Upcoming developments
+
+- 🔍 **Searching a longer agency list** — the home screen's agency picker is a plain scrollable list today, which is fine for a handful of agencies but won't stay that way as more of Colorado's statewide transit authorities get added. A search/filter for the home screen's agency list is planned to keep picking an agency quick once that list gets long.
+- 🕐 **A current-time clock on the home screen** — so the time is right there while you're picking an agency or checking your boarded trip, without needing to back out to a system clock.
 
 ## 🗺️ What can it do?
 
@@ -95,6 +104,10 @@ That's it — happy transit-ing! 🚏🚌🚆
 - **Stations are deduplicated using GTFS's `parent_station`** — a big station with several platforms (subway entrances, commuter rail tracks, etc.) shows up as one marker/entry, not one per platform, while still resolving to the right platform's `stop_id` under the hood for schedule lookups. Only real platforms and boarding areas count as "member platforms" for this — GTFS also links entrances, elevators, and escalator nodes to the same parent station, and those are filtered out so a big hub's map isn't cluttered with dozens of non-boardable points.
 - **Boarding a trip is a saved reference, not a background tracker** — Pico Transit never polls a live feed while the app itself isn't open. "You've reached your stop" detection only runs while Trip Detail or the home screen is actually visible and polling, the same way every other bit of live tracking in the app works.
 - **Commuter rail track assignments come from MBTA's V3 API, not GTFS-RT** — GTFS-RT never publishes which specific track a commuter rail trip will use, and MBTA's own dispatch system usually doesn't decide until 10-15 minutes before departure. Pico Transit polls the V3 API (`api-v3.mbta.com`, no key required) for this and for commuter rail's own live vehicle positions, falling back to the standard GTFS-RT feed if a trip has no V3 match yet.
+
+## 🙌 Credits
+
+Thanks to [Jose Briones](https://github.com/jbriones95) for his continued support integrating RTD Denver and Colorado transit into Pico Transit.
 
 ## 📄 License
 
