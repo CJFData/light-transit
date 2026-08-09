@@ -60,6 +60,10 @@ class GtfsIngestor(private val filesDir: File) {
         }
         val dbFile = gtfsDbFile(filesDir, agency)
         val metaFile = File(agencyDir, "feed_meta.txt")
+        // See GTFS_SCHEMA_VERSION's own doc -- forces one full re-ingest whenever the app's own
+        // schema has moved on, independent of whether the remote feed itself changed.
+        val schemaVersionFile = File(agencyDir, "schema_version.txt")
+        val cachedSchemaVersion = schemaVersionFile.takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull()
 
         val trustAnchor = agency.component<BundledRootTrustAnchor>()
 
@@ -73,6 +77,7 @@ class GtfsIngestor(private val filesDir: File) {
         }
 
         val upToDate = dbFile.exists() && cachedMeta != null && remoteMeta != null &&
+            cachedSchemaVersion == GTFS_SCHEMA_VERSION &&
             cachedMeta.size == remoteMeta.size && cachedMeta.zip(remoteMeta).all { (cached, remote) ->
                 !cached.isEmpty() && cached == remote
             }
@@ -113,6 +118,7 @@ class GtfsIngestor(private val filesDir: File) {
         }
 
         remoteMeta?.let { metas -> writeFeedMeta(metaFile, feedUrls, metas) }
+        schemaVersionFile.writeText(GTFS_SCHEMA_VERSION.toString())
         onStatus(GtfsIngestStatus.Ready)
     }
 
@@ -245,6 +251,7 @@ class GtfsIngestor(private val filesDir: File) {
             "calendar_dates.txt" to { db, reader, idPrefix, _ -> loadCalendarDates(db, reader, idPrefix) },
             "feed_info.txt" to { db, reader, idPrefix, _ -> loadFeedInfo(db, reader, idPrefix) },
             "agency.txt" to { db, reader, idPrefix, _ -> loadAgency(db, reader, idPrefix) },
+            "directions.txt" to { db, reader, idPrefix, _ -> loadDirections(db, reader, idPrefix) },
         )
     }
 }
@@ -274,6 +281,7 @@ private fun clearGtfsTables(db: SQLiteDatabase) {
     db.delete("calendar", null, null)
     db.delete("feed_info", null, null)
     db.delete("agency", null, null)
+    db.delete("directions", null, null)
 }
 
 private fun prefixedId(prefix: String, id: String?): String? = id?.takeIf { it.isNotEmpty() }?.let { prefix + it }
@@ -466,6 +474,26 @@ private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader, idPref
         stmt.bindString(1, serviceId)
         stmt.bindString(2, date)
         stmt.bindLong(3, exceptionType)
+        stmt.executeInsert()
+    }
+}
+
+/** directions.txt is an optional GTFS extension -- absent for most agencies, in which case this
+ * table simply stays empty and GtfsRepository.getDirections falls back to a headsign-derived
+ * label. Plain INSERT (not OR REPLACE) is safe since (route_id, direction_id) is documented as a
+ * guaranteed-unique key within the file itself. */
+private fun loadDirections(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
+    val stmt = db.compileStatement(
+        "INSERT INTO directions (route_id, direction_id, direction, direction_destination) VALUES (?, ?, ?, ?)"
+    )
+    readCsvEntry(reader) { header, row ->
+        val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry
+        val directionId = header.get(row, "direction_id")?.toLongOrNull() ?: return@readCsvEntry
+        stmt.clearBindings()
+        stmt.bindString(1, routeId)
+        stmt.bindLong(2, directionId)
+        stmt.bindStringOrNull(3, header.get(row, "direction"))
+        stmt.bindStringOrNull(4, header.get(row, "direction_destination"))
         stmt.executeInsert()
     }
 }

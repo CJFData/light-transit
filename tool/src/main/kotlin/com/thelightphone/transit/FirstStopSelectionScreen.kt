@@ -20,6 +20,8 @@ import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.StopOption
 import com.thelightphone.transit.gtfs.TapHoldPreferences
+import com.thelightphone.transit.gtfs.currentGtfsTimeOfDay
+import com.thelightphone.transit.gtfs.todayForGtfs
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -52,10 +54,17 @@ class FirstStopSelectionViewModel(
     dbFile: File,
     private val routeId: String,
     private val directionId: Int?,
+    /** Null only for the auto-skip case (see [GtfsRepository.getStops]'s own doc) -- every real
+     * chosen [com.thelightphone.transit.gtfs.DirectionOption] carries its own headsign (possibly
+     * itself null, a distinct real value -- see [GtfsRepository.getStopsForVariant]), so this
+     * screen can tell "no direction was ever chosen" apart from "the chosen variant's headsign
+     * happens to be blank" via [directionId] rather than conflating both into this one field. */
+    private val headsign: String?,
     private val tapHoldPreferences: TapHoldPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
+    private val agency = GtfsAgency.forDbFile(dbFile)
 
     private val _state = MutableStateFlow<FirstStopSelectionState>(FirstStopSelectionState.Loading)
     val state: StateFlow<FirstStopSelectionState> = _state
@@ -73,8 +82,15 @@ class FirstStopSelectionViewModel(
             _state.value = try {
                 // Already in physical route order (see GtfsRepository.getStops's own doc comment) --
                 // no location needed to pick a stop along a route, same as choosing a route or
-                // direction isn't location-based either.
-                FirstStopSelectionState.Loaded(repository.getStops(routeId, directionId))
+                // direction isn't location-based either. Restricted to stops with a departure still
+                // remaining today (see GtfsRepository.getStops's own doc) -- a stop that would just
+                // lead to an empty "No departures today" screen isn't worth offering as a choice.
+                val zoneId = agency?.zoneId ?: java.time.ZoneId.systemDefault()
+                val today = todayForGtfs(zoneId)
+                val afterTime = currentGtfsTimeOfDay(zoneId)
+                val stops = directionId?.let { repository.getStopsForVariant(routeId, it, headsign, afterTime, today) }
+                    ?: repository.getStops(routeId, null, afterTime, today)
+                FirstStopSelectionState.Loaded(stops)
             } catch (e: Exception) {
                 Log.e("FirstStopSelectionScreen", "Failed to load first stops for route $routeId", e)
                 FirstStopSelectionState.Error("Unable to load stops.")
@@ -94,6 +110,9 @@ class FirstStopSelectionScreen(
     private val routeId: String,
     private val routeLabel: String,
     private val directionId: Int?,
+    /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
+     * [directionId] rather than folded into a single nullable signal. */
+    private val headsign: String?,
     private val directionLabel: String,
 ) : LightScreen<Unit, FirstStopSelectionViewModel>(sealedActivity) {
 
@@ -101,7 +120,7 @@ class FirstStopSelectionScreen(
         get() = FirstStopSelectionViewModel::class.java
 
     override fun createViewModel(): FirstStopSelectionViewModel =
-        FirstStopSelectionViewModel(dbFile, routeId, directionId, TapHoldPreferences(lightContext.dataStore))
+        FirstStopSelectionViewModel(dbFile, routeId, directionId, headsign, TapHoldPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
@@ -143,9 +162,13 @@ class FirstStopSelectionScreen(
                         lighten = true,
                     )
 
+                    // Empty now means "no stop on this route/direction has a departure left today"
+                    // (see GtfsRepository.getStops/getStopsForVariant's own doc) -- not "this
+                    // route/direction doesn't exist", so the message says so rather than implying
+                    // something's missing or broken.
                     is FirstStopSelectionState.Loaded -> if (s.stops.isEmpty()) {
                         LightText(
-                            text = "No stops found.",
+                            text = "Nothing found in today's schedule.",
                             variant = LightTextVariant.Copy,
                             lighten = true,
                         )
@@ -172,6 +195,7 @@ class FirstStopSelectionScreen(
                                                             routeId,
                                                             routeLabel,
                                                             directionId,
+                                                            headsign,
                                                             directionLabel,
                                                             stop.stopId,
                                                             stop.displayLabel(),

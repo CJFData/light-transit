@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.AgencyPreferences
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
+import com.thelightphone.transit.gtfs.DeparturePreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.MapPreferences
@@ -44,6 +45,7 @@ class SettingsViewModel(
     private val boardedTripPreferences: BoardedTripPreferences,
     private val homeScreenPreferences: HomeScreenPreferences,
     private val tapHoldPreferences: TapHoldPreferences,
+    private val departurePreferences: DeparturePreferences,
 ) : LightViewModel<Unit>() {
 
     val defaultAgency: StateFlow<GtfsAgency?>
@@ -114,6 +116,10 @@ class SettingsViewModel(
         get() = _mergeFeedStationsEnabled
     private val _mergeFeedStationsEnabled = MutableStateFlow(false)
 
+    val includeLongerTripsEnabled: StateFlow<Boolean>
+        get() = _includeLongerTripsEnabled
+    private val _includeLongerTripsEnabled = MutableStateFlow(true)
+
     init {
         viewModelScope.launch {
             agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
@@ -165,6 +171,9 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             agencyPreferences.mergeFeedStationsEnabledFlow.collect { _mergeFeedStationsEnabled.value = it }
+        }
+        viewModelScope.launch {
+            departurePreferences.includeLongerTripsEnabledFlow.collect { _includeLongerTripsEnabled.value = it }
         }
     }
 
@@ -239,6 +248,10 @@ class SettingsViewModel(
     fun setMergeFeedStationsEnabled(enabled: Boolean) {
         viewModelScope.launch { agencyPreferences.setMergeFeedStationsEnabled(enabled) }
     }
+
+    fun setIncludeLongerTripsEnabled(enabled: Boolean) {
+        viewModelScope.launch { departurePreferences.setIncludeLongerTripsEnabled(enabled) }
+    }
 }
 
 class SettingsScreen(
@@ -254,6 +267,7 @@ class SettingsScreen(
         BoardedTripPreferences(lightContext.dataStore),
         HomeScreenPreferences(lightContext.dataStore),
         TapHoldPreferences(lightContext.dataStore),
+        DeparturePreferences(lightContext.dataStore),
     )
 
     /** Every on/off setting on this screen renders as one tappable row using the SDK's own
@@ -297,6 +311,7 @@ class SettingsScreen(
         val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
         val dailyMessageRandom by viewModel.dailyMessageRandom.collectAsState()
         val mergeFeedStationsEnabled by viewModel.mergeFeedStationsEnabled.collectAsState()
+        val includeLongerTripsEnabled by viewModel.includeLongerTripsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -414,6 +429,27 @@ class SettingsScreen(
                 ToggleRow("Map", tapHoldArrivalsEnabled, viewModel::setTapHoldArrivalsEnabled)
                 ToggleRow("Schedules", tapHoldScheduleArrivalsEnabled, viewModel::setTapHoldScheduleArrivalsEnabled)
                 ToggleRow("Stations", tapHoldStationArrivalsEnabled, viewModel::setTapHoldStationArrivalsEnabled)
+
+                LightText(
+                    text = "Include longer trips in departures",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on (the default), a route/direction's departures list also includes " +
+                        "any trip that runs at least as far as the direction you picked -- e.g. picking " +
+                        "\"Toward Readville\" on MBTA's Franklin/Foxboro Line also shows \"Toward South " +
+                        "Station\" departures at a stop they share, since either one gets you to " +
+                        "Readville. It never works the other way around: picking \"Toward South Station\" " +
+                        "never shows a Readville-only departure, since that trip doesn't reach that far. " +
+                        "When off, departures match the picked direction exactly, with no broader trips " +
+                        "mixed in either way.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Include longer trips in departures", includeLongerTripsEnabled, viewModel::setIncludeLongerTripsEnabled)
 
                 LightText(
                     text = "Tap and hold -- Vehicles",

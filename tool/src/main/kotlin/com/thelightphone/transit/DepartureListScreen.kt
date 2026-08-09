@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.Departure
+import com.thelightphone.transit.gtfs.DeparturePreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.formatGtfsTime
@@ -36,6 +37,7 @@ import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -49,7 +51,11 @@ class DepartureListViewModel(
     dbFile: File,
     private val routeId: String,
     private val directionId: Int?,
+    /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
+     * [directionId] rather than conflated into one nullable signal. */
+    private val headsign: String?,
     private val stopId: String,
+    private val departurePreferences: DeparturePreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -63,7 +69,20 @@ class DepartureListViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
                 val today = todayForGtfs(agency?.zoneId ?: java.time.ZoneId.systemDefault())
-                DepartureListState.Loaded(repository.getDepartures(routeId, directionId, stopId, today))
+                // Read once at screen-open, same as every other one-shot Settings read in this app
+                // (see TapHoldPreferences' own usage) -- Settings isn't shown at the same time as
+                // this screen, so no need to react live.
+                val includeLongerTrips = departurePreferences.includeLongerTripsEnabledFlow.first()
+                val departures = when {
+                    directionId == null -> repository.getDepartures(routeId, null, stopId, today)
+                    // See GtfsRepository.getDeparturesForVariant's own doc: also includes any
+                    // longer trip that reaches at least as far as the chosen variant (e.g. a
+                    // "South Station" train under a "Toward Readville" pick), unless the rider has
+                    // turned that off in Settings, in which case it's an exact headsign match only.
+                    includeLongerTrips -> repository.getDeparturesForVariant(routeId, directionId, headsign, stopId, today)
+                    else -> repository.getDeparturesForExactVariant(routeId, directionId, headsign, stopId, today)
+                }
+                DepartureListState.Loaded(departures)
             } catch (e: Exception) {
                 Log.e("DepartureListScreen", "Failed to load departures for stop $stopId", e)
                 DepartureListState.Error("Unable to load departures.")
@@ -83,6 +102,9 @@ class DepartureListScreen(
     private val routeId: String,
     private val routeLabel: String,
     private val directionId: Int?,
+    /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
+     * [directionId] rather than conflated into one nullable signal. */
+    private val headsign: String?,
     private val directionLabel: String,
     private val stopId: String,
     private val stopLabel: String,
@@ -92,7 +114,7 @@ class DepartureListScreen(
         get() = DepartureListViewModel::class.java
 
     override fun createViewModel(): DepartureListViewModel =
-        DepartureListViewModel(dbFile, routeId, directionId, stopId)
+        DepartureListViewModel(dbFile, routeId, directionId, headsign, stopId, DeparturePreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {

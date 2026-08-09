@@ -4,6 +4,18 @@ import android.database.sqlite.SQLiteDatabase
 import java.io.File
 
 /**
+ * Bump whenever [GtfsSchema.STATEMENTS] changes in a way an already-ingested database on a user's
+ * device won't pick up on its own. `CREATE TABLE IF NOT EXISTS` only runs during a real ingest
+ * (see [openGtfsDatabase]/[GtfsIngestor]), and ingest is normally skipped whenever the remote
+ * feed's ETag/Last-Modified hasn't changed -- so a cached database from before a schema change
+ * would otherwise keep silently missing the new table/column forever, until that agency's feed
+ * happens to publish an update for unrelated reasons. [GtfsIngestor] persists this value
+ * alongside each cached feed's metadata and forces one full re-ingest whenever it doesn't match,
+ * independent of the feed's own ETag/Last-Modified.
+ */
+internal const val GTFS_SCHEMA_VERSION = 1
+
+/**
  * Mirrors the subset of the GTFS static spec this app ingests. trip_id, route_id, stop_id, and
  * service_id are the join/filter keys every later screen uses, so each gets an explicit index
  * except where it's already the leading column of a table's primary key.
@@ -108,6 +120,19 @@ private object GtfsSchema {
             agency_name TEXT,
             agency_url TEXT
         )
+        """,
+        // Optional GTFS extension (MBTA publishes it; most agencies don't) giving the curated
+        // rider-facing word for each direction -- "Inbound"/"Outbound", "Northbound"/"Southbound",
+        // etc. -- and destination, since direction_id itself has no fixed meaning across routes.
+        // (route_id, direction_id) is a guaranteed-unique key per the file's own spec.
+        """
+        CREATE TABLE IF NOT EXISTS directions (
+            route_id TEXT NOT NULL,
+            direction_id INTEGER NOT NULL,
+            direction TEXT,
+            direction_destination TEXT,
+            PRIMARY KEY (route_id, direction_id)
+        ) WITHOUT ROWID
         """,
     )
 }

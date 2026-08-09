@@ -36,7 +36,22 @@ enum class LineType(val gtfsRouteTypes: Set<Int>, val label: String, val emoji: 
     }
 }
 
-data class DirectionOption(val directionId: Int?, val headsign: String?)
+data class DirectionOption(
+    val directionId: Int?,
+    val headsign: String?,
+    /** e.g. "Inbound"/"Outbound"/"Northbound" -- from the feed's own optional directions.txt (an
+     * MBTA-originated GTFS extension; most agencies don't publish it), the authoritative rider-
+     * facing word for this direction. GTFS's direction_id itself is just a binary flag with no
+     * fixed meaning across routes or agencies, so this can't be inferred from direction_id alone.
+     * Null when the feed doesn't publish the file, in which case [displayLabel] falls back to the
+     * representative headsign. */
+    val directionName: String? = null,
+    /** This direction's curated destination name from the same directions.txt row as
+     * [directionName] (e.g. "Ashmont/Braintree" for the Red Line's south direction) -- distinct
+     * from [headsign], which is just whichever headsign happens to be most common among this
+     * direction's trips. Null under the same conditions as [directionName]. */
+    val destination: String? = null,
+)
 
 data class StopOption(
     val stopId: String,
@@ -173,14 +188,45 @@ class GtfsRepository(dbFile: File) {
         }
     }
 
+    /**
+     * One entry per distinct (direction_id, trip_headsign) pair actually running on this route --
+     * every real headsign variant stays individually selectable. A route with branch/short-turn
+     * trips can have several distinct headsigns within the same direction_id (e.g. LTC's Route 01
+     * splits into "1A Pond Mills" and "1B King Edward" branches nearly 50/50, and RIPTA's Route 20
+     * has three genuinely different termini -- TF Green Airport, Job Lot, and NEIT -- all under one
+     * direction_id); collapsing those down to a single "most common" entry would silently hide real
+     * destinations riders specifically need to tell apart, so every variant is kept.
+     *
+     * Each entry also carries the feed's optional directions.txt extension data (route_id,
+     * direction_id) -> (direction, direction_destination) -- see [DirectionOption]'s own doc --
+     * when the feed publishes it (MBTA does; most agencies don't). [DirectionSelectionScreen] uses
+     * that to group same-direction_id entries under a real "Inbound"/"Outbound"-style header when
+     * available, so a branchy route reads as "2 directions, each with variants" instead of a flat
+     * list of what look like 4+ unrelated directions -- without ever hiding a variant to get there.
+     * Agencies with no directions.txt (RIPTA/LTC/RTD today) render exactly as they always have: a
+     * flat list of every headsign, one tap away from its stop list.
+     */
     fun getDirections(routeId: String): List<DirectionOption> =
+        // LEFT JOINed on directions.txt's own documented key (route_id, direction_id) -- every
+        // trip_headsign variant within a direction_id carries the same joined direction/
+        // destination, since that join key doesn't depend on headsign at all.
         db.rawQuery(
-            "SELECT DISTINCT direction_id, trip_headsign FROM trips WHERE route_id = ?",
+            """
+            SELECT DISTINCT t.direction_id, t.trip_headsign, d.direction, d.direction_destination
+            FROM trips t
+            LEFT JOIN directions d ON d.route_id = t.route_id AND d.direction_id = t.direction_id
+            WHERE t.route_id = ? AND t.direction_id IS NOT NULL
+            ORDER BY t.direction_id, t.trip_headsign
+            """,
             arrayOf(routeId),
         ).use { cursor ->
-            cursor.mapRowsNotNull {
-                val directionId = getIntOrNull(0) ?: return@mapRowsNotNull null
-                DirectionOption(directionId, getStringOrNull(1))
+            cursor.mapRows {
+                DirectionOption(
+                    directionId = getInt(0),
+                    headsign = getStringOrNull(1),
+                    directionName = getStringOrNull(2),
+                    destination = getStringOrNull(3),
+                )
             }
         }
 
@@ -189,30 +235,90 @@ class GtfsRepository(dbFile: File) {
      * "direction" to distinguish, where skipping straight to stop selection is the right call), or
      * the route has no trips scheduled at all (confirmed to genuinely happen -- e.g. LTC's own feed
      * publishes some routes with zero currently-active trips), where skipping ahead just lands on a
-     * dead-end "No stops found" screen. Callers use this to tell the two apart before deciding
-     * whether to auto-skip direction selection. */
+     * dead-end "Nothing found in today's schedule" screen. Callers use this to tell the two apart
+     * before deciding whether to auto-skip direction selection. */
     fun routeHasTrips(routeId: String): Boolean =
         db.rawQuery("SELECT 1 FROM trips WHERE route_id = ? LIMIT 1", arrayOf(routeId)).use { it.moveToFirst() }
 
     /**
-     * Every distinct stop served by any trip on [routeId]+[directionId], ordered by each stop's
-     * earliest stop_sequence across those trips — an approximation of physical route order,
-     * since GTFS doesn't guarantee stop_sequence numbering is identical across trip variants.
+     * Every distinct stop served by any trip on [routeId]+[directionId] with at least one
+     * departure remaining today (calendar-active on [today] per [activeTodayClause], departing at
+     * or after [afterTime]) -- ordered by each stop's earliest stop_sequence across those trips,
+     * an approximation of physical route order since GTFS doesn't guarantee stop_sequence
+     * numbering is identical across trip variants. A stop whose only service today has already
+     * left, or that's only ever served on a different day, is excluded entirely rather than left
+     * for a rider to tap into and find "No departures today" -- there'd be nothing useful there
+     * for them right now regardless. Used only for the auto-skip case where no specific
+     * direction/headsign was ever chosen (every trip on the route has a null direction_id -- see
+     * [routeHasTrips]'s own doc); a real chosen direction goes through [getStopsForVariant]
+     * instead, which also narrows by headsign.
      */
-    fun getStops(routeId: String, directionId: Int?): List<StopOption> {
+    fun getStops(routeId: String, directionId: Int?, afterTime: String, today: LocalDate): List<StopOption> {
+        val todayGtfs = today.toGtfsDateString()
+        val dayColumn = today.dayOfWeek.toGtfsColumnName()
         val directionClause = if (directionId == null) "t.direction_id IS NULL" else "t.direction_id = ?"
-        val args = if (directionId == null) arrayOf(routeId) else arrayOf(routeId, directionId.toString())
+        val args = buildList {
+            add(routeId)
+            directionId?.let { add(it.toString()) }
+            add(afterTime)
+            addAll(listOf(todayGtfs, todayGtfs, todayGtfs))
+        }.toTypedArray()
         return db.rawQuery(
             """
             SELECT st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN stops s ON s.stop_id = st.stop_id
-            WHERE t.route_id = ? AND $directionClause
+            WHERE t.route_id = ? AND $directionClause AND st.departure_time >= ?
+              AND ${activeTodayClause(dayColumn)}
             GROUP BY st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
             ORDER BY MIN(st.stop_sequence)
             """,
             args,
+        ).use { cursor ->
+            cursor.mapRows {
+                StopOption(
+                    stopId = getString(0),
+                    stopName = getStringOrNull(1),
+                    lat = getDoubleOrNull(2),
+                    lon = getDoubleOrNull(3),
+                )
+            }
+        }
+    }
+
+    /**
+     * Same as [getStops], further narrowed to only trips carrying the exact [headsign] of the
+     * direction variant a rider actually picked in [DirectionSelectionScreen] -- e.g. MBTA's
+     * Franklin/Foxboro Line has 92 "South Station" inbound trips running the full line plus 5
+     * "Readville" trips that short-turn partway through and share the same direction_id; without
+     * this narrowing, choosing "Toward Readville" would still list every stop all the way to
+     * South Station (direction_id alone can't tell the two apart), misleading a rider into
+     * picking a stop their actual train never reaches. Matched via `IS` rather than `=` so a
+     * variant with a genuinely blank/absent headsign (a real, distinct [DirectionOption] in its
+     * own right -- see [getDirections]) is matched correctly too, not silently excluded.
+     *
+     * Deliberately an *exact* headsign match, not [getDeparturesForVariant]'s more generous
+     * "reaches at least this far" inclusion -- regardless of whether that's enabled in Settings,
+     * this list should promise only what the exact chosen variant itself guarantees today, never
+     * a stop that's merely reachable via some other headsign's trip. Same "no departures today"
+     * exclusion as [getStops] -- see that function's own doc.
+     */
+    fun getStopsForVariant(routeId: String, directionId: Int, headsign: String?, afterTime: String, today: LocalDate): List<StopOption> {
+        val todayGtfs = today.toGtfsDateString()
+        val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        return db.rawQuery(
+            """
+            SELECT st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
+            FROM trips t
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            JOIN stops s ON s.stop_id = st.stop_id
+            WHERE t.route_id = ? AND t.direction_id = ? AND t.trip_headsign IS ? AND st.departure_time >= ?
+              AND ${activeTodayClause(dayColumn)}
+            GROUP BY st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
+            ORDER BY MIN(st.stop_sequence)
+            """,
+            arrayOf(routeId, directionId.toString(), headsign, afterTime, todayGtfs, todayGtfs, todayGtfs),
         ).use { cursor ->
             cursor.mapRows {
                 StopOption(
@@ -233,7 +339,9 @@ class GtfsRepository(dbFile: File) {
      *
      * [stopId] may occur anywhere in a trip's stop sequence now that stop selection isn't
      * restricted to route termini; each result carries the matched stop_sequence so trip detail
-     * can filter to "from this stop onward" instead of assuming the trip starts there.
+     * can filter to "from this stop onward" instead of assuming the trip starts there. Used only
+     * for the auto-skip case (see [getStops]'s own doc) -- a real chosen direction goes through
+     * [getDeparturesForVariant] instead, which also narrows by headsign.
      */
     fun getDepartures(routeId: String, directionId: Int?, stopId: String, today: LocalDate): List<Departure> {
         val todayGtfs = today.toGtfsDateString()
@@ -257,6 +365,142 @@ class GtfsRepository(dbFile: File) {
         return db.rawQuery(
             sql,
             args,
+        ).use { cursor ->
+            cursor.mapRows {
+                Departure(
+                    departureTime = getString(0),
+                    tripId = getString(1),
+                    headsign = getStringOrNull(2),
+                    stopSequence = getInt(3),
+                )
+            }
+        }
+    }
+
+    /**
+     * Same as [getDepartures], but for [stopId] on the direction variant a rider actually picked
+     * -- and, deliberately, not narrowed to trips with that *exact* [headsign]. A candidate trip
+     * qualifies if it covers at least one *complete* real trip pattern among the chosen variant's
+     * own trips that itself reaches [stopId] -- so it's included whenever it's known to run at
+     * least as far as some real "H"-labeled run gets from here, whether or not it continues
+     * further.
+     *
+     * Deliberately NOT the simpler "union of every stop any H-labeled trip visits" -- a single
+     * headsign string doesn't always correspond to one consistent physical path. RIPTA's Route 20
+     * outbound "Kennedy Plaza via Elmwood Ave" covers three distinct real patterns (30, 46, and 50
+     * stops) that happen to share a headsign; their union is a 51-stop path no single real trip
+     * -- not even another "Kennedy Plaza" trip -- actually runs, so requiring full coverage of
+     * that union matched nothing at all and silently emptied the departures list. Anchoring the
+     * comparison to one real reference trip that itself reaches the stop being viewed avoids that
+     * trap: every "H"-labeled trip trivially covers itself, so the chosen variant's own departures
+     * always qualify at any stop it actually serves, regardless of how many different real
+     * patterns share its headsign.
+     *
+     * This is deliberately asymmetric, matching how these variants actually relate to each other:
+     * MBTA's Franklin/Foxboro "Readville" trips are a strict subset of "South Station" trips (same
+     * corridor, shorter run) -- so a rider who picked "Toward Readville" also sees "South Station"
+     * departures at a shared stop like Franklin (either one gets them to Readville, so hiding the
+     * extra option would be needlessly conservative), but a rider who picked "Toward South Station"
+     * never sees a "Readville" departure sneak in, since a Readville trip doesn't cover South
+     * Station's full stop set -- boarding one under a false assumption would strand them early.
+     * Same real relationship on RIPTA's Route 20: "TF Green Airport" trips are a subset of "New
+     * England Tech" trips (confirmed against real stop data), so TF-Green riders also see NEIT
+     * departures, but NEIT riders never see a TF-Green-only trip that stops short of NEIT. "Job
+     * Lot" trips aren't a subset of (or superset of) either -- a genuinely different branch, not a
+     * shorter/longer version of the same run -- so it stays fully isolated from both, with no
+     * agency-specific logic needed to keep it that way; the containment check alone does it.
+     *
+     * Gated behind [DeparturePreferences.includeLongerTripsEnabledFlow] (on by default) -- when a
+     * rider turns it off, callers use [getDeparturesForExactVariant] instead, which drops back to
+     * an exact-headsign match with none of the above.
+     *
+     * The expensive relational-containment check only ever runs over trips carrying a *different*
+     * headsign than [headsign] -- a same-headsign trip trivially covers itself, so it's included
+     * directly via the cheap `t.trip_headsign IS ?` branch below without ever entering the
+     * containment check at all. This matters a lot in practice: on a high-frequency subway line
+     * where one headsign covers virtually the whole direction (confirmed on MBTA's Blue Line --
+     * 714 of 722 trips this direction), excluding those 714 self-matching trips from the candidate
+     * pool cut real measured query time from ~3.7s to ~0.04s for an identical result set, since the
+     * earlier version cross-joined every one of them against every reference trip needlessly.
+     */
+    fun getDeparturesForVariant(routeId: String, directionId: Int, headsign: String?, stopId: String, today: LocalDate): List<Departure> {
+        val todayGtfs = today.toGtfsDateString()
+        val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val sql = """
+            WITH h_trips_at_stop AS (
+                SELECT DISTINCT t.trip_id
+                FROM trips t
+                JOIN stop_times st ON st.trip_id = t.trip_id
+                WHERE t.route_id = ? AND t.direction_id = ? AND t.trip_headsign IS ? AND st.stop_id = ?
+            ),
+            other_candidate_trips AS (
+                SELECT DISTINCT t.trip_id
+                FROM trips t
+                JOIN stop_times st ON st.trip_id = t.trip_id
+                WHERE t.route_id = ? AND t.direction_id = ? AND st.stop_id = ? AND t.trip_headsign IS NOT ?
+            ),
+            qualifying_other_trips AS (
+                -- A candidate (already known to carry a DIFFERENT headsign -- see
+                -- other_candidate_trips) qualifies if, for at least one reference trip that itself
+                -- reaches this stop under the chosen headsign, the candidate visits every stop that
+                -- reference trip visits (relational containment, not a raw row/stop count).
+                SELECT DISTINCT c.trip_id
+                FROM other_candidate_trips c, h_trips_at_stop h
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM stop_times hs
+                    WHERE hs.trip_id = h.trip_id
+                      AND NOT EXISTS (
+                          SELECT 1 FROM stop_times cs WHERE cs.trip_id = c.trip_id AND cs.stop_id = hs.stop_id
+                      )
+                )
+            )
+            SELECT st.departure_time, t.trip_id, t.trip_headsign, st.stop_sequence
+            FROM trips t
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            WHERE t.route_id = ? AND t.direction_id = ? AND st.stop_id = ?
+              AND (t.trip_headsign IS ? OR t.trip_id IN (SELECT trip_id FROM qualifying_other_trips))
+              AND ${activeTodayClause(dayColumn)}
+            ORDER BY st.departure_time
+        """.trimIndent()
+        val args = arrayOf(
+            routeId, directionId.toString(), headsign, stopId,
+            routeId, directionId.toString(), stopId, headsign,
+            routeId, directionId.toString(), stopId, headsign,
+            todayGtfs, todayGtfs, todayGtfs,
+        )
+        return db.rawQuery(sql, args).use { cursor ->
+            cursor.mapRows {
+                Departure(
+                    departureTime = getString(0),
+                    tripId = getString(1),
+                    headsign = getStringOrNull(2),
+                    stopSequence = getInt(3),
+                )
+            }
+        }
+    }
+
+    /**
+     * The strict counterpart to [getDeparturesForVariant] -- an exact match on [headsign], with
+     * none of that function's "reaches at least this far" inclusion. Used when a rider has turned
+     * off [DeparturePreferences.includeLongerTripsEnabledFlow]: picking "Toward Readville" then
+     * shows only the Readville-headsign trips themselves, never the longer "South Station" ones
+     * that happen to reach Readville along the way -- for a rider who wants that guarantee even
+     * though the broader trips were never actually misleading the other direction.
+     */
+    fun getDeparturesForExactVariant(routeId: String, directionId: Int, headsign: String?, stopId: String, today: LocalDate): List<Departure> {
+        val todayGtfs = today.toGtfsDateString()
+        val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        return db.rawQuery(
+            """
+            SELECT st.departure_time, t.trip_id, t.trip_headsign, st.stop_sequence
+            FROM trips t
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            WHERE t.route_id = ? AND t.direction_id = ? AND t.trip_headsign IS ? AND st.stop_id = ?
+              AND ${activeTodayClause(dayColumn)}
+            ORDER BY st.departure_time
+            """.trimIndent(),
+            arrayOf(routeId, directionId.toString(), headsign, stopId, todayGtfs, todayGtfs, todayGtfs),
         ).use { cursor ->
             cursor.mapRows {
                 Departure(
