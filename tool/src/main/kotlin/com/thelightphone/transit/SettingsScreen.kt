@@ -26,6 +26,7 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightModalManager
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -38,6 +39,7 @@ import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlin.time.Duration
 
 class SettingsViewModel(
     private val agencyPreferences: AgencyPreferences,
@@ -177,11 +179,13 @@ class SettingsViewModel(
         }
     }
 
-    /** Tapping the already-selected default clears it back to "no default", so there's a way to
-     * turn the auto-skip back off, not just switch which agency it points at. */
-    fun toggleDefaultAgency(agency: GtfsAgency) {
+    /** Called from the AgencyPickerModal opened by the "Transit Agency" row below -- persisting the
+     * new default is all this does. HomeScreenViewModel's own defaultAgencyFlow collector (not this
+     * call) is what actually switches/ingests it, so this is the same effect a first-launch pick
+     * has, just reached from Settings instead. */
+    fun selectAgency(agency: GtfsAgency) {
         viewModelScope.launch {
-            agencyPreferences.setDefaultAgency(if (defaultAgency.value == agency) null else agency)
+            agencyPreferences.setDefaultAgency(agency)
         }
     }
 
@@ -329,31 +333,47 @@ class SettingsScreen(
                 )
                 LightScrollView(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(
-                    text = "Default agency",
+                    text = "Transit Agency",
                     variant = LightTextVariant.Copy,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 LightText(
-                    text = "Tap your agency to skip picking it every launch. Tap it again to turn that off.",
+                    text = "Tap to switch to a different agency.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
 
-                Column {
-                    GtfsAgency.entries.forEach { agency ->
-                        LightText(
-                            text = agency.displayName,
-                            variant = LightTextVariant.Copy,
-                            lighten = agency != defaultAgency,
-                            underline = agency == defaultAgency,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .lightClickable { viewModel.toggleDefaultAgency(agency) }
-                                .padding(vertical = 12.dp),
-                        )
-                    }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .lightClickable {
+                            // Same AgencyPickerModal Stage 1 onboarding uses, just with a close
+                            // button (allowCancel = true) since -- unlike first launch -- there's
+                            // already a valid agency to fall back to here.
+                            LightModalManager.show(
+                                modal = AgencyPickerModal(
+                                    filesDir = lightContext.filesDir,
+                                    allowCancel = true,
+                                    onAgencySelected = { agency -> viewModel.selectAgency(agency) },
+                                ),
+                                duration = Duration.INFINITE,
+                            )
+                        }
+                        .padding(vertical = 12.dp),
+                ) {
+                    LightText(
+                        text = defaultAgency?.displayName ?: "Choose agency",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.weight(1f),
+                    )
+                    LightIcon(
+                        icon = LightIcons.ARROW_RIGHT,
+                        size = 1f,
+                        contentDescription = "Change agency",
+                    )
                 }
 
                 LightText(

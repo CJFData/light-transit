@@ -13,21 +13,22 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 - ⏱️ **Departures now match the direction you picked** — by default, a stop shared by a short-turn trip and a longer one (e.g. Readville vs. South Station) shows both, since either gets you at least as far as the shorter one promises — but never the other way around, so picking the longer destination never shows you a train that stops short of it. A new Settings toggle ("Include longer trips in departures") switches to an exact match only, for anyone who'd rather not see the extra trips at all.
 - 🚍 **Bustang live tracking** — Bustang, Colorado's statewide intercity coach service, now merges right into RTD Denver: its own routes and stops show up alongside RTD's own in schedules and connections, and its live vehicles now track on the map too, not just its static timetable.
 - 🐛 **Fixed a stuck home screen progress bar** — This was noticed in agencies that never populate `current_stop_sequence` in their live vehicle feed left the home screen's trip progress bar frozen in place, even though the same trip's own Trip Detail screen showed it moving. The home screen now falls back to the same GPS-proximity and TripUpdate-based matching Trip Detail already used.
+- 👋 **A real onboarding step, and a clock on the home screen** — first launch (or picking "Transit Agency" again in Settings) now opens a dedicated welcome screen to choose your agency, instead of the home screen doubling as an always-visible picker. Once an agency's picked, the home screen shows a ticking clock in that agency's own timezone, its name, and a loading indicator while its schedule downloads — and the clock stays put once a trip's boarded too, right alongside your live ETA and progress bar.
 
 ## 🔭 Upcoming developments
 
-- 🔍 **Searching a longer agency list** — the home screen's agency picker is a plain scrollable list today, which is fine for a handful of agencies but won't stay that way as more of Colorado's statewide transit authorities get added. A search/filter for the home screen's agency list is planned to keep picking an agency quick once that list gets long.
-- 🕐 **A current-time clock on the home screen** — so the time is right there while you're picking an agency or checking your boarded trip, without needing to back out to a system clock.
+- 🔍 **Searching a longer agency list** — the onboarding picker is a plain scrollable list today, which is fine for a handful of agencies but won't stay that way as more of Colorado's statewide transit authorities get added. Search support is already wired up under the hood, just dormant until the list actually gets long enough to need it.
 
 ## 🗺️ What can it do?
 
-- 🏠 **Pick your agency** — MBTA, RIPTA, or RTD Denver — and Pico Transit downloads their schedule right onto your phone.
+- 🏠 **Pick your agency** — MBTA, RIPTA, RTD Denver, or LTC Ontario — and Pico Transit downloads their schedule right onto your phone. First launch (or switching agencies later from Settings) opens this as its own welcome screen; once picked, the home screen shows a ticking clock, your agency's name, and a loading indicator until its schedule is ready.
   
-![Screenshot_20260807_190114.png](docs/screenshots/Screenshot_20260807_190114.png)
+  ![alt text](docs/screenshots/Screenshot_20260810_171500.png)
+  ![alt text](docs/screenshots/Screenshot_20260810_171800.png)
   
-- ⚙️ **Settings** — a default agency to skip the picker, light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals — the same gesture also jumps from a Station map's own name to the main map centered on it; double-tap a station to zoom into its platforms; track tapped-open stops' own vehicles on the map; the home screen's trip progress bar; the home screen's daily message; and "See Everything," a map mode covered below).
+- ⚙️ **Settings** — switch agencies any time (reopens the same welcome picker), light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals — the same gesture also jumps from a Station map's own name to the main map centered on it; double-tap a station to zoom into its platforms; track tapped-open stops' own vehicles on the map; the home screen's trip progress bar; the home screen's daily message; and "See Everything," a map mode covered below).
   
-  ![alt text](docs/screenshots/Screenshot_20260801_215544.png)
+  ![alt text](docs/screenshots/Screenshot_20260810_172700.png)
   ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
 
 - 📅 **Explore Schedules** — browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, pick a route, a direction, and a stop, and see every departure today.
@@ -44,7 +45,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
   
 - ⏱️ **Live ETAs** — real-time predictions with On Time / Late / Early badges, whenever the agency's live feed is playing along nicely.
   
-   ![alt text](docs/screenshots/Screenshot_20260801_204530.png)
+   ![alt text](docs/screenshots/Screenshot_20260810_172200.png)
 
 
 - 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus). Flip on "See Everything" (Settings) to drop the usual "just this stop's own vehicles" filter and plot every live vehicle in view instead, labeled with just its route until you tap it; narrow it back down by tapping a stop ("Filter by stop" — tags each vehicle TO/FROM/AT that stop) or by mode (Bus/Subway/Commuter Rail).
@@ -59,12 +60,12 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 - ▶️ **Board a trip** — from any Trip Detail screen, tap Play to make it your current trip. Keep track of which stop you're closest to from the vehicle icon.Tap a stop along the way to mark where you're getting off — reach it, and Pico Transit throws a little "You've reached your stop! 🎉" celebration and jumps you to that stop's upcoming arrivals, whether you were looking at the trip or just sitting on the home screen.
   
 
-   ![alt text](docs/screenshots/Screenshot_20260801_214024.png)
+   ![alt text](docs/screenshots/Screenshot_20260810_172300.png)
    ![alt text](docs/screenshots/Screenshot_20260801_212442.png)
   
-- 🚦 **Home screen trip status** — while a trip is boarded, the home screen swaps its agency picker for your route, live ETA, and stops remaining, plus an optional progress bar with a little vehicle marker crawling from your boarding stop toward your alight stop.
+- 🚦 **Home screen trip status** — while a trip is boarded, the home screen swaps its usual heading for your route, live ETA, and stops remaining, plus an optional progress bar with a little vehicle marker crawling from your boarding stop toward your alight stop — the clock stays put through all of it, right above your route.
 
-![Screenshot_20260807_185916.png](docs/screenshots/Screenshot_20260807_185916.png)  ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
+![alt text](docs/screenshots/Screenshot_20260810_172500.png)  ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
 
 - ↩️ **Jump back anytime** — a Play icon shows up in the corner of every screen while a trip's boarded, one tap from wherever you are back to its live tracking; a plain circle in the footer does the same for the home screen itself.
   
@@ -72,7 +73,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 
 - ℹ️ **About** — a full legend of every icon and mode Pico Transit uses, reachable right from the home screen.
   
-   ![alt text](docs/screenshots/Screenshot_20260801_212041.png)
+   ![alt text](docs/screenshots/Screenshot_20260810_171900.png)
 
 ## 🛠️ Building & running it
 

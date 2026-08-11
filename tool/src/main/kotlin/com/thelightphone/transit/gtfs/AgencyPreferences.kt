@@ -12,10 +12,11 @@ private val defaultAgencyKey = stringPreferencesKey("DEFAULT_AGENCY")
 private val mergeFeedStationsEnabledKey = booleanPreferencesKey("MERGE_FEED_STATIONS_ENABLED")
 
 /**
- * The user's default agency (Settings screen), persisted via the SDK's Preferences DataStore --
- * the same mechanism LightPushManager uses elsewhere in the SDK for simple key-value settings.
- * When set, HomeScreen skips the manual agency-tap on launch and goes straight into that agency's
- * data.
+ * The user's selected agency, persisted via the SDK's Preferences DataStore -- the same mechanism
+ * LightPushManager uses elsewhere in the SDK for simple key-value settings. Doubles as both
+ * "default" and "currently selected": HomeScreen goes straight into this agency's data when set,
+ * and shows the AgencyPickerModal onboarding overlay when null (first launch, before anything's
+ * ever been picked). Settings' own "Transit Agency" row is the only way to change it once set.
  */
 class AgencyPreferences(private val dataStore: DataStore<Preferences>) {
 

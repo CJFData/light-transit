@@ -13,13 +13,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -34,7 +32,6 @@ import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.FeedAttribution
 import com.thelightphone.transit.gtfs.GtfsAgency
-import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsIngestor
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
@@ -57,8 +54,8 @@ import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightModalManager
 import com.thelightphone.sdk.ui.LightProgressBar
-import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
@@ -72,8 +69,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -81,12 +78,19 @@ import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import kotlin.time.Duration
 
 // One agency-row icon's footprint -- also used as a blank placeholder's size for the "already
 // cached" state, so every agency name lines up at the same x position whether or not it has an
 // icon next to it.
 private const val AGENCY_ICON_SIZE = 1f
+
+// Stage 2's own ticking clock, in whichever agency's own timezone is currently selected -- see
+// HomeScreenViewModel's currentTime.
+private val CLOCK_FORMATTER = DateTimeFormatter.ofPattern("h:mm a")
 
 /**
  * A friendly, low-stakes message shown at the bottom of the home screen -- picked deterministically
@@ -289,6 +293,47 @@ class HomeScreenViewModel(
      * previous one's anchor. */
     private var lastMatchedStopSequence: Int? = null
 
+    /** Null until Stage 1's onboarding modal (or a Settings-driven switch) picks one -- see the
+     * defaultAgencyFlow collector in [init]. Declared (along with every field below, through
+     * [feedAttribution]) before that init block rather than after -- viewModelScope uses
+     * Dispatchers.Main.immediate, so a coroutine launched from init that already has a value to
+     * emit (e.g. defaultAgencyFlow's first, already-cached value) runs synchronously as part of
+     * this constructor, not deferred to after it returns. Referencing a field declared later in
+     * the class from inside that synchronous run reads it before its own initializer has executed
+     * -- still null (a MutableStateFlow field, not yet assigned) -- which crashed with a bare NPE
+     * on .value/.collect until these were moved up here. */
+    val selectedAgency = MutableStateFlow<GtfsAgency?>(null)
+    /** Ingest failure text only -- shown under Stage 2's agency name/loading indicator. */
+    val status = MutableStateFlow<String?>(null)
+
+    /** Set once ingestion completes successfully; gates whether the "Schedule"/"Explore" mode
+     * buttons are available, and whether Stage 2's own loading indicator shows (see [currentTime]'s
+     * own doc for the rest of that heading block). */
+    val readyAgency = MutableStateFlow<GtfsAgency?>(null)
+    private var agencyIngestJob: Job? = null
+
+    /** Stage 2's own ticking clock, in [selectedAgency]'s timezone -- "" until an agency is picked.
+     * Restarted (see [currentTimeJob]) every time [selectedAgency] changes, since the zone changes
+     * with it. */
+    val currentTime = MutableStateFlow("")
+    private var currentTimeJob: Job? = null
+
+    /** Whether [readyAgency] has any real, qualifying multi-platform stations at all (see
+     * GtfsRepository.getAllStations) -- an agency with none (e.g. RIPTA, which has no grouped
+     * stations in its GTFS feed) shows no "Station" entry point rather than one that always opens
+     * an empty list. Reset to false the moment a new agency is selected so a stale true from the
+     * previous agency can't flash the link before this agency's own check completes. */
+    val agencyHasStations = MutableStateFlow(false)
+
+    /** The currently-selected agency's own GTFS-feed attribution, plus one entry for every
+     * [SecondaryGtfsFeed] component it has (see that class's own doc) -- e.g. RTD Denver's own
+     * attribution followed by "Bustang", so a merged feed's data source gets credited too, not
+     * just the primary agency's. See GtfsRepository.getFeedAttribution's own doc for the primary
+     * entry's fallback chain. Reset to empty the moment a new agency is selected, same reasoning
+     * as [agencyHasStations]: a stale value from the previous agency shouldn't flash under the new
+     * one before its own check completes. */
+    val feedAttribution = MutableStateFlow<List<FeedAttribution>>(emptyList())
+
     init {
         viewModelScope.launch {
             boardedTripPreferences.boardedTripFlow.collect {
@@ -307,48 +352,60 @@ class HomeScreenViewModel(
         viewModelScope.launch {
             homeScreenPreferences.dailyMessageVisibleFlow.collect { dailyMessageVisible.value = it }
         }
+        // Covers both cold start (no saved default -> onboarding modal; a saved default -> select
+        // it, same as the old one-shot onScreenShow check used to) and a Settings-driven switch
+        // made while this ViewModel is alive but HomeScreen isn't the visible screen -- this
+        // collector runs for the ViewModel's whole lifetime (same as the others above), and
+        // DataStore's own Flow reacts the moment Settings persists a new default, so there's no
+        // separate propagation path needed for "agency switching happens through Settings."
+        viewModelScope.launch {
+            preferences.defaultAgencyFlow.collect { default ->
+                when {
+                    default != null && default != selectedAgency.value -> selectAgency(default)
+                    default == null && selectedAgency.value == null -> showAgencyPicker()
+                }
+            }
+        }
+        // Restarted (not just updated) on every agency change since the timezone itself changes --
+        // a stale loop ticking in the previous agency's zone would show the wrong clock for one
+        // more tick after switching.
+        viewModelScope.launch {
+            selectedAgency.collect { agency ->
+                currentTimeJob?.cancel()
+                if (agency == null) {
+                    currentTime.value = ""
+                    return@collect
+                }
+                currentTimeJob = viewModelScope.launch {
+                    while (isActive) {
+                        currentTime.value = LocalTime.now(agency.zoneId).format(CLOCK_FORMATTER)
+                        delay(60_000L)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Stage 1: shown via the same LightModal overlay ReachedStopModal uses (see
+     * AgencyPickerModal's own doc) whenever there's no agency selected and no saved default --
+     * first launch, or (per [AgencyPreferences.setDefaultAgency]'s own doc) after Settings clears
+     * it. Picking an agency there only persists it as the new default; this ViewModel's own
+     * defaultAgencyFlow collector above (not the modal itself) is what actually selects/ingests
+     * it, so this same path handles both first-launch and a Settings-driven switch identically. */
+    private fun showAgencyPicker() {
+        LightModalManager.show(
+            modal = AgencyPickerModal(
+                filesDir = filesDir,
+                allowCancel = false,
+                onAgencySelected = { agency -> viewModelScope.launch { preferences.setDefaultAgency(agency) } },
+            ),
+            duration = Duration.INFINITE,
+        )
     }
 
     fun clearReachedAlightStop() {
         reachedAlightStop.value = null
     }
-
-    /** When there is NO active trip this is the default state: Choose your agency, view the attribution
-     * to the agency's data, and enjoy your daily message**/
-    val selectedAgency = MutableStateFlow<GtfsAgency?>(null)
-    /** Error text only now -- per-agency ready/syncing state renders as an icon next to each
-     * agency's name instead (see [cachedAgencies]/[syncingAgency]). */
-    val status = MutableStateFlow<String?>(null)
-
-    /** Set once ingestion completes successfully; gates the "Schedule"/"Explore" mode buttons are available. */
-    val readyAgency = MutableStateFlow<GtfsAgency?>(null)
-
-    /** Agencies with a GTFS schedule already downloaded/cached on disk -- checked once at
-     * screen-open, then grown as each agency's own ingest completes. An agency in this set (and
-     * not currently in [syncingAgency]) shows no icon at all next to its name. A ready agency just means
-     * they have an up to date GTFS file downloaded, not that they are selected, downloaded and buttons loaded*/
-    val cachedAgencies = MutableStateFlow<Set<GtfsAgency>>(emptySet())
-
-    /** The one agency (if any) currently checking for updates/downloading/parsing right now --
-     * shows a spinning sync icon next to that agency's name only. */
-    val syncingAgency = MutableStateFlow<GtfsAgency?>(null)
-    private var agencyIngestJob: Job? = null
-
-    /** Whether [readyAgency] has any real, qualifying multi-platform stations at all (see
-     * GtfsRepository.getAllStations) -- an agency with none (e.g. RIPTA, which has no grouped
-     * stations in its GTFS feed) shows no "Station" entry point rather than one that always opens
-     * an empty list. Reset to false the moment a new agency is selected so a stale true from the
-     * previous agency can't flash the link before this agency's own check completes. */
-    val agencyHasStations = MutableStateFlow(false)
-
-    /** The currently-selected agency's own GTFS-feed attribution, plus one entry for every
-     * [SecondaryGtfsFeed] component it has (see that class's own doc) -- e.g. RTD Denver's own
-     * attribution followed by "Bustang", so a merged feed's data source gets credited too, not
-     * just the primary agency's. See GtfsRepository.getFeedAttribution's own doc for the primary
-     * entry's fallback chain. Reset to empty the moment a new agency is selected, same reasoning
-     * as [agencyHasStations]: a stale value from the previous agency shouldn't flash under the new
-     * one before its own check completes. */
-    val feedAttribution = MutableStateFlow<List<FeedAttribution>>(emptyList())
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
@@ -365,18 +422,8 @@ class HomeScreenViewModel(
                 withTimeoutOrNull(LIVE_VEHICLE_POLL_INTERVAL_MS) { tripStatusRefreshTrigger.receive() }
             }
         }
-        // A configured default agency skips the manual tap -- the list stays visible/tappable in
-        // case someone wants a different agency for this session, this just saves the first tap.
-        // Only checked once per ViewModel (guarded by selectedAgency already being set), so
-        // returning to HomeScreen from a child screen doesn't re-trigger it.
-        if (selectedAgency.value != null) return
-        viewModelScope.launch(Dispatchers.IO) {
-            cachedAgencies.value = GtfsAgency.entries.filterTo(mutableSetOf()) { gtfsDbFile(filesDir, it).exists() }
-            val default = preferences.defaultAgencyFlow.first()
-            if (default != null && selectedAgency.value == null) {
-                selectAgency(default)
-            }
-        }
+        // Agency selection (default-agency auto-select, or showing the onboarding modal) is now
+        // handled by the defaultAgencyFlow collector in init -- see its own doc comment.
     }
 
     override fun onScreenHide(screen: SimpleLightScreen<Unit>) {
@@ -483,19 +530,13 @@ class HomeScreenViewModel(
         selectedAgency.value = agency
         readyAgency.value = null
         status.value = null
-        syncingAgency.value = agency
         agencyHasStations.value = false
         feedAttribution.value = emptyList()
         Log.d("HomeScreen", "Selected agency: ${agency.displayName}")
 
         agencyIngestJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                ingestor.ingest(agency) { ingestStatus ->
-                    if (ingestStatus == GtfsIngestStatus.Ready && selectedAgency.value == agency) {
-                        syncingAgency.value = null
-                        cachedAgencies.value = cachedAgencies.value + agency
-                    }
-                }
+                ingestor.ingest(agency) { }
                 // A later selection may have started another ingest while this one was running.
                 // Do not let the older job replace the newer agency's ready state or station check.
                 if (selectedAgency.value != agency) return@launch
@@ -505,7 +546,6 @@ class HomeScreenViewModel(
             } catch (e: Exception) {
                 Log.e("HomeScreen", "GTFS ingestion failed for ${agency.displayName}", e)
                 if (selectedAgency.value == agency) {
-                    syncingAgency.value = null
                     status.value = "Unable to load ${agency.displayName} data."
                 }
                 return@launch
@@ -530,8 +570,12 @@ class HomeScreenViewModel(
     }
 }
 
-@InitialScreen /** This screen appears when PICO transit is first installed, the agencies are available to select with download indicators next to each agency name
- no populated buttons at the bottom except for about and settings**/
+/** The app's root screen. With no agency selected (first launch, or after Settings clears the
+ * default), it renders behind Stage 1's [AgencyPickerModal] onboarding overlay -- see
+ * HomeScreenViewModel's defaultAgencyFlow collector. Once an agency is selected it's Stage 2's own
+ * landing screen: a ticking clock/agency name/loading indicator, then Schedule/Station/Explore in
+ * the bottom bar once that agency's data is ready. */
+@InitialScreen
 class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeScreenViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<HomeScreenViewModel>
@@ -551,8 +595,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val selectedAgency by viewModel.selectedAgency.collectAsState()
         val status by viewModel.status.collectAsState()
         val readyAgency by viewModel.readyAgency.collectAsState()
-        val cachedAgencies by viewModel.cachedAgencies.collectAsState()
-        val syncingAgency by viewModel.syncingAgency.collectAsState()
+        val currentTime by viewModel.currentTime.collectAsState()
         val agencyHasStations by viewModel.agencyHasStations.collectAsState()
         val feedAttribution by viewModel.feedAttribution.collectAsState()
         val boardedTrip by viewModel.boardedTrip.collectAsState()
@@ -634,11 +677,22 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                         .fillMaxSize()
                         .padding(32.dp)
                 ) {
-                    // While a trip is boarded, this becomes an active-trip status instead of the
-                    // agency-picker heading -- everything below (agency list, mode icons, daily
-                    // message) stays exactly as-is underneath either way. Reverts back the moment
-                    // the trip is alighted (boardedTrip/activeTripStatus both go null together).
+                    // While a trip is boarded, this becomes an active-trip status instead of
+                    // Stage 2's own clock/agency-name heading -- everything below (mode icons,
+                    // daily message) stays exactly as-is underneath either way. Reverts back the
+                    // moment the trip is alighted (boardedTrip/activeTripStatus both go null
+                    // together).
                     if (boardedTrip != null) {
+                        // Same ticking clock Stage 2's own heading uses (HomeScreenViewModel.currentTime)
+                        // -- kept visible here too rather than giving up the space entirely to trip
+                        // status, since knowing the current time is just as useful mid-trip as it is
+                        // before boarding.
+                        LightText(
+                            text = currentTime,
+                            variant = LightTextVariant.Detail,
+                            lighten = true,
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
                         LightText(
                             text = activeTripStatus?.routeLabel ?: boardedTrip?.routeLabel ?: "Current Trip",
                             variant = LightTextVariant.Heading,
@@ -672,16 +726,51 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                 )
                             }
                         }
-                    } else {
+                    } else if (selectedAgency != null) {
+                        // Stage 2's own landing heading: a ticking clock in the agency's own
+                        // timezone (see HomeScreenViewModel.currentTime), its name, and -- only
+                        // while its GTFS data is still ingesting -- the same spinning REFRESH
+                        // treatment the old inline agency list used per-row, now shown just once
+                        // here since Stage 2 only ever has one agency to show at a time.
                         LightText(
-                            text = "Choose Transit Agency",
+                            text = currentTime,
                             variant = LightTextVariant.Heading,
-                            modifier = Modifier.padding(bottom = 16.dp),
+                            modifier = Modifier.padding(bottom = 4.dp),
                         )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 16.dp),
+                        ) {
+                            LightText(
+                                text = selectedAgency?.displayName.orEmpty(),
+                                variant = LightTextVariant.Subheading,
+                                lighten = true,
+                            )
+                            if (readyAgency != selectedAgency && status == null) {
+                                val infiniteTransition = rememberInfiniteTransition(label = "agencyLoading")
+                                val angle by infiniteTransition.animateFloat(
+                                    initialValue = 0f,
+                                    targetValue = 360f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(durationMillis = 1000, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Restart,
+                                    ),
+                                    label = "agencyLoadingAngle",
+                                )
+                                LightIcon(
+                                    icon = LightIcons.REFRESH,
+                                    size = AGENCY_ICON_SIZE,
+                                    contentDescription = "Loading schedule",
+                                    modifier = Modifier
+                                        .padding(start = 8.dp)
+                                        .rotate(angle),
+                                )
+                            }
+                        }
                     }
 
-                    // Only ever populated by an ingest failure now -- per-agency ready/syncing
-                    // state is the icon next to each agency's name below, not a screen-wide banner.
+                    // Ingest failure text only -- the loading state itself is the spinning icon
+                    // next to the agency name above, not a screen-wide banner.
                     status?.let {
                         LightText(
                             text = it,
@@ -692,12 +781,9 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                     }
 
                     // Lives here -- directly under the heading/status block, in the same spot
-                    // whether boarded (below the progress bar) or not (below the agency-picker
-                    // heading) -- rather than pinned to the bottom alongside the feed attribution
-                    // below. Pinned to the bottom, it would scroll underneath (and become
-                    // unreadable behind) the agency list once that list is long enough to need
-                    // scrolling -- unlike attribution, which is *meant* to float over the list that
-                    // way, this message has no such reason to compete with it for the same space.
+                    // whether boarded (below the progress bar) or not (below Stage 2's own
+                    // clock/agency-name heading) -- rather than pinned to the bottom alongside the
+                    // feed attribution below.
                     if (dailyMessageVisible) {
                         LightText(
                             text = dailyMessageText,
@@ -707,83 +793,12 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                         )
                     }
 
-                    // Hidden entirely while a trip is boarded -- the active-trip status above (and
-                    // its progress bar) takes this space instead. Reappears the moment the trip is
-                    // alighted, same as the heading reverting above.
-                    //
-                    // Wrapped in LightScrollView (weighted, so it only claims what's left after the
-                    // heading/status text above) rather than a plain Column -- with three agencies
-                    // today every entry fits on screen, but a plain Column has no way to reach
-                    // entries once the list grows past that, same as [SettingsScreen]'s own
-                    // default-agency list.
-                    if (boardedTrip == null) {
-                    LightScrollView(modifier = Modifier.weight(1f)) {
-                        GtfsAgency.entries.forEach { agency ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .lightClickable { viewModel.selectAgency(agency) }
-                                    .padding(vertical = 12.dp),
-                            ) {
-                                when {
-                                    agency == syncingAgency -> {
-                                        val infiniteTransition = rememberInfiniteTransition(label = "agencySync")
-                                        val angle by infiniteTransition.animateFloat(
-                                            initialValue = 0f,
-                                            targetValue = 360f,
-                                            animationSpec = infiniteRepeatable(
-                                                animation = tween(durationMillis = 1000, easing = LinearEasing),
-                                                repeatMode = RepeatMode.Restart,
-                                            ),
-                                            label = "agencySyncAngle",
-                                        )
-                                        LightIcon(
-                                            icon = LightIcons.REFRESH,
-                                            size = AGENCY_ICON_SIZE,
-                                            contentDescription = "Checking for updates",
-                                            modifier = Modifier
-                                                .padding(end = 8.dp)
-                                                .rotate(angle),
-                                        )
-                                    }
-                                    agency !in cachedAgencies -> {
-                                        LightIcon(
-                                            icon = LightIcons.DOWNLOAD_ARROW,
-                                            size = AGENCY_ICON_SIZE,
-                                            contentDescription = "Download",
-                                            modifier = Modifier.padding(end = 8.dp),
-                                        )
-                                    }
-                                    else -> {
-                                        Spacer(
-                                            modifier = Modifier.size(
-                                                width = AGENCY_ICON_SIZE.gridUnitsAsDp() + 8.dp,
-                                                height = AGENCY_ICON_SIZE.gridUnitsAsDp(),
-                                            ),
-                                        )
-                                    }
-                                }
-                                LightText(
-                                    text = agency.displayName,
-                                    variant = LightTextVariant.Copy,
-                                    lighten = agency != selectedAgency,
-                                    underline = agency == selectedAgency,
-                                )
-                            }
-                        }
-                    }
-                    }
-
                 }
 
                 // Attribution sits directly above the icon row (not at the very bottom edge) so
                 // nothing competes for the same space -- matches LightBottomBar's own "matching
                 // LightOS ActionBar" convention (see its doc comment) rather than the previous
-                // ad-hoc Alignment.BottomStart/BottomEnd pair. Deliberately a sibling of (not
-                // nested inside) the agency list's own Column above -- Box stacks them, so once the
-                // agency list is long enough to need scrolling, this bottom-pinned attribution
-                // floats over its tail end rather than pushing it up or being pushed off itself.
+                // ad-hoc Alignment.BottomStart/BottomEnd pair.
                 Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                     // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's
                     // own doc for exactly which GTFS file this comes from, plus one name per
