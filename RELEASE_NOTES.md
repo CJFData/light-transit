@@ -15,7 +15,7 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 
 ## 🗺️ Core features
 
-- **Agency picker home screen** — pick MBTA, RIPTA, RTD Denver, or LTC, and Pico Transit downloads that agency's schedule to the phone.
+- **Onboarding agency picker** — first launch (or switching agencies from Settings) opens a dedicated welcome screen to pick MBTA, RIPTA, RTD Denver, or LTC; Pico Transit downloads that agency's schedule to the phone. Once picked, the home screen shows a ticking clock in the agency's own timezone, its name, and a loading indicator until the schedule's ready — the clock stays visible while a trip's boarded too, alongside the live ETA and progress bar.
 - **Explore Schedules** — browse by Subway, Commuter Rail, or Bus, pick a route/direction/stop, and see every departure for the day.
 - **Connections** — tap any stop along a trip to see everything else that comes through there next, across every platform of a station.
 - **Explore / nearby stops** — type a location or let the app guess via IP geolocation, and get the closest stops ranked by distance; remembers your last search.
@@ -26,7 +26,7 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **Home screen trip status** — while boarded, the home screen swaps the agency picker for your route, live ETA, stops remaining, and an optional progress bar with a vehicle marker crawling from boarding stop to alight stop.
 - **Jump back anytime** — a persistent Play icon returns you to live trip tracking from anywhere while a trip is boarded.
 - **About screen** — a full legend of every icon and mode Pico Transit uses.
-- **Settings** — default agency (skip the picker), light/dark map tiles, and toggles for tap-and-hold-to-arrivals, double-tap-to-zoom-platforms, tracking a tapped stop's vehicles, the home screen progress bar, the home screen daily message, and "See Everything."
+- **Settings** — switch agencies any time (reopens the onboarding picker), light/dark map tiles, and toggles for tap-and-hold-to-arrivals, double-tap-to-zoom-platforms, tracking a tapped stop's vehicles, the home screen progress bar, the home screen daily message, and "See Everything."
 
 ## 🐛 Notable fixes
 
