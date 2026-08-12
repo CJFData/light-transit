@@ -3,6 +3,7 @@ package com.thelightphone.sdk.audio
 import androidx.media3.common.Player
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal class PendingPlayerCommands {
     private val pending = mutableListOf<(Player) -> Unit>()
@@ -10,7 +11,7 @@ internal class PendingPlayerCommands {
     private var player: Player? = null
     private var released = false
 
-    val availability: StateFlow<LightAudioPlayerAvailability> = _availability
+    val availability: StateFlow<LightAudioPlayerAvailability> = _availability.asStateFlow()
 
     fun dispatch(command: (Player) -> Unit) {
         val readyPlayer = synchronized(this) {

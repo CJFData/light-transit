@@ -23,6 +23,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 
 /** Whether a [LightAudioPlayer] is initializing, accepts commands, or is terminal. */
@@ -59,15 +60,15 @@ class LightAudioPlayer internal constructor(
     private var released = false
 
     /** Current position in milliseconds, updated while playing. */
-    val positionMs: StateFlow<Long> = _positionMs
+    val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
     /** Resolved duration in milliseconds, or `0` while unknown/unavailable. */
-    val durationMs: StateFlow<Long> = _durationMs
+    val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
     /** Whether the platform is actively advancing playback. */
-    val isPlaying: StateFlow<Boolean> = _isPlaying
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
     /** Current queue index, or `-1` when the queue is empty. */
-    val currentMediaItemIndex: StateFlow<Int> = _currentMediaItemIndex
+    val currentMediaItemIndex: StateFlow<Int> = _currentMediaItemIndex.asStateFlow()
     /** Current playback failure, or `null` after successful re-preparation. */
-    val error: StateFlow<LightAudioError?> = _error
+    val error: StateFlow<LightAudioError?> = _error.asStateFlow()
     /** Connection and command-acceptance lifecycle of this player. */
     val availability: StateFlow<LightAudioPlayerAvailability> = commands.availability
 
