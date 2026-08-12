@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
@@ -84,15 +85,16 @@ internal class PlayerDemoMode(
     private val store: PlayerModeStore,
     initialPlayback: LightAudioPlayback = LightAudioPlayback.Attached,
 ) {
-    val playback = MutableStateFlow(initialPlayback)
+    private val _playback = MutableStateFlow(initialPlayback)
+    val playback = _playback.asStateFlow()
 
     suspend fun load(): LightAudioPlayback = store.getPlayback().also {
-        playback.value = it
+        _playback.value = it
     }
 
     suspend fun set(playback: LightAudioPlayback) {
+        _playback.value = playback
         store.setPlayback(playback)
-        this.playback.value = playback
     }
 }
 
@@ -130,7 +132,8 @@ class PlayerViewModel(
         .flatMapLatest { it.error }
         .stateIn(viewModelScope, SharingStarted.Eagerly, currentPlayer.error.value)
     val playback = mode.playback
-    val speed = MutableStateFlow(1f)
+    private val _speed = MutableStateFlow(1f)
+    val speed = _speed.asStateFlow()
 
     private val modeLoadJob = viewModelScope.launch {
         val initialPlayback = mode.playback.value
@@ -165,7 +168,7 @@ class PlayerViewModel(
 
     fun cycleSpeed() {
         val next = SPEEDS[(SPEEDS.indexOf(speed.value) + 1).mod(SPEEDS.size)]
-        speed.value = next
+        _speed.value = next
         currentPlayer.speed = next
     }
 
@@ -187,7 +190,6 @@ class PlayerViewModel(
         val nextPlayer = audio.newPlayer(playback = nextPlayback).apply {
             speed = this@PlayerViewModel.speed.value
         }
-        mode.playback.value = nextPlayback
         playerFlow.value = nextPlayer
     }
 
