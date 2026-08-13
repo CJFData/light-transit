@@ -19,6 +19,7 @@ private const val PERMISSION_MISSING_MESSAGE = "This tool doesn't have access to
 private const val UNAVAILABLE_MESSAGE = "This phone can't use NFC."
 
 enum class LightNfcTapState {
+    Unknown,
     Waiting,
     Disabled,
     PermissionMissing,
@@ -35,6 +36,7 @@ fun LightNfcTapReader(
 ) {
     val colors = LightThemeTokens.colors
     val message = when (state) {
+        LightNfcTapState.Unknown -> ""
         LightNfcTapState.Waiting -> prompt
         LightNfcTapState.Disabled -> DISABLED_MESSAGE
         LightNfcTapState.PermissionMissing -> PERMISSION_MISSING_MESSAGE

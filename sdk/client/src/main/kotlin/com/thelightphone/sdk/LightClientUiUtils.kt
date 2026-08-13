@@ -5,6 +5,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -73,9 +74,9 @@ fun LightNfcTapReader(
     val lifecycleOwner = LocalLifecycleOwner.current
     val nfc = rememberLightNfc()
     val onTapState = rememberUpdatedState(onTap)
-    var availability by remember { mutableStateOf(LightNfcAvailability.Unsupported) }
+    var availability by remember { mutableStateOf<LightNfcAvailability?>(null) }
     var readFailureMessage by remember { mutableStateOf<String?>(null) }
-    var readerRestarts by remember { mutableStateOf(0) }
+    var readerRestarts by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(lifecycleOwner, nfc) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -85,7 +86,7 @@ fun LightNfcTapReader(
 
     LaunchedEffect(nfc, availability, readerRestarts) {
         readFailureMessage = null
-        if (nfc == null || !availability.isReady) return@LaunchedEffect
+        if (nfc == null || availability?.isReady != true) return@LaunchedEffect
         nfc.newReader().asFlow()
             .retryWhen { cause, _ ->
                 if (cause !is LightNfcReadException) return@retryWhen false
@@ -106,7 +107,7 @@ fun LightNfcTapReader(
     }
 
     LightNfcTapReader(
-        state = availability.toTapState(),
+        state = availability?.toTapState() ?: LightNfcTapState.Unknown,
         onBack = onBack,
         modifier = modifier,
         title = title,

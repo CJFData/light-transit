@@ -4,6 +4,7 @@ import com.thelightphone.sdk.nfc.LightNfcAvailability
 import com.thelightphone.sdk.ui.LightNfcTapState
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 class LightNfcTapStateTest {
     @Test
@@ -30,6 +31,13 @@ class LightNfcTapStateTest {
     fun everyAvailabilityMapsToATapState() {
         val states = LightNfcAvailability.entries.map { it.toTapState() }
 
-        assertEquals(LightNfcTapState.entries.toSet(), states.toSet())
+        assertEquals(LightNfcTapState.entries.toSet() - LightNfcTapState.Unknown, states.toSet())
+    }
+
+    @Test
+    fun noAvailabilityEverReportsUnknown() {
+        val states = LightNfcAvailability.entries.map { it.toTapState() }
+
+        assertFalse(LightNfcTapState.Unknown in states)
     }
 }
