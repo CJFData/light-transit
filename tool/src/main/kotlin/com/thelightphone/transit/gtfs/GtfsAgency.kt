@@ -8,8 +8,9 @@ import java.time.ZoneId
  * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
  * URL here is the only change a screen-level caller ever needs to make.
  *
- * RIPTA's realtime service is plain-HTTP-only with no HTTPS equivalent. Its two URLs below are
- * reachable through the narrowly scoped cleartext exception provided by the :netconfig module.
+ * RIPTA's and LTC London's realtime feeds are HTTP-only at the origin with no HTTPS equivalent of
+ * their own; every URL below is now a redirect that resolves to HTTPS, so no cleartext exception
+ * is needed for any agency here (the old `:netconfig` module is gone).
  *
  * To add a new agency: append an entry below with a unique [id] (uniqueness is enforced at
  * class-load time, see the companion `init` block), its [displayName], its static [feedUrl], and
@@ -17,8 +18,8 @@ import java.time.ZoneId
  * don't guess from the city name). Leave either realtime URL null if that feed doesn't exist.
  * Nothing else needs a matching change -- every screen and preference store iterates [entries]
  * rather than switching on individual agencies. Three things worth checking against the agency's
- * *live* feed before trusting a new entry: (1) all three URLs should be plain HTTPS, or you'll
- * need RIPTA's cleartext exception above; (2) GtfsRealtime.kt's hand-rolled protobuf schema only
+ * *live* feed before trusting a new entry: (1) all three URLs should resolve to plain HTTPS, same
+ * as RIPTA/LTC above; (2) GtfsRealtime.kt's hand-rolled protobuf schema only
  * declares the specific field numbers seen in MBTA/RIPTA/RTD's real feeds so far -- an undeclared
  * field on a new agency's feed can fault the whole GTFS-RT decode (see that file's doc comments),
  * so hand-verify a live sample against it; (3) [timeZoneId] only matters once it differs from
@@ -51,8 +52,8 @@ enum class GtfsAgency(
         "mbta",
         "MBTA",
         "https://cdn.mbta.com/MBTA_GTFS.zip",
-        "https://cdn.mbta.com/realtime/TripUpdates.pb",
-        "https://cdn.mbta.com/realtime/VehiclePositions.pb",
+        "https://pico-transit-proxy.data-32b.workers.dev/mbta/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/mbta/vehiclepositions",
         timeZoneId = "America/New_York",
         components = listOf(MbtaV3VehicleSource),
     ),
@@ -60,27 +61,26 @@ enum class GtfsAgency(
         "ripta",
         "RIPTA",
         "https://ripta.com/RIPTA-GTFS.zip",
-        "http://realtime.ripta.com:81/api/tripupdates?format=gtfs.proto",
-        "http://realtime.ripta.com:81/api/vehiclepositions?format=gtfs.proto",
+        "https://pico-transit-proxy.data-32b.workers.dev/ripta/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/ripta/vehiclepositions",
         timeZoneId = "America/New_York",
     ),
     RTD(
         "rtd",
         "RTD Denver",
         "https://www.rtd-denver.com/files/gtfs/google_transit.zip",
-        "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/TripUpdate.pb",
-        "https://open-data.rtd-denver.com/files/gtfs-rt/rtd/VehiclePosition.pb",
+        "https://pico-transit-proxy.data-32b.workers.dev/rtd/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/rtd/vehiclepositions",
         timeZoneId = "America/Denver",
         components = listOf(BustangSecondaryFeed),
     ),
     LTC(
         "ltc",
-        "LTC Ontario-testing",
-        "https://www.londontransit.ca/gtfsfeed/google_transit.zip",
-        "http://gtfs.ltconline.ca/TripUpdate/TripUpdates.pb",
-        "http://gtfs.ltconline.ca/Vehicle/VehiclePositions.pb",
+        "LTC Ontario",
+        "https://pico-transit-proxy.data-32b.workers.dev/ltc/static",
+        "https://pico-transit-proxy.data-32b.workers.dev/ltc/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/ltc/vehiclepositions",
         timeZoneId = "America/Toronto",
-        components = listOf(LtcTrustAnchor),
     ),
 
     ;

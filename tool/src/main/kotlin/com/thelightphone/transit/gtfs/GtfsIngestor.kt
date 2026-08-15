@@ -65,12 +65,10 @@ class GtfsIngestor(private val filesDir: File) {
         val schemaVersionFile = File(agencyDir, "schema_version.txt")
         val cachedSchemaVersion = schemaVersionFile.takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull()
 
-        val trustAnchor = agency.component<BundledRootTrustAnchor>()
-
         onStatus(GtfsIngestStatus.CheckingForUpdates)
         val cachedMeta = readFeedMeta(metaFile, feedUrls)
         val remoteMeta = try {
-            feedUrls.map { checkForUpdate(it, trustAnchor) }.takeIf { metas -> metas.all { it != null } }?.map { it!! }
+            feedUrls.map { checkForUpdate(it) }.takeIf { metas -> metas.all { it != null } }?.map { it!! }
         } catch (e: Exception) {
             Log.e("GtfsIngestor", "Feed update check failed for ${agency.displayName}, redownloading to be safe", e)
             null
@@ -87,7 +85,7 @@ class GtfsIngestor(private val filesDir: File) {
         }
 
         onStatus(GtfsIngestStatus.Downloading)
-        feedUrls.zip(zipFiles).forEach { (url, zipFile) -> downloadZip(url, zipFile, trustAnchor) }
+        feedUrls.zip(zipFiles).forEach { (url, zipFile) -> downloadZip(url, zipFile) }
 
         onStatus(GtfsIngestStatus.Parsing)
         val tempDbFile = File(agencyDir, "transit.db.tmp")
@@ -124,15 +122,10 @@ class GtfsIngestor(private val filesDir: File) {
 
     /** A HEAD request's ETag/Last-Modified, or null if the check couldn't be completed -- follows
      * the same manual redirect handling as [downloadZip], since a HEAD to the same URL can hit the
-     * same http hop. [trustAnchor] is only non-null for an agency whose static feed host needs one
-     * (see [BundledRootTrustAnchor]) -- every other agency's client is left with OkHttp's plain
-     * defaults, untouched by this at all. */
-    private suspend fun checkForUpdate(url: String, trustAnchor: BundledRootTrustAnchor?): FeedMeta? {
+     * same http hop. */
+    private suspend fun checkForUpdate(url: String): FeedMeta? {
         val client = HttpClient(OkHttp) {
             followRedirects = false
-            trustAnchor?.let { anchor ->
-                engine { config { sslSocketFactory(anchor.sslSocketFactory, anchor.trustManager) } }
-            }
         }
         try {
             var currentUrl = url
@@ -177,20 +170,16 @@ class GtfsIngestor(private val filesDir: File) {
     }
 
     /**
-     * Some feeds (e.g. RIPTA) redirect through a plain-HTTP hop before landing on HTTPS.
-     * Ktor's HttpRedirect plugin refuses to follow an HTTPS->HTTP downgrade by default (and
-     * Android blocks cleartext traffic anyway), so it hands back the original redirect
-     * response instead of an error. Redirects are followed manually here, upgrading any
-     * http:// hop to https:// rather than ever actually connecting over plain HTTP.
-     *
-     * [trustAnchor] -- see [checkForUpdate]'s matching parameter.
+     * Some feeds (e.g. RTD Denver's static GTFS feed) redirect through a hop that needs resolving
+     * relative to the URL that produced it. Ktor's HttpRedirect plugin refuses to follow an
+     * HTTPS->HTTP downgrade by default (and Android blocks cleartext traffic anyway), so it hands
+     * back the original redirect response instead of an error. Redirects are followed manually
+     * here, upgrading any http:// hop to https:// rather than ever actually connecting over plain
+     * HTTP.
      */
-    private suspend fun downloadZip(url: String, destination: File, trustAnchor: BundledRootTrustAnchor?) {
+    private suspend fun downloadZip(url: String, destination: File) {
         val client = HttpClient(OkHttp) {
             followRedirects = false
-            trustAnchor?.let { anchor ->
-                engine { config { sslSocketFactory(anchor.sslSocketFactory, anchor.trustManager) } }
-            }
         }
         try {
             var currentUrl = url

@@ -116,7 +116,7 @@ class SettingsViewModel(
 
     val mergeFeedStationsEnabled: StateFlow<Boolean>
         get() = _mergeFeedStationsEnabled
-    private val _mergeFeedStationsEnabled = MutableStateFlow(false)
+    private val _mergeFeedStationsEnabled = MutableStateFlow(true)
 
     val includeLongerTripsEnabled: StateFlow<Boolean>
         get() = _includeLongerTripsEnabled

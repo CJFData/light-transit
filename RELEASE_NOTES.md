@@ -11,7 +11,7 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **MBTA** and **RIPTA** — the original two agencies, with full realtime support.
 - **RTD Denver** — added via a community contribution, including GTFS-RT decode fixes and secondary-feed support.
 - **Bustang** (Colorado's statewide intercity coach) — merged directly into RTD Denver: its routes, stops, schedules, and live vehicles all show up alongside RTD's own.
-- **LTC Ontario** (London, Ontario) — newly added, along with fixes for its zero-trip routes, an HTTP static-feed URL, and a missing trust anchor (see below).
+- **LTC Ontario** (London, Ontario) — newly added, along with fixes for its zero-trip routes and an HTTP-only static feed (see below).
 
 ## 🗺️ Core features
 
@@ -37,17 +37,18 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **Home screen progress bar stuck** — agencies that never populate `current_stop_sequence` (e.g. RIPTA) left the home screen's progress bar frozen even though Trip Detail moved correctly; home screen now shares Trip Detail's GPS-proximity/TripUpdate fallback, and only credits a stop as "completed" once actually passed, not merely approached.
 - **RTD Denver GTFS-RT decode** — fixed a decode failure and restored HomeScreen features that had regressed during RTD integration; also made the agency list scrollable.
 - **LTC navigation bug** — zero-trip routes (which are real in LTC's data) caused an infinite back-button bounce between screens; fixed with explicit trip-existence checks and a dedicated "no trips" state.
-- **LTC missing trust anchor** — LTC's static-feed host serves a valid cert chain rooted at a 2021 Sectigo root that older Android system trust stores don't have yet, so HTTPS requests failed with `SSLHandshakeException: Trust anchor for certification path not found` even though the certificate itself is valid. Fixed with a code-only, LTC-scoped `BundledRootTrustAnchor` (`GtfsTrustAnchors.kt`) that bundles the missing root and is wired in only via LTC's own agency component — every other agency's HTTPS client is untouched.
 - **Timezone-aware schedules** — GTFS time math previously used the device's timezone instead of the agency's, causing wrong-day/wrong-time results for out-of-timezone agencies; fixed by threading the agency's own timezone through all schedule calculations.
+- **Home screen ETA timezone** — the compact "ETA h:mm" text next to the home screen's progress bar was a separate miss from the fix above: it rendered the boarded trip's live ETA against the device's own timezone rather than the agency's, so a device outside the agency's timezone showed a shifted clock time even though the underlying ETA math was already correct. Fixed by threading the agency's timezone through that display path too.
 - **Stations search keyboard** — the search keyboard silently stopped accepting input on reopen due to a stale ViewModel callback; fixed by hoisting the text field state.
 
 ## 🔧 Under the hood
 
-- **`:netconfig` cleartext exception, scoped to RIPTA and LTC** — both agencies' realtime `TripUpdates`/`VehiclePositions` feeds are plain-HTTP-only with no HTTPS equivalent (confirmed via direct TLS handshake attempts), so a narrowly-scoped Network Security Config exception permits cleartext only to `realtime.ripta.com` and `gtfs.ltconline.ca` — no blanket cleartext allowance elsewhere. **This is unlikely to survive Light's actual build/signing pipeline as-is**: `builder/lightbuilder/extract.py` only extracts `tool/` and discards every other module (including `netconfig`), and the plugin's `ManifestGenerator` never emits a `networkSecurityConfig` manifest attribute at all — a real workaround needs to come from Light's side before this can be trusted in production.
+- **RIPTA's and LTC's realtime feeds now resolve through a redirect to HTTPS** — both are plain-HTTP-only at the origin with no HTTPS equivalent of their own (RIPTA's realtime feed, and LTC's HTTP-only realtime plus its static feed's cert chain rooted at a 2021 Sectigo root some Android trust stores don't carry yet). Routing every agency's feed URL through one redirect layer resolved both problems at once, so the `:netconfig` cleartext-exception module and the code-only `BundledRootTrustAnchor`/`GtfsTrustAnchors.kt` workaround are both gone — no agency's HTTP client needs special-casing anymore.
 - Local **Light Keyboard UI** dependency (previously pulled from JitPack) folded in as a proper subtree.
 - **BouncyCastle** (`bcprov-jdk18on`) added to the dependency allow-list to support agency-specific crypto needs.
 - No device GPS is used anywhere — nearby-stop and location search run entirely on Nominatim/OpenStreetMap and IP-based geolocation, since the SDK doesn't expose GPS to tools.
 - Boarding a trip is a saved reference, not a background tracker — no live-feed polling happens unless Trip Detail or the home screen is actually open and visible.
+- Pulled in upstream `light-sdk`'s latest: an NFC reader API, detached audio playback, Light Keyboard bumped to v0.0.18, and a `zxing`/`sol4k` dependency-allowlist addition — none of it wired into Pico Transit yet, just picked up by the merge.
 
 ## 🙌 Credits
 

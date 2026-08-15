@@ -12,7 +12,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 
-private const val MBTA_V3_VEHICLES_URL = "https://api-v3.mbta.com/vehicles"
+private const val MBTA_V3_VEHICLES_URL = "https://pico-transit-proxy.data-32b.workers.dev/mbta/v3/vehicles"
 
 private val mbtaV3Json = Json { ignoreUnknownKeys = true }
 

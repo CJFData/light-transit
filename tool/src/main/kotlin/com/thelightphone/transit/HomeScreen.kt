@@ -208,10 +208,13 @@ data class ActiveTripStatus(
      * stop_sequence position -- drives the progress bar's marker (Settings screen's "Trip progress
      * bar" toggle). Null under the same conditions as [stopsRemaining]. */
     val progressFraction: Float?,
+    /** The boarded trip's own agency timezone -- [etaEpochSeconds] must be rendered against this,
+     * not the rider's device zone, same reasoning as every other GTFS time display in the app. */
+    val zoneId: ZoneId,
 )
 
-private fun Long.asClockTime(): String {
-    val time = LocalDateTime.ofInstant(Instant.ofEpochSecond(this), ZoneId.systemDefault())
+private fun Long.asClockTime(zoneId: ZoneId): String {
+    val time = LocalDateTime.ofInstant(Instant.ofEpochSecond(this), zoneId)
     return formatGtfsTime("%02d:%02d:00".format(time.hour, time.minute))
 }
 
@@ -224,7 +227,7 @@ fun ActiveTripStatus.headingSubtitle(): String {
             alightStopName?.let { "$stopsRemaining $stopsWord to $it" } ?: "$stopsRemaining $stopsWord away"
         }
     }
-    val etaText = etaEpochSeconds?.let { "ETA ${it.asClockTime()}" }
+    val etaText = etaEpochSeconds?.let { "ETA ${it.asClockTime(zoneId)}" }
     return listOfNotNull(stopsToDest, etaText).joinToString(" · ").ifBlank {
         if (alightStopName != null) {
             "Boarded"
@@ -455,7 +458,7 @@ class HomeScreenViewModel(
             if (alightStopId == null || alightStop == null) {
                 activeTripStatus.value = ActiveTripStatus(
                     routeLabel = trip.routeLabel, alightStopName = null, etaEpochSeconds = null,
-                    stopsRemaining = null, progressFraction = null,
+                    stopsRemaining = null, progressFraction = null, zoneId = trip.agency.zoneId,
                 )
                 return
             }
@@ -512,6 +515,7 @@ class HomeScreenViewModel(
                 etaEpochSeconds = eta?.etaEpochSeconds,
                 stopsRemaining = stopsRemaining,
                 progressFraction = progressFraction,
+                zoneId = trip.agency.zoneId,
             )
 
             // Checked here (not just from Trip Detail's own poll) so the "you've arrived" moment

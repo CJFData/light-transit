@@ -50,3 +50,6 @@ bin/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+### Personal, not for the repo ###
+comments_review.md

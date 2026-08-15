@@ -7,7 +7,6 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
-import io.ktor.http.HttpHeaders
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -188,48 +187,22 @@ data class GtfsRtStopTimeEvent(
 
 class GtfsRealtimeException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
-private const val MAX_REDIRECTS = 5
-
-/** Resolves a redirect Location against the URL that produced it (RFC 3986) and upgrades an
- * absolute http:// result to https:// -- see GtfsIngestor.kt's identical private helper (of the
- * same name) for the full explanation of why a relative Location can't just be string-checked. */
-private fun resolveRedirectLocation(currentUrl: String, location: String): String {
-    val resolved = java.net.URI(currentUrl).resolve(location).toString()
-    return if (resolved.startsWith("http://")) "https://" + resolved.removePrefix("http://") else resolved
-}
-
 /**
  * Fetches and decodes a GTFS-RT feed — TripUpdates and VehiclePositions are separate published
  * feeds but both decode into this same FeedMessage/FeedEntity wrapper (each entity just populates
  * whichever of trip_update/vehicle applies to that feed), so one fetch function covers both.
- * Reuses the same manual redirect handling as GtfsIngestor's zip download (some feeds route
- * through non-HTTPS hops too), upgrading any http:// redirect target to https:// rather than ever
- * connecting over plain HTTP.
+ * [url] is always a redirect that resolves to the real feed on the client's behalf, so a single
+ * request here is enough -- no redirect-following needed at this layer.
  */
 object GtfsRealtimeClient {
     suspend fun fetchFeed(url: String): GtfsRtFeedMessage {
-        val client = HttpClient(OkHttp) {
-            followRedirects = false
-        }
+        val client = HttpClient(OkHttp)
         try {
-            var currentUrl = url
-            repeat(MAX_REDIRECTS + 1) {
-                val response = client.get(currentUrl)
-                val status = response.status.value
-                when {
-                    status in 200..299 -> {
-                        val bytes: ByteArray = response.body()
-                        return ProtoBuf.decodeFromByteArray(GtfsRtFeedMessage.serializer(), bytes)
-                    }
-                    status in 300..399 -> {
-                        val location = response.headers[HttpHeaders.Location]
-                            ?: throw GtfsRealtimeException("GTFS-RT redirected without a Location header")
-                        currentUrl = resolveRedirectLocation(currentUrl, location)
-                    }
-                    else -> throw GtfsRealtimeException("GTFS-RT fetch failed: HTTP $status")
-                }
-            }
-            throw GtfsRealtimeException("GTFS-RT fetch exceeded $MAX_REDIRECTS redirects")
+            val response = client.get(url)
+            val status = response.status.value
+            if (status !in 200..299) throw GtfsRealtimeException("GTFS-RT fetch failed: HTTP $status")
+            val bytes: ByteArray = response.body()
+            return ProtoBuf.decodeFromByteArray(GtfsRtFeedMessage.serializer(), bytes)
         } finally {
             client.close()
         }

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- RIPTA and LTC have no HTTPS equivalent for these realtime endpoints. -->
-<network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">realtime.ripta.com</domain>
-        <domain includeSubdomains="false">gtfs.ltconline.ca</domain>
-    </domain-config>
-</network-security-config>

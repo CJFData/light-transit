@@ -34,13 +34,13 @@ class AgencyPreferences(private val dataStore: DataStore<Preferences>) {
         }
     }
 
-    /** Settings screen toggle (off by default), scaffolding for a not-yet-implemented feature: when
+    /** Settings screen toggle (on by default), scaffolding for a not-yet-implemented feature: when
      * on, a [SecondaryGtfsFeed]'s own stops at the same physical station as one of the parent
      * agency's own (e.g. Bustang's gates at RTD Denver's Union Station) would be merged into that
      * station's group, the same way MBTA's South Station groups its own platforms. Reading this
      * flag currently has no effect anywhere -- added ahead of that feature so the setting exists
      * and can be discussed/tested independently of the merge logic itself. */
-    val mergeFeedStationsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[mergeFeedStationsEnabledKey] ?: false }
+    val mergeFeedStationsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[mergeFeedStationsEnabledKey] ?: true }
 
     suspend fun setMergeFeedStationsEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[mergeFeedStationsEnabledKey] = enabled }

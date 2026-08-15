@@ -105,7 +105,7 @@ That's it — happy transit-ing! 🚏🚌🚆
 
 ## 🧪 A couple of nerdy notes
 
-- **RIPTA's live feeds are HTTP-only** (no HTTPS). A narrowly scoped `:netconfig` exception permits realtime requests only to `realtime.ripta.com`.
+- **RIPTA's and LTC's live feeds are HTTP-only at the origin** (no HTTPS). Both now resolve through a redirect to HTTPS, so the app itself never connects over cleartext, and the `:netconfig` module's cleartext exception is no longer needed.
 - **No device GPS is used anywhere** — the SDK doesn't expose it to tools yet. Nearby-stop and location search are powered by Nominatim (OpenStreetMap) and IP-based geolocation instead. Be kind to their free APIs! 🙏
 - **Stations are deduplicated using GTFS's `parent_station`** — a big station with several platforms (subway entrances, commuter rail tracks, etc.) shows up as one marker/entry, not one per platform, while still resolving to the right platform's `stop_id` under the hood for schedule lookups. Only real platforms and boarding areas count as "member platforms" for this — GTFS also links entrances, elevators, and escalator nodes to the same parent station, and those are filtered out so a big hub's map isn't cluttered with dozens of non-boardable points.
 - **Boarding a trip is a saved reference, not a background tracker** — Pico Transit never polls a live feed while the app itself isn't open. "You've reached your stop" detection only runs while Trip Detail or the home screen is actually visible and polling, the same way every other bit of live tracking in the app works.
