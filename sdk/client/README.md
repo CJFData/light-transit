@@ -76,11 +76,18 @@ Every screen gets:
 `LightAudio` provides a minimal and opinionated API for dealing with sound input and output, both at the file (`LightAudioPlayer`,  `LightAudioRecorder`) and buffer levels (`LightAudioVoice`, `LightAudioCapture`).
 [`:examples:audio-demo`](../../examples/audio-demo) has a complete app demo of the current functionality.
 
-_NOTE: The SDK only supports foreground audio at the moment. Background audio requires some work on LightOS, and is planned._
+Attached players follow the tool screen lifecycle. Detached players opt into
+service-owned playback that can continue after the screen leaves.
 
 #### Setup and lifecycle
 
-`LightAudio` is a factory for foreground audio (only plays while tool is "in focus"), constructed from the `SealedLightActivity` your screen already receives. Pass it into your view model's constructor, create players, recorders, capture sources, and PCM voices from it there, and release them in `onCleared()`.
+`LightAudio` is constructed from the `SealedLightActivity` the screen already receives.
+Pass it into your view model, create players, recorders, capture sources, and PCM voices there, and release their handles in `onCleared()`.
+
+`newPlayer()` creates an attached player by default.
+Its playback belongs to the tool screen and `release()` stops it.
+A detached player moves playback ownership to an SDK service, so `release()` disconnects the tool handle but does not stop playback.
+Call `stop()` before `release()` when the tool intends to end detached playback.
 
 ```kotlin
 class PlayerViewModel(audio: LightAudio) : LightViewModel<Unit>() {
@@ -105,7 +112,8 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) : LightScree
 
 #### Player
 
-`LightAudioPlayer` plays files, bundled assets, and local or remote URLs. A player owns one queue and exposes position, duration, playback state, and queue index through `StateFlow` objects.
+`LightAudioPlayer` plays files, bundled assets, and local or remote URLs. A player owns one queue and exposes its state through `StateFlow` objects: `positionMs`, `durationMs`, `isPlaying`, `currentMediaItemIndex`, `error`, and `availability`.
+`currentMediaItemIndex` is `NO_MEDIA_ITEM` while the queue is empty.
 
 ```kotlin
 player.setMediaQueue(
@@ -119,11 +127,80 @@ player.setMediaQueue(
 player.play()
 ```
 
-- Use `pause`, `stop`, `seekTo`, or the skip methods for transport controls.
+- Use `pause`, `stop`, and `seekTo` for transport controls.
+- `skipBack()` and `skipForward()` seek 15 seconds within the current item; `skipToPrevious()` and `skipToNext()` move through the queue.
+- Set `speed` to change playback rate; values at or below zero clamp to the minimum supported rate.
+- Use `setSource(File)` as a convenience for a one-item local-file queue.
 - Playback requests audio focus automatically.
 - If focus is unavailable, `play()` does nothing.
 - Observe `isPlaying` for the actual state.
 - Transient focus loss pauses and later resumes playback, while duckable loss lowers the volume.
+
+##### Playback failures
+
+Player creation failures and playback failures use different mechanisms.
+
+`LightAudioPlayerException` is **thrown** when you create a player, for things the tool got wrong: a missing capability, a second detached handle, or a usage that conflicts with a live detached session.
+Correct the cause, then create the player again.
+
+`LightAudioError` is **observed** while playing, for things the content or the device got wrong. Playback stopped, but the player still works; select another item to continue.
+
+```kotlin
+player.error.collect { error ->
+    when (error?.kind) {
+        LightAudioErrorKind.Source -> // network or file I/O; worth retrying
+        LightAudioErrorKind.Unsupported -> // bad container or codec; skip it
+        LightAudioErrorKind.Output -> // the audio device could not be opened
+        LightAudioErrorKind.Unknown -> // unclassified
+        null -> // no current failure
+    }
+}
+```
+
+`error.diagnostic` carries the underlying platform error name for logs, and `error.itemIndex` is the queue position that failed, or `-1` when unavailable.
+
+When an item fails, playback stops rather than skipping to the next item.
+The SDK does not advance automatically, because unplayable content would advance in a loop.
+Setting a queue again or selecting a healthy item clears `error`.
+
+##### Detached playback and reconnecting
+
+Create a detached player when playback must continue after its tool screen is released.
+Enable detached audio in `lighttool.toml`:
+
+```toml
+[tool]
+capabilities = ["detached-audio"]
+```
+
+Wait for its controller before deciding whether the session is fresh:
+
+```kotlin
+val player = audio.newPlayer(playback = LightAudioPlayback.Detached)
+if (player.awaitReady() && player.currentMediaItemIndex.value == NO_MEDIA_ITEM) {
+    player.setMediaQueue(items)
+}
+```
+
+The player `availability` field exposes the connection lifecycle:
+
+- `Initializing` — the detached controller is connecting.
+- `Ready` — commands can be handled. Attached players start here.
+- `Released` — the handle is closed and cannot accept commands.
+
+`awaitReady()` suspends through initialization and returns `true` only when the player reaches `Ready`. Returns `false` if the player is released first.
+
+A non-empty queue belongs to the surviving service. Reuse it instead of setting the queue again, which would replace live playback. Position, duration, playing state, queue index, and playback error are populated when the controller connects.
+Once the service stops, the next player is fresh and restoring its queue and position is the tool's responsibility.
+
+`release()` disconnects a detached handle but does not stop its playback.
+To end detached playback, call `stop()` before `release()`. Calling `release()`
+alone only disconnects the handle; playback may continue.
+Only one detached handle may exist per tool process.
+
+A live session must be reopened with the same `LightAudioUsage`; requesting a different usage throws `LightAudioPlayerException`.
+
+For more details on the detached playback design, refer to [Design Decisions - Detached audio](../../docs/design_decisions/detached_audio.md).
 
 #### PCM voice
 
@@ -185,6 +262,71 @@ capture.asFlow().collect { pcm ->
 - Use one active collector per capture instance.
 - A capture startup failure throws `LightAudioCaptureException` from collection.
 - Set `CaptureConfig.source` to `Unprocessed` to request raw input when supported; `Mic` uses the standard processed microphone path.
+
+### NFC
+
+`LightNfc` reads NFC tags — and other phones presenting a tag — while your tool is in the foreground.
+Declare the permission in `lighttool.toml`; the plugin emits the matching `<uses-feature android:name="android.hardware.nfc" android:required="false" />` for you, so phones without NFC are never filtered out of the store listing.
+
+```toml
+permissions = ["android.permission.NFC"]
+```
+
+#### Availability
+
+`LightNfc` is a factory constructed from the `SealedLightActivity` your screen already receives. `availability` is read again on every access, because NFC can be switched on or off in Settings while your tool is backgrounded.
+
+```kotlin
+val nfc: LightNfc = DefaultLightNfc(sealedActivity)
+
+val prompt = when (nfc.availability) {
+    LightNfcAvailability.Ready -> "Hold your phone near the other device."
+    LightNfcAvailability.Disabled -> "Turn on NFC in Settings, then try again."
+    LightNfcAvailability.PermissionMissing -> "This tool doesn't have access to NFC."
+    LightNfcAvailability.Unsupported -> "This phone can't use NFC."
+}
+```
+
+- `availability.isReady` is the short form. Gate any tap affordance on it, so a phone without NFC never shows the button.
+- `Unsupported` means no NFC hardware; `Disabled` means the user turned NFC off; `PermissionMissing` means the tool omitted `android.permission.NFC` from `lighttool.toml`, and is logged with that detail.
+- Screens can refresh it from `willShow()`, which runs every time the screen comes back to the front.
+
+#### Reading taps
+
+`LightNfcReader` provides taps as a `Flow<LightNfcTap>`, holding reader mode for as long as it is collected.
+
+```kotlin
+nfc.newReader().asFlow().collect { tap ->
+    val address = tap.uri ?: tap.text
+}
+```
+
+For a one-shot read, `awaitTap()` takes the first tap and stops:
+
+```kotlin
+val tap = nfc.newReader().awaitTap()
+```
+
+- Collection owns reader mode: starting collection arms the reader, or the next time the tool resumes if it is backgrounded; backgrounding disarms it; cancelling releases it.
+- Collection is the boundary, not the screen. A reader collected from a scope that outlives the screen stays armed after the user navigates away, so collect from something that ends with the screen, as `LightNfcTapReader` does.
+- Concurrent collectors share the one reader mode Android grants the Activity: the newest receives taps, earlier ones resume as later ones stop, and the last to stop releases the radio.
+- Release matters: while reader mode is on, no other app sees taps.
+- Every tap carries `serialNumber`, the tag's UID as uppercase hex.
+- `records` holds the decoded NDEF message as `LightNfcRecord.Uri`, `LightNfcRecord.Text`, or `LightNfcRecord.Binary`. `tap.uri` and `tap.text` are shortcuts for the first record of each kind.
+- A tag with no NDEF message — a bare UID badge — reads successfully with an empty `records` list.
+- Failures arrive from collection as a `LightNfcException`: `LightNfcUnavailableException` when NFC is off, absent, not granted to the tool, or couldn't start; `LightNfcReadException` when the tag left the field or its contents couldn't be decoded. The exception message is product copy naming the actual cause.
+- `LightNfcReaderConfig` narrows the technologies polled, skips the platform's NDEF check, silences the platform tap sound, and sets the presence-check delay.
+
+#### Tap prompt
+
+`LightNfcTapReader` is the ready-made counterpart to `LightQrCodeScanner`. It runs the reader while the screen is showing and renders the prompt, so a tool that just needs an address off a tap does not handle availability itself.
+
+```kotlin
+LightNfcTapReader(
+    onTap = { tap -> tap.uri?.let(::onAddressScanned) },
+    onBack = { goBack(Unit) },
+)
+```
 
 ### Talking to LightOS
 
