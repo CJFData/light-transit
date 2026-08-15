@@ -18,6 +18,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 ## 🔭 Upcoming developments
 
 - 🔍 **Searching a longer agency list** — the onboarding picker is a plain scrollable list today, which is fine for a handful of agencies but won't stay that way as more of Colorado's statewide transit authorities get added. Search support is already wired up under the hood, just dormant until the list actually gets long enough to need it.
+- - 🔍 **Comment and documentation review** — I will be reviewing all comments and documentation in code and, rewriting any notes provided with LLM support in my own words and provide clearer explanation for logic and reasoning
 
 ## 🗺️ What can it do?
 
