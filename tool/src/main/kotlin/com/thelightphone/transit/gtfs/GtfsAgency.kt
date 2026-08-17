@@ -82,6 +82,14 @@ enum class GtfsAgency(
         "https://pico-transit-proxy.data-32b.workers.dev/ltc/vehiclepositions",
         timeZoneId = "America/Toronto",
     ),
+    STM(
+        "stm",
+        "STM Montréal",
+        "https://www.stm.info/sites/default/files/gtfs/gtfs_stm.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/stm/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/stm/vehiclepositions",
+        timeZoneId = "America/Montreal",
+    ),
 
     ;
 

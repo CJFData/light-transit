@@ -2,7 +2,7 @@
 
 Pico Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a live map that shows exactly where your ride actually is — no ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-Right now Pico Transit knows its way around **MBTA**, **RIPTA**, **RTD Denver**, and **LTC Ontario** (London, Ontario), with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
+Right now Pico Transit knows its way around **MBTA**, **RIPTA**, **RTD Denver**, **LTC Ontario** (London, Ontario), and **STM Montréal**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
 
 Pico Transit can be used alongside the light phone's directions tool for more context on your commutes, or standalone, covering buses, commuter rail.subway systems, and transit stations.
 
@@ -18,11 +18,12 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 ## 🔭 Upcoming developments
 
 - 🔍 **Searching a longer agency list** — the onboarding picker is a plain scrollable list today, which is fine for a handful of agencies but won't stay that way as more of Colorado's statewide transit authorities get added. Search support is already wired up under the hood, just dormant until the list actually gets long enough to need it.
+- 🚏 **More agencies coming soon** — thanks to community support, Pico Transit's agency list keeps growing beyond where it started.
 - - 🔍 **Comment and documentation review** — I will be reviewing all comments and documentation in code and, rewriting any notes provided with LLM support in my own words and provide clearer explanation for logic and reasoning
 
 ## 🗺️ What can it do?
 
-- 🏠 **Pick your agency** — MBTA, RIPTA, RTD Denver, or LTC Ontario — and Pico Transit downloads their schedule right onto your phone. First launch (or switching agencies later from Settings) opens this as its own welcome screen; once picked, the home screen shows a ticking clock, your agency's name, and a loading indicator until its schedule is ready.
+- 🏠 **Pick your agency** — MBTA, RIPTA, RTD Denver, LTC Ontario, or STM Montréal — and Pico Transit downloads their schedule right onto your phone. First launch (or switching agencies later from Settings) opens this as its own welcome screen; once picked, the home screen shows a ticking clock, your agency's name, and a loading indicator until its schedule is ready.
   
   ![alt text](docs/screenshots/Screenshot_20260810_171500.png)
   ![alt text](docs/screenshots/Screenshot_20260810_171800.png)
@@ -32,14 +33,22 @@ Pico Transit can be used alongside the light phone's directions tool for more co
   ![alt text](docs/screenshots/Screenshot_20260810_172700.png)
   ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
 
-- 📅 **Explore Schedules** — browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, pick a route, a direction, and a stop, and see every departure today.
+- 📅 **Schedules** — browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, pick a route, a direction, and a stop, and see every departure today. New: tap the header on the Departures screen to plan ahead with tomorrow's schedule instead.
   ![alt text](docs/screenshots/Screenshot_20260801_204325.png)
+
+  Routes for each agency Pico Transit currently supports:
+
+  ![alt text](docs/screenshots/Screenshot_20260817_013000.png)
+  ![alt text](docs/screenshots/Screenshot_20260817_012800.png)
+  ![alt text](docs/screenshots/Screenshot_20260817_013500.png)
+  ![alt text](docs/screenshots/Screenshot_20260817_013600.png)
+  ![alt text](docs/screenshots/Screenshot_20260817_013800.png)
 
 - 🔗 **Connections** — tap any stop along a trip to see what else comes through there next, across every platform of a station, not just the one your trip happened to use. Great for planning a transfer on the fly.
   
   ![alt text](docs/screenshots/Screenshot_20260801_211241.png)
   
-- 📍 **Explore** — type where you are (or let Pico Transit take a quick IP-based guess 🛰️) and get the closest stops, nearest first — it remembers your last search, so ducking into a stop's arrivals and back doesn't make you search all over again. Need something more precise, search for an address or landmark and find the closest stops in feet to it, then find how soon the next trip will arrive at your stop.
+- 📍 **Explore/Leave now** — type where you are (or let Pico Transit take a quick IP-based guess 🛰️) and get the closest stops, nearest first — it remembers your last search, so ducking into a stop's arrivals and back doesn't make you search all over again. Need something more precise, search for an address or landmark and find the closest stops in feet to it, then find how soon the next trip will arrive at your stop.
   
    ![alt text](docs/screenshots/Screenshot_20260801_214943.png)
    ![alt text](image.png)
@@ -53,6 +62,8 @@ Pico Transit can be used alongside the light phone's directions tool for more co
   
   ![alt text](docs/screenshots/Screenshot_20260801_200838.png)
   ![alt text](docs/screenshots/Screenshot_20260801_204556.png)
+
+- 👆 **Gestures** — tap and hold a stop or station's name — on the Map, in Schedules while picking where to board, or in the Stations list — to jump straight to its live upcoming arrivals instead of whatever a plain tap would open there. On the Map itself, double-tap a multi-platform station to zoom into a view of just its own platforms, then double-tap its name again to zoom back out to the main map and see what else is nearby. On Trip Detail, tap and hold works a little differently depending on whether that trip's boarded: not boarded, a plain tap opens a stop's connections and tap-and-hold jumps to its live arrivals instead; boarded, a plain tap sets (or clears) that stop as where you're getting off, and tap-and-hold still opens its connections.
 
 - 🚉 **Stations** — browse every real multi-platform station an agency has, and open a zoomed-in map of just that station's own real platforms and gates (elevators, entrances, and escalators are filtered out). For MBTA commuter rail, once a specific track is assigned — usually 10-15 minutes before departure — its vehicle shows up right on that track's own platform.
   

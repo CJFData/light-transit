@@ -64,29 +64,48 @@ class DepartureListViewModel(
     private val _state = MutableStateFlow<DepartureListState>(DepartureListState.Loading)
     val state: StateFlow<DepartureListState> = _state
 
+    /** Whether the list below is showing tomorrow's service day instead of today's -- toggled by
+     * tapping the "view tomorrow's schedule" row (see [DepartureListScreen.Content]). Every
+     * [GtfsRepository] departures query already takes an arbitrary service date rather than
+     * assuming "today", so shifting this by one day is the only change [loadDepartures] needs. */
+    private val _showTomorrow = MutableStateFlow(false)
+    val showTomorrow: StateFlow<Boolean> = _showTomorrow
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
-            _state.value = try {
-                val today = todayForGtfs(agency?.zoneId ?: java.time.ZoneId.systemDefault())
-                // Read once at screen-open, same as every other one-shot Settings read in this app
-                // (see TapHoldPreferences' own usage) -- Settings isn't shown at the same time as
-                // this screen, so no need to react live.
-                val includeLongerTrips = departurePreferences.includeLongerTripsEnabledFlow.first()
-                val departures = when {
-                    directionId == null -> repository.getDepartures(routeId, null, stopId, today)
-                    // See GtfsRepository.getDeparturesForVariant's own doc: also includes any
-                    // longer trip that reaches at least as far as the chosen variant (e.g. a
-                    // "South Station" train under a "Toward Readville" pick), unless the rider has
-                    // turned that off in Settings, in which case it's an exact headsign match only.
-                    includeLongerTrips -> repository.getDeparturesForVariant(routeId, directionId, headsign, stopId, today)
-                    else -> repository.getDeparturesForExactVariant(routeId, directionId, headsign, stopId, today)
-                }
-                DepartureListState.Loaded(departures)
-            } catch (e: Exception) {
-                Log.e("DepartureListScreen", "Failed to load departures for stop $stopId", e)
-                DepartureListState.Error("Unable to load departures.")
+            loadDepartures()
+        }
+    }
+
+    fun toggleDay() {
+        _showTomorrow.value = !_showTomorrow.value
+        viewModelScope.launch(Dispatchers.IO) {
+            loadDepartures()
+        }
+    }
+
+    private suspend fun loadDepartures() {
+        _state.value = try {
+            val serviceDate = todayForGtfs(agency?.zoneId ?: java.time.ZoneId.systemDefault())
+                .let { if (_showTomorrow.value) it.plusDays(1) else it }
+            // Read once at screen-open, same as every other one-shot Settings read in this app
+            // (see TapHoldPreferences' own usage) -- Settings isn't shown at the same time as
+            // this screen, so no need to react live.
+            val includeLongerTrips = departurePreferences.includeLongerTripsEnabledFlow.first()
+            val departures = when {
+                directionId == null -> repository.getDepartures(routeId, null, stopId, serviceDate)
+                // See GtfsRepository.getDeparturesForVariant's own doc: also includes any
+                // longer trip that reaches at least as far as the chosen variant (e.g. a
+                // "South Station" train under a "Toward Readville" pick), unless the rider has
+                // turned that off in Settings, in which case it's an exact headsign match only.
+                includeLongerTrips -> repository.getDeparturesForVariant(routeId, directionId, headsign, stopId, serviceDate)
+                else -> repository.getDeparturesForExactVariant(routeId, directionId, headsign, stopId, serviceDate)
             }
+            DepartureListState.Loaded(departures)
+        } catch (e: Exception) {
+            Log.e("DepartureListScreen", "Failed to load departures for stop $stopId", e)
+            DepartureListState.Error("Unable to load departures.")
         }
     }
 
@@ -119,6 +138,7 @@ class DepartureListScreen(
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
+        val showTomorrow by viewModel.showTomorrow.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -129,7 +149,18 @@ class DepartureListScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text("Departures"),
+                    // The header itself doubles as the day toggle -- tapping either line flips
+                    // between today's and tomorrow's schedule (see DepartureListViewModel.toggleDay).
+                    // Every departures query already takes an arbitrary service date, so this is a
+                    // pure UI/state addition, not a new query path.
+                    center = LightTopBarCenter.TwoLineDetail(
+                        line1 = "Departures",
+                        // Kept short -- LightTopBarCenter caps this line's width at 18 grid units
+                        // (see LightTopBar.kt's CENTER_MAX_WIDTH_UNITS), so a full sentence here
+                        // just gets ellipsized on the actual device.
+                        line2 = if (showTomorrow) "Tomorrow — tap for today" else "Tap for tomorrow",
+                        onClick = { viewModel.toggleDay() },
+                    ),
                     rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
                         navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
                     },
@@ -157,7 +188,7 @@ class DepartureListScreen(
 
                     is DepartureListState.Loaded -> if (s.departures.isEmpty()) {
                         LightText(
-                            text = "No departures today.",
+                            text = if (showTomorrow) "No departures tomorrow." else "No departures today.",
                             variant = LightTextVariant.Copy,
                             lighten = true,
                         )

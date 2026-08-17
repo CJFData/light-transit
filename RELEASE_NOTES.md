@@ -15,15 +15,15 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 
 ## 🗺️ Core features
 
-- **Onboarding agency picker** — first launch (or switching agencies from Settings) opens a dedicated welcome screen to pick MBTA, RIPTA, RTD Denver, or LTC; Pico Transit downloads that agency's schedule to the phone. Once picked, the home screen shows a ticking clock in the agency's own timezone, its name, and a loading indicator until the schedule's ready — the clock stays visible while a trip's boarded too, alongside the live ETA and progress bar.
-- **Explore Schedules** — browse by Subway, Commuter Rail, or Bus, pick a route/direction/stop, and see every departure for the day.
+- **Onboarding agency picker** — first launch (or switching agencies from Settings) opens a dedicated welcome screen to pick MBTA, RIPTA, RTD Denver, LTC, or STM; Pico Transit downloads that agency's schedule to the phone. Once picked, the home screen shows a ticking clock in the agency's own timezone, its name, and a loading indicator until the schedule's ready — the clock stays visible while a trip's boarded too, alongside the live ETA and progress bar.
+- **Schedules** — browse by Subway, Commuter Rail, or Bus, pick a route/direction/stop, and see every departure for the day. New: tap the header on the Departures screen to plan ahead with tomorrow's schedule instead of today's.
 - **Connections** — tap any stop along a trip to see everything else that comes through there next, across every platform of a station.
-- **Explore / nearby stops** — type a location or let the app guess via IP geolocation, and get the closest stops ranked by distance; remembers your last search.
+- **Explore/Leave now** — type a location or let the app guess via IP geolocation, and get the closest stops ranked by distance; remembers your last search.
 - **Live ETAs** — real-time predictions with On Time / Late / Early badges wherever an agency's live feed supports it.
 - **Live map** — your stop pinned with nearby stops and live vehicles shown with mode-specific icons; a "See Everything" mode drops the per-stop filter to show every live vehicle in view, filterable by stop or mode.
 - **Stations** — every real multi-platform station, deduplicated via GTFS `parent_station` so a hub shows as one entry, with a zoomed-in map of just its real platforms (entrances/elevators/escalators filtered out). MBTA commuter rail track assignments come from MBTA's V3 API once a track is assigned, ~10–15 minutes before departure.
 - **Board a trip** — tap Play from any Trip Detail screen to make it your current trip, track your position via the vehicle marker, mark an alight stop, and get a "You've reached your stop! 🎉" celebration when you arrive.
-- **Home screen trip status** — while boarded, the home screen swaps the agency picker for your route, live ETA, stops remaining, and an optional progress bar with a vehicle marker crawling from boarding stop to alight stop.
+- **Home screen trip status** — while boarded, the home screen swaps its usual heading for your route, live ETA, stops remaining, and an optional progress bar with a vehicle marker crawling from boarding stop to alight stop.
 - **Jump back anytime** — a persistent Play icon returns you to live trip tracking from anywhere while a trip is boarded.
 - **About screen** — a full legend of every icon and mode Pico Transit uses.
 - **Settings** — switch agencies any time (reopens the onboarding picker), light/dark map tiles, and toggles for tap-and-hold-to-arrivals, double-tap-to-zoom-platforms, tracking a tapped stop's vehicles, the home screen progress bar, the home screen daily message, and "See Everything."
