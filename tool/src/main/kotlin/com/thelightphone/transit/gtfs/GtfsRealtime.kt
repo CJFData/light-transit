@@ -164,7 +164,11 @@ data class GtfsRtTripDescriptor(
 
 /** Field 5 (schedule_relationship) is RTD-specific -- present on every one of its live stop time
  * updates -- and declared unused for the same undeclared-field-faults-decode reason as
- * [GtfsRtTripDescriptor]'s doc comment. */
+ * [GtfsRtTripDescriptor]'s doc comment. Field 1005 is the MTA commuter railroads' (LIRR, Metro-
+ * North) own nyct_stop_time_update extension (scheduled_track/actual_track) -- hand-verified live
+ * against LIRR's real feed: a short nested message whose sub-fields decode as valid UTF-8 track
+ * labels (e.g. "203", "4", "2A"), so String is a safe unused-field type here, same reasoning as
+ * [GtfsRtTripUpdate]'s own vendor-bundle fields. */
 @Serializable
 data class GtfsRtStopTimeUpdate(
     @ProtoNumber(1) val stopSequence: Int? = null,
@@ -172,6 +176,7 @@ data class GtfsRtStopTimeUpdate(
     @ProtoNumber(2) val arrival: GtfsRtStopTimeEvent? = null,
     @ProtoNumber(3) val departure: GtfsRtStopTimeEvent? = null,
     @ProtoNumber(5) val scheduleRelationship: Int? = null,
+    @ProtoNumber(1005) val nyctTrackUnused: String? = null,
 )
 
 /** Field 4 is LTC London-specific -- a second timestamp-shaped varint present on nearly every

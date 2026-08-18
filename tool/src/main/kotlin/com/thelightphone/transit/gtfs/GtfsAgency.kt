@@ -91,6 +91,191 @@ enum class GtfsAgency(
         timeZoneId = "America/Montreal",
     ),
 
+    // Most entries below are static-schedule-only ("(No Live)" in their own displayName) -- added
+    // ahead of realtime on purpose so each one gets a real on-device ingest test at its actual size
+    // before any live-feed work is layered on top. Realtime is only wired where it was hand-verified
+    // to need no API key, resolve over plain HTTPS with no proxy needed, and either already fit
+    // GtfsRealtime.kt's declared protobuf schema or needed just one small, verified addition (see
+    // LIRR/METRO_NORTH below) -- every other entry's own comment records exactly what's blocking it
+    // (no feed exists at all, a key/registration is required, the origin is HTTP-only and needs
+    // proxying, or the feed's shape doesn't fit this app's one-URL-per-agency model), so wiring one
+    // in later is a lookup, not new research. None of these reference 511.org's regional aggregator
+    // by design (deliberately excluded), even where it's the only realtime source that exists for an
+    // agency -- see each entry's own note for what that costs it.
+
+    /** TripUpdates exists on BART's own domain but the origin is HTTP-only
+     * (http://api.bart.gov/gtfsrt/tripupdate.aspx, 301-redirecting to HTTPS on the same host) --
+     * same shape as RIPTA/LTC before their fix, so it needs routing through pico-transit-proxy
+     * (or an equivalent HTTPS-only entry point) before it can be added here; Android blocks the
+     * initial cleartext connection outright, before it would ever see the redirect. No key needed
+     * either way. VehiclePositions does not exist at all -- confirmed against BART's own
+     * GTFS-Realtime doc page and by exhausting every plausible URL guess -- same class of gap as
+     * STM's Métro, live vehicle markers just aren't possible for BART. */
+    BART(
+        "bart",
+        "BART (No Live)",
+        "https://www.bart.gov/dev/schedules/google_transit.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    /** No realtime feed exists on any SFMTA-owned domain -- Muni's only live vehicle/ETA data is
+     * distributed through 511's regional aggregator, which this app deliberately doesn't use.
+     * Static schedule only, with no path to live data short of reversing that exclusion. ~1.9M
+     * stop_times rows (~37% of STM's row count) -- real size, should be fine under the
+     * streaming-download/batched-commit fixes already shipped, but worth a real device ingest test
+     * before trusting it the way STM's own test was needed. */
+    SFMTA_MUNI(
+        "sfmta_muni",
+        "SFMTA Muni (No Live)",
+        "https://muni-gtfs.apps.sfmta.com/data/muni_gtfs-current.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    /** Full TripUpdates + VehiclePositions exist on AC Transit's own HTTPS domain
+     * (api.actransit.org/gtfsrt/...) but require an individually-registered API token -- the static
+     * feed URL below embeds a token AC Transit itself publishes as a public documentation example
+     * (not a secret), but a realtime token needs its own registration and wasn't obtained here, so
+     * field-compatibility against GtfsRealtime.kt's declared schema is unverified. timeZoneId is
+     * `US/Pacific` exactly as declared in this feed's own agency.txt (a legacy tzdata alias --
+     * resolves fine via ZoneId.of(), left as-is per this file's own "don't guess/correct, copy
+     * straight from the feed" rule). */
+    AC_TRANSIT(
+        "ac_transit",
+        "AC Transit (No Live)",
+        "https://api.actransit.org/transit/gtfs/download?token=2512B81107A09D2DC44895CDDC650D47",
+        null,
+        null,
+        timeZoneId = "US/Pacific",
+    ),
+    /** No independently-discoverable realtime feed exists outside 511/Swiftly -- static schedule
+     * only. Feed is Trillium-hosted (data.trilliumtransit.com), same vendor already used for
+     * Colorado's smaller agencies, not Caltrain's own domain -- it's the exact URL Caltrain's own
+     * developer-resources page links to as its GTFS source. Tiny (5.5K stop_times rows), no size
+     * concern. */
+    CALTRAIN(
+        "caltrain",
+        "Caltrain (No Live)",
+        "https://data.trilliumtransit.com/gtfs/caltrain-ca-us/caltrain-ca-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    /** No realtime feed of VTA's own -- Transitland's own operator record lists VTA's only live
+     * source as the 511 regional feed by Transitland's own tagging, not a VTA-owned one. Static
+     * schedule only, same situation as Muni. */
+    VTA(
+        "vta",
+        "VTA (No Live)",
+        "https://gtfs.vta.org/gtfs_vta.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    /** Bus (primary) + Rail ([LaMetroRailSecondaryFeed], see that file's own doc) -- LACMTA
+     * publishes them as two separate static zips for the same real operator, merged the same way
+     * Bustang merges into RTD. Realtime: Swiftly (API-key application, server-to-server per
+     * Swiftly's own docs, not meant for individual client polling) or api.metro.net (a custom JSON
+     * REST API despite its "GTFS-rt" branding -- not GTFS-RT protobuf, needs a bespoke adapter, not
+     * a URL swap) -- neither wired here. */
+    LA_METRO(
+        "la_metro",
+        "LA Metro (No Live)",
+        "https://gitlab.com/LACMTA/gtfs_bus/-/raw/master/gtfs_bus.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+        components = listOf(LaMetroRailSecondaryFeed),
+    ),
+    /** TripUpdates + VehiclePositions exist on CTA's own domain
+     * (transitdata.transitchicago.com/GtfsRealtime/{TripUpdates,VehiclePositions}.pb?key=...) but
+     * need a free registered API key
+     * AND sit behind Cloudflare bot-protection that 403'd even a plain unauthenticated probe --
+     * field-compatibility against GtfsRealtime.kt is unverified, and a real client User-Agent may be
+     * needed to avoid being blocked as a bot, independent of the key. ~6.0M stop_times rows -- larger
+     * than STM's 5.1M that already needed the streaming/batching fixes; same order of magnitude, not
+     * UK-BODS-regional scale, but wants its own real device ingest test before being trusted. */
+    CTA(
+        "cta",
+        "CTA (No Live)",
+        "https://www.transitchicago.com/downloads/sch_data/google_transit.zip",
+        null,
+        null,
+        timeZoneId = "America/Chicago",
+    ),
+    /** Realtime exists (30s refresh, gtfspublic.metrarr.com) but requires submitting Metra's own
+     * GTFS-RT license agreement request form before a key is issued -- not wired here,
+     * field-compatibility unverified. Tiny static feed (76K stop_times rows), no size concern. */
+    METRA(
+        "metra",
+        "Metra (No Live)",
+        "https://schedules.metrarail.com/gtfs/schedule.zip",
+        null,
+        null,
+        timeZoneId = "America/Chicago",
+    ),
+    /** No GTFS-RT feed exists for Pace at all -- confirmed, live predictions are only shown on
+     * Pace's own Bus Tracker web page, never published as a downloadable feed. Static schedule only.
+     * Pace's own GTFS itself only covers routes with their "Intelligent Bus System" equipment
+     * installed, so even this static feed may not represent every Pace route. */
+    PACE(
+        "pace",
+        "Pace (No Live)",
+        "https://www.pacebus.com/sites/default/files/2026-08/GTFS.zip",
+        null,
+        null,
+        timeZoneId = "America/Chicago",
+    ),
+    /** Realtime needs real work before it's safe to wire in, more than any agency added so far: it's
+     * split across 8 separate live feeds with non-overlapping trip_id ranges (one per line group --
+     * verified live), no API key needed but a real User-Agent header is required (HEAD requests get
+     * a 403, likely a WAF rule). Every entity on every feed carries NYCT's own protobuf extension
+     * (TripDescriptor field 1001 -- train_id/is_assigned/direction -- present on 100% of both
+     * TripUpdates and VehiclePositions sampled) plus FeedEntity fields 2/5, VehiclePosition field 6,
+     * and StopTimeUpdate fields 7 and 1001 (also 100% present), none of which GtfsRealtime.kt
+     * declares today -- this isn't an edge case to shrug off the way some other agencies' unused
+     * fields were, the whole feed would fault on decode exactly like RIPTA/LTC/RTD did before their
+     * fixes. Static feed itself is small (565K stop_times rows), no size concern. */
+    NYC_SUBWAY(
+        "nyc_subway",
+        "NYC Subway (No Live)",
+        "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip",
+        null,
+        null,
+        timeZoneId = "America/New_York",
+    ),
+    /** Realtime: no key needed, HTTPS, one combined TripUpdates+VehiclePositions feed -- wired in
+     * below. GtfsRealtime.kt's schema needed one addition for this ([GtfsRtStopTimeUpdate]'s field
+     * 1005, the MTA railroads' own scheduled/actual-track extension) -- hand-verified live against
+     * this exact feed (wire type 2, decodes as valid UTF-8 track labels), see that field's own doc
+     * comment. calendar_dates.txt-only (no calendar.txt) is fine -- verified
+     * GtfsRepository's activeTodayClause already handles a service_id with zero `calendar` rows via
+     * its independent calendar_dates-addition branch, same standard GTFS pattern many agencies use.
+     * Tiny feed (24K stop_times rows). */
+    LIRR(
+        "lirr",
+        "LIRR",
+        "https://rrgtfsfeeds.s3.amazonaws.com/gtfslirr.zip",
+        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr",
+        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr",
+        timeZoneId = "America/New_York",
+    ),
+    /** Same situation as LIRR -- no key, HTTPS, one combined feed, wired in below. Shares
+     * [GtfsRtStopTimeUpdate]'s field 1005 (hand-verified live against this feed too, same nested
+     * track-label shape as LIRR's, though the sub-field contents differ slightly -- e.g. a
+     * "Departed" status string where LIRR's was another track code). No calendar.txt in this feed
+     * either (only calendar_dates.txt) -- confirmed fine for the same reason noted on [LIRR].
+     * ~380K stop_times rows, no size concern. */
+    METRO_NORTH(
+        "metro_north",
+        "Metro-North",
+        "https://rrgtfsfeeds.s3.amazonaws.com/gtfsmnr.zip",
+        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/mnr%2Fgtfs-mnr",
+        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/mnr%2Fgtfs-mnr",
+        timeZoneId = "America/New_York",
+    ),
+
     ;
 
     /** Cached lookup -- [ZoneId.of] parses/interns the zone's rules, no need to redo that on every
