@@ -26,7 +26,8 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **Home screen trip status** — while boarded, the home screen swaps its usual heading for your route, live ETA, stops remaining, and an optional progress bar with a vehicle marker crawling from boarding stop to alight stop.
 - **Jump back anytime** — a persistent Play icon returns you to live trip tracking from anywhere while a trip is boarded.
 - **About screen** — a full legend of every icon and mode Pico Transit uses.
-- **Settings** — switch agencies any time (reopens the onboarding picker), light/dark map tiles, and toggles for tap-and-hold-to-arrivals, double-tap-to-zoom-platforms, tracking a tapped stop's vehicles, the home screen progress bar, the home screen daily message, and "See Everything."
+- **Settings** — switch agencies any time (reopens the onboarding picker), light/dark map tiles, and toggles for tap-and-hold-to-arrivals, double-tap-to-zoom-platforms, tracking a tapped stop's vehicles, the home screen progress bar, the home screen daily message, "See Everything," and "Only download over Wi-Fi."
+- **Only download over Wi-Fi** — on by default. Skips a schedule's update check and download entirely (not just the large parts) whenever the device isn't on Wi-Fi, falling back to whatever's already cached, and automatically resumes the moment Wi-Fi reconnects. Built on top of `LightConnectivity`, a new SDK API for querying/observing the device's network state.
 
 ## 🐛 Notable fixes
 
@@ -40,6 +41,8 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **Timezone-aware schedules** — GTFS time math previously used the device's timezone instead of the agency's, causing wrong-day/wrong-time results for out-of-timezone agencies; fixed by threading the agency's own timezone through all schedule calculations.
 - **Home screen ETA timezone** — the compact "ETA h:mm" text next to the home screen's progress bar was a separate miss from the fix above: it rendered the boarded trip's live ETA against the device's own timezone rather than the agency's, so a device outside the agency's timezone showed a shifted clock time even though the underlying ETA math was already correct. Fixed by threading the agency's timezone through that display path too.
 - **Stations search keyboard** — the search keyboard silently stopped accepting input on reopen due to a stale ViewModel callback; fixed by hoisting the text field state.
+- **STM Montréal crashed on real hardware while downloading its schedule** — confirmed via on-device logcat as an `OutOfMemoryError` inside Ktor's response handling: the old download path buffered STM's entire multi-hundred-MB zip into one in-memory byte array before writing anything to disk, which blew past the phone's heap even though it never reproduced in the emulator. Fixed by streaming the HTTP response straight to disk instead, so memory use stays bounded no matter the feed's size.
+- **STM Montréal also crashed while parsing its schedule** — STM's `stop_times.txt` alone is ~5.1M rows; loading a feed that size inside one long-held SQLite transaction let the transaction's journal grow unbounded in memory. Fixed by committing in 50,000-row batches per table instead of one transaction for the whole feed.
 
 ## 🔧 Under the hood
 
@@ -53,3 +56,5 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 ## 🙌 Credits
 
 Thanks to [Jose Briones](https://github.com/jbriones95) for his continued work integrating RTD Denver and Colorado transit into Pico Transit.
+
+Thanks to Guy Dupont on the Light team for adding `LightConnectivity` updates to `light-sdk` ([lightphone/light-sdk#166](https://github.com/lightphone/light-sdk/pull/166)), the network-state API that made the "Only download over Wi-Fi" setting possible.

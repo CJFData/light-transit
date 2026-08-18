@@ -32,9 +32,12 @@ import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.FeedAttribution
 import com.thelightphone.transit.gtfs.GtfsAgency
+import com.thelightphone.transit.gtfs.GtfsCacheClearedSignal
 import com.thelightphone.transit.gtfs.GtfsIngestor
+import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
+import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.SecondaryGtfsFeed
 import com.thelightphone.transit.gtfs.fetchTripUpdate
 import com.thelightphone.transit.gtfs.fetchVehiclePosition
@@ -46,6 +49,7 @@ import com.thelightphone.transit.gtfs.formatGtfsTime
 import com.thelightphone.transit.gtfs.gtfsDbFile
 import com.thelightphone.transit.gtfs.todayForGtfs
 import com.thelightphone.sdk.InitialScreen
+import com.thelightphone.sdk.LightConnectivity
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -71,6 +75,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -242,9 +249,11 @@ class HomeScreenViewModel(
     private val preferences: AgencyPreferences,
     private val boardedTripPreferences: BoardedTripPreferences,
     private val homeScreenPreferences: HomeScreenPreferences,
+    private val connectivity: LightConnectivity,
+    private val networkPreferences: NetworkPreferences,
 ) : LightViewModel<Unit>() {
 
-    private val ingestor = GtfsIngestor(filesDir)
+    private val ingestor = GtfsIngestor(filesDir, connectivity, networkPreferences)
 
     /** The trip the rider is currently on (if any), independent of whichever agency is selected
      * above -- see BoardedTripPreferences' own doc comment for why this is a saved reference back
@@ -315,6 +324,12 @@ class HomeScreenViewModel(
     val readyAgency = MutableStateFlow<GtfsAgency?>(null)
     private var agencyIngestJob: Job? = null
 
+    /** True exactly when [selectedAgency]'s ingest was skipped by the "Only download over Wi-Fi"
+     * setting (see [GtfsIngestStatus.WaitingForWifi]) -- distinct from [status] itself since a Wi-Fi
+     * reconnect should retry ingest only in this case, not for an unrelated ingest failure that
+     * also happens to leave [status] non-null. */
+    private val waitingForWifi = MutableStateFlow(false)
+
     /** Stage 2's own ticking clock, in [selectedAgency]'s timezone -- "" until an agency is picked.
      * Restarted (see [currentTimeJob]) every time [selectedAgency] changes, since the zone changes
      * with it. */
@@ -368,6 +383,34 @@ class HomeScreenViewModel(
                     default == null && selectedAgency.value == null -> showAgencyPicker()
                 }
             }
+        }
+        // Settings' "Clear schedule cache" deletes the currently selected agency's own database
+        // out from under this screen without changing which agency is selected, so the
+        // defaultAgencyFlow collector above (keyed on the agency actually changing) never fires for
+        // it -- this is the second trigger selectAgency needs, re-running the same agency's ingest
+        // now that there's nothing on disk for it. drop(1) skips the initial value every
+        // MutableStateFlow emits on collect, so this doesn't re-ingest on ordinary screen creation.
+        viewModelScope.launch {
+            GtfsCacheClearedSignal.version.drop(1).collect {
+                selectedAgency.value?.let { agency -> selectAgency(agency) }
+            }
+        }
+        // "Only download over Wi-Fi" can leave selectAgency's own ingest skipped entirely -- this
+        // resumes it the moment Wi-Fi actually becomes available, rather than making the rider
+        // reopen the app or revisit Settings to get today's schedule. drop(1) skips the Flow's own
+        // initial emission on collect (this device's connectivity at ViewModel-creation time), same
+        // reasoning as the GtfsCacheClearedSignal collector above -- only a real transition to
+        // Wi-Fi should retry.
+        viewModelScope.launch {
+            connectivity.observeNetworkStatus()
+                .map { it.isWifi }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { isWifi ->
+                    if (isWifi && waitingForWifi.value) {
+                        selectedAgency.value?.let { agency -> selectAgency(agency) }
+                    }
+                }
         }
         // Restarted (not just updated) on every agency change since the timezone itself changes --
         // a stale loop ticking in the previous agency's zone would show the wrong clock for one
@@ -534,16 +577,29 @@ class HomeScreenViewModel(
         selectedAgency.value = agency
         readyAgency.value = null
         status.value = null
+        waitingForWifi.value = false
         agencyHasStations.value = false
         feedAttribution.value = emptyList()
         Log.d("HomeScreen", "Selected agency: ${agency.displayName}")
 
         agencyIngestJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                ingestor.ingest(agency) { }
+                ingestor.ingest(agency) { ingestStatus ->
+                    if (selectedAgency.value != agency) return@ingest
+                    waitingForWifi.value = ingestStatus == GtfsIngestStatus.WaitingForWifi
+                    status.value = if (waitingForWifi.value) {
+                        "Waiting for Wi-Fi to update ${agency.displayName}'s schedule."
+                    } else {
+                        null
+                    }
+                }
                 // A later selection may have started another ingest while this one was running.
                 // Do not let the older job replace the newer agency's ready state or station check.
                 if (selectedAgency.value != agency) return@launch
+                // "Only download over Wi-Fi" can skip ingest entirely, leaving nothing on disk for a
+                // first-ever pick of this agency made off Wi-Fi -- only an actual database on disk
+                // (this agency's own fresh one, or a still-usable stale one) makes it ready to use.
+                if (!gtfsDbFile(filesDir, agency).exists()) return@launch
                 readyAgency.value = agency
             } catch (e: CancellationException) {
                 throw e
@@ -591,6 +647,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
             AgencyPreferences(lightContext.dataStore),
             BoardedTripPreferences(lightContext.dataStore),
             HomeScreenPreferences(lightContext.dataStore),
+            lightContext.connectivity,
+            NetworkPreferences(lightContext.dataStore),
         )
     }
 

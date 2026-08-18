@@ -28,7 +28,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
   ![alt text](docs/screenshots/Screenshot_20260810_171500.png)
   ![alt text](docs/screenshots/Screenshot_20260810_171800.png)
   
-- ⚙️ **Settings** — switch agencies any time (reopens the same welcome picker), light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals — the same gesture also jumps from a Station map's own name to the main map centered on it; double-tap a station to zoom into its platforms; track tapped-open stops' own vehicles on the map; the home screen's trip progress bar; the home screen's daily message; and "See Everything," a map mode covered below).
+- ⚙️ **Settings** — switch agencies any time (reopens the same welcome picker), light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals — the same gesture also jumps from a Station map's own name to the main map centered on it; double-tap a station to zoom into its platforms; track tapped-open stops' own vehicles on the map; the home screen's trip progress bar; the home screen's daily message; "See Everything," a map mode covered below; and "Only download over Wi-Fi," on by default, so a schedule refresh never surprises you with cellular data usage). A "Clear schedule cache" action frees up space by deleting every agency's downloaded schedule, then re-downloads your current one right away.
   
   ![alt text](docs/screenshots/Screenshot_20260810_172700.png)
   ![alt text](docs/screenshots/Screenshot_20260801_215602.png)

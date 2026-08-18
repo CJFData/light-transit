@@ -2,23 +2,27 @@ package com.thelightphone.transit.gtfs
 
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
+import com.thelightphone.sdk.LightConnectivity
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.request.get
 import io.ktor.client.request.head
+import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
+import io.ktor.utils.io.jvm.javaio.copyTo
 import java.io.BufferedReader
 import java.io.File
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.zip.ZipFile
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 enum class GtfsIngestStatus {
-    CheckingForUpdates, Downloading, Parsing, Ready
+    CheckingForUpdates, Downloading, Parsing, WaitingForWifi, Ready
 }
 
 class GtfsIngestException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -29,6 +33,24 @@ private const val MAX_REDIRECTS = 5
 fun gtfsDbFile(filesDir: File, agency: GtfsAgency): File =
     File(filesDir, "gtfs/${agency.id}/transit.db")
 
+/** Deletes every agency's downloaded/ingested GTFS data (zip, database, and cached ETag/schema
+ * metadata) -- the Settings screen's "Clear schedule cache" action. A no-op if nothing's been
+ * downloaded yet. Bumps [GtfsCacheClearedSignal] so HomeScreenViewModel can react and re-ingest
+ * whichever agency is currently selected, since deleting the files underneath it otherwise leaves
+ * that agency's screens pointed at a database that no longer exists. */
+fun clearAllCachedSchedules(filesDir: File) {
+    File(filesDir, "gtfs").deleteRecursively()
+    GtfsCacheClearedSignal.version.value++
+}
+
+/** Bumped by [clearAllCachedSchedules] -- a plain in-process counter (not a DataStore-backed
+ * preference) since this only needs to signal other live screens for the remainder of this
+ * process, never to persist across app restarts. Same "shared singleton Flow" pattern as
+ * [HomeVisibility]. */
+object GtfsCacheClearedSignal {
+    val version = MutableStateFlow(0)
+}
+
 /** ETag/Last-Modified as last seen for a successfully-downloaded feed -- either may be blank if the
  * server didn't send that particular header. */
 private data class FeedMeta(val etag: String, val lastModified: String) {
@@ -36,7 +58,11 @@ private data class FeedMeta(val etag: String, val lastModified: String) {
 }
 
 /** Downloads, unzips, and bulk-loads an agency's GTFS static feed into a local SQLite database. */
-class GtfsIngestor(private val filesDir: File) {
+class GtfsIngestor(
+    private val filesDir: File,
+    private val connectivity: LightConnectivity,
+    private val networkPreferences: NetworkPreferences,
+) {
     private val ingestMutex = Mutex()
 
     /**
@@ -64,6 +90,17 @@ class GtfsIngestor(private val filesDir: File) {
         // schema has moved on, independent of whether the remote feed itself changed.
         val schemaVersionFile = File(agencyDir, "schema_version.txt")
         val cachedSchemaVersion = schemaVersionFile.takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull()
+
+        // Checked before any network activity at all (not just before the zip download) -- the
+        // "Only download over Wi-Fi" setting's whole point is that a rider on cellular never pays
+        // for a GTFS refresh, including the small HEAD-only update check below. Whatever's already
+        // on disk (possibly stale, possibly nothing at all) is left exactly as it is; the caller
+        // (HomeScreenViewModel) is what decides whether a stale-but-present database is still
+        // usable, and retries once Wi-Fi comes back.
+        if (networkPreferences.wifiOnlyDownloadsEnabledFlow.first() && !connectivity.currentStatus.isWifi) {
+            onStatus(GtfsIngestStatus.WaitingForWifi)
+            return
+        }
 
         onStatus(GtfsIngestStatus.CheckingForUpdates)
         val cachedMeta = readFeedMeta(metaFile, feedUrls)
@@ -176,6 +213,15 @@ class GtfsIngestor(private val filesDir: File) {
      * back the original redirect response instead of an error. Redirects are followed manually
      * here, upgrading any http:// hop to https:// rather than ever actually connecting over plain
      * HTTP.
+     *
+     * Streams the response body straight to [destination] via [prepareGet]/[bodyAsChannel] rather
+     * than `client.get(url)` + `response.body<ByteArray>()` -- the latter (via Ktor's SavedCall)
+     * buffers the *entire* response into one in-memory byte array before it's ever written to disk,
+     * which OOM'd on a real Light Phone III for STM Montreal's multi-hundred-MB zip (confirmed via
+     * on-device logcat: `OutOfMemoryError` inside `SavedCallKt.save`/`SourcesKt.readByteArray`,
+     * against a ~128MB heap growth limit). Streaming keeps memory use bounded regardless of feed
+     * size. This is separate from [COMMIT_BATCH_SIZE]'s fix, which addresses OOM risk during
+     * parsing/loading, not downloading.
      */
     private suspend fun downloadZip(url: String, destination: File) {
         val client = HttpClient(OkHttp) {
@@ -184,21 +230,22 @@ class GtfsIngestor(private val filesDir: File) {
         try {
             var currentUrl = url
             repeat(MAX_REDIRECTS + 1) {
-                val response = client.get(currentUrl)
-                val status = response.status.value
-                when {
-                    status in 200..299 -> {
-                        val bytes: ByteArray = response.body()
-                        destination.writeBytes(bytes)
-                        return
+                val redirectLocation = client.prepareGet(currentUrl).execute { response ->
+                    val status = response.status.value
+                    when {
+                        status in 200..299 -> {
+                            destination.outputStream().use { out -> response.bodyAsChannel().copyTo(out) }
+                            null
+                        }
+                        status in 300..399 -> {
+                            response.headers[HttpHeaders.Location]
+                                ?: throw GtfsIngestException("GTFS download redirected without a Location header")
+                        }
+                        else -> throw GtfsIngestException("GTFS download failed: HTTP $status")
                     }
-                    status in 300..399 -> {
-                        val location = response.headers[HttpHeaders.Location]
-                            ?: throw GtfsIngestException("GTFS download redirected without a Location header")
-                        currentUrl = secureRedirectUrl(currentUrl, location)
-                    }
-                    else -> throw GtfsIngestException("GTFS download failed: HTTP $status")
                 }
+                if (redirectLocation == null) return
+                currentUrl = secureRedirectUrl(currentUrl, redirectLocation)
             }
             throw GtfsIngestException("GTFS download exceeded $MAX_REDIRECTS redirects")
         } finally {
@@ -206,24 +253,25 @@ class GtfsIngestor(private val filesDir: File) {
         }
     }
 
+    /** No outer transaction wraps the whole zip here -- each table's own [readCsvEntry] call
+     * commits itself in batches instead (see that function's own doc for why a single transaction
+     * spanning a table the size of STM Montreal's stop_times.txt crashed on real hardware). The
+     * ingest pipeline's actual safety net is [ingestInternal]'s temp-file-then-atomic-move, not
+     * this function's own atomicity -- a failure partway through here just leaves the temp database
+     * mid-load and never reaches the move, so the previous good database (if any) is untouched
+     * either way. */
     private fun parseAndLoad(zipFile: File, db: SQLiteDatabase, idPrefix: String, secondaryFeedName: String?) {
-        db.beginTransaction()
-        try {
-            ZipFile(zipFile).use { archive ->
-                val entries = archive.entries()
-                while (entries.hasMoreElements()) {
-                    val entry = entries.nextElement()
-                    val loader = TABLE_LOADERS[entry.name.substringAfterLast('/')]
-                    if (loader != null) {
-                        archive.getInputStream(entry).reader(Charsets.UTF_8).buffered().use { reader ->
-                            loader(db, reader, idPrefix, secondaryFeedName)
-                        }
+        ZipFile(zipFile).use { archive ->
+            val entries = archive.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                val loader = TABLE_LOADERS[entry.name.substringAfterLast('/')]
+                if (loader != null) {
+                    archive.getInputStream(entry).reader(Charsets.UTF_8).buffered().use { reader ->
+                        loader(db, reader, idPrefix, secondaryFeedName)
                     }
                 }
             }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
         }
     }
 
@@ -294,7 +342,7 @@ private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Str
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, routeId)
@@ -318,7 +366,7 @@ private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Stri
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val tripId = prefixedId(idPrefix, header.get(row, "trip_id")) ?: return@readCsvEntry
         val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry
         val serviceId = prefixedId(idPrefix, header.get(row, "service_id")) ?: return@readCsvEntry
@@ -345,7 +393,7 @@ private fun loadStops(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Stri
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val stopId = prefixedId(idPrefix, header.get(row, "stop_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, stopId)
@@ -371,7 +419,7 @@ private fun loadStopTimes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val tripId = prefixedId(idPrefix, header.get(row, "trip_id")) ?: return@readCsvEntry
         val stopSequence = header.get(row, "stop_sequence")?.toLongOrNull() ?: return@readCsvEntry
         val stopId = prefixedId(idPrefix, header.get(row, "stop_id")) ?: return@readCsvEntry
@@ -397,7 +445,7 @@ private fun loadCalendar(db: SQLiteDatabase, reader: BufferedReader, idPrefix: S
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val serviceId = prefixedId(idPrefix, header.get(row, "service_id")) ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, serviceId)
@@ -424,7 +472,7 @@ private fun loadFeedInfo(db: SQLiteDatabase, reader: BufferedReader, idPrefix: S
     val stmt = db.compileStatement(
         "INSERT INTO feed_info (feed_publisher_name, feed_publisher_url) VALUES (?, ?)"
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val name = header.get(row, "feed_publisher_name") ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, name)
@@ -439,7 +487,7 @@ private fun loadAgency(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Str
     val stmt = db.compileStatement(
         "INSERT INTO agency (agency_name, agency_url) VALUES (?, ?)"
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val name = header.get(row, "agency_name") ?: return@readCsvEntry
         stmt.clearBindings()
         stmt.bindString(1, name)
@@ -455,7 +503,7 @@ private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader, idPref
         VALUES (?, ?, ?)
         """
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val serviceId = prefixedId(idPrefix, header.get(row, "service_id")) ?: return@readCsvEntry
         val date = header.get(row, "date") ?: return@readCsvEntry
         val exceptionType = header.get(row, "exception_type")?.toLongOrNull() ?: return@readCsvEntry
@@ -475,7 +523,7 @@ private fun loadDirections(db: SQLiteDatabase, reader: BufferedReader, idPrefix:
     val stmt = db.compileStatement(
         "INSERT INTO directions (route_id, direction_id, direction, direction_destination) VALUES (?, ?, ?, ?)"
     )
-    readCsvEntry(reader) { header, row ->
+    readCsvEntry(db, reader) { header, row ->
         val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry
         val directionId = header.get(row, "direction_id")?.toLongOrNull() ?: return@readCsvEntry
         stmt.clearBindings()

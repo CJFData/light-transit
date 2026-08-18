@@ -13,12 +13,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import com.thelightphone.transit.gtfs.AgencyPreferences
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.DeparturePreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
+import com.thelightphone.transit.gtfs.clearAllCachedSchedules
 import com.thelightphone.transit.gtfs.MapPreferences
+import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -39,6 +42,7 @@ import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.time.Duration
 
 class SettingsViewModel(
@@ -48,6 +52,8 @@ class SettingsViewModel(
     private val homeScreenPreferences: HomeScreenPreferences,
     private val tapHoldPreferences: TapHoldPreferences,
     private val departurePreferences: DeparturePreferences,
+    private val networkPreferences: NetworkPreferences,
+    private val filesDir: File,
 ) : LightViewModel<Unit>() {
 
     val defaultAgency: StateFlow<GtfsAgency?>
@@ -122,6 +128,10 @@ class SettingsViewModel(
         get() = _includeLongerTripsEnabled
     private val _includeLongerTripsEnabled = MutableStateFlow(true)
 
+    val wifiOnlyDownloadsEnabled: StateFlow<Boolean>
+        get() = _wifiOnlyDownloadsEnabled
+    private val _wifiOnlyDownloadsEnabled = MutableStateFlow(true)
+
     init {
         viewModelScope.launch {
             agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
@@ -176,6 +186,9 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             departurePreferences.includeLongerTripsEnabledFlow.collect { _includeLongerTripsEnabled.value = it }
+        }
+        viewModelScope.launch {
+            networkPreferences.wifiOnlyDownloadsEnabledFlow.collect { _wifiOnlyDownloadsEnabled.value = it }
         }
     }
 
@@ -256,6 +269,17 @@ class SettingsViewModel(
     fun setIncludeLongerTripsEnabled(enabled: Boolean) {
         viewModelScope.launch { departurePreferences.setIncludeLongerTripsEnabled(enabled) }
     }
+
+    fun setWifiOnlyDownloadsEnabled(enabled: Boolean) {
+        viewModelScope.launch { networkPreferences.setWifiOnlyDownloadsEnabled(enabled) }
+    }
+
+    /** Deletes every agency's downloaded schedule to free up space, then re-downloads whichever
+     * agency is currently selected -- see [clearAllCachedSchedules]'s own doc for how the running
+     * home screen picks this up. File I/O, so off the main thread even though it's usually quick. */
+    fun clearScheduleCache() {
+        viewModelScope.launch(Dispatchers.IO) { clearAllCachedSchedules(filesDir) }
+    }
 }
 
 class SettingsScreen(
@@ -272,6 +296,8 @@ class SettingsScreen(
         HomeScreenPreferences(lightContext.dataStore),
         TapHoldPreferences(lightContext.dataStore),
         DeparturePreferences(lightContext.dataStore),
+        NetworkPreferences(lightContext.dataStore),
+        lightContext.filesDir,
     )
 
     /** Every on/off setting on this screen renders as one tappable row using the SDK's own
@@ -316,6 +342,7 @@ class SettingsScreen(
         val dailyMessageRandom by viewModel.dailyMessageRandom.collectAsState()
         val mergeFeedStationsEnabled by viewModel.mergeFeedStationsEnabled.collectAsState()
         val includeLongerTripsEnabled by viewModel.includeLongerTripsEnabled.collectAsState()
+        val wifiOnlyDownloadsEnabled by viewModel.wifiOnlyDownloadsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -373,6 +400,55 @@ class SettingsScreen(
                         icon = LightIcons.ARROW_RIGHT,
                         size = 1f,
                         contentDescription = "Change agency",
+                    )
+                }
+
+                LightText(
+                    text = "Only download over Wi-Fi",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, schedule downloads and update checks wait for Wi-Fi -- some " +
+                        "agencies' schedules are large enough to be a real cellular data cost. Your " +
+                        "last-downloaded schedule keeps working in the meantime.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Only download over Wi-Fi", wifiOnlyDownloadsEnabled, viewModel::setWifiOnlyDownloadsEnabled)
+
+                LightText(
+                    text = "Clear schedule cache",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "Deletes every agency's downloaded schedule from this device to free up " +
+                        "space. Your current agency starts re-downloading right away, in the " +
+                        "background.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .lightClickable {
+                            LightModalManager.show(
+                                modal = ClearCacheConfirmModal(onConfirm = { viewModel.clearScheduleCache() }),
+                                duration = Duration.INFINITE,
+                            )
+                        }
+                        .padding(vertical = 12.dp),
+                ) {
+                    LightText(
+                        text = "Clear cache",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.weight(1f),
                     )
                 }
 

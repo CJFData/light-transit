@@ -3,7 +3,7 @@ id = "com.thelightphone.transit"
 label = "Pico Transit"
 versionCode = 1
 versionName = "1.0.0"
-permissions = ["android.permission.INTERNET"]
+permissions = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE"]
 capabilities = []
 serverPackage = "com.lightos"
 # for emulator testing instead:

@@ -1,5 +1,6 @@
 package com.thelightphone.transit.gtfs
 
+import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteStatement
 import java.io.BufferedReader
 
@@ -52,18 +53,45 @@ internal class GtfsCsvHeader(header: List<String>) {
     }
 }
 
+/** Rows committed per transaction while reading a table — see [readCsvEntry]'s own doc for why
+ * this exists. Picked as a round number comfortably under what's been observed to strain memory
+ * on real hardware for a table the size of STM Montreal's ~5.1M-row stop_times.txt, while still
+ * large enough that the commit overhead itself stays negligible next to the parsing work. */
+private const val COMMIT_BATCH_SIZE = 50_000
+
 /**
  * Reads the header line from [reader] then invokes [onRow] for each data row until the current
- * zip entry ends. [reader] is never closed here — closing it would close the shared
- * ZipInputStream it wraps.
+ * zip entry ends, committing to [db] every [COMMIT_BATCH_SIZE] rows rather than holding one
+ * transaction open for the whole table. A single transaction spanning an entire large table (STM
+ * Montreal's stop_times.txt alone is ~5.1M rows) was confirmed to crash on a real Light Phone III,
+ * though it never reproduced in the emulator — SQLite keeps that whole transaction's journal live
+ * until it commits, and each row's bind/insert call crosses the JNI boundary, so the memory this
+ * holds onto scales with the table's size rather than staying bounded. Every other agency's tables
+ * are small enough that this was never an issue for them.
+ *
+ * [reader] is never closed here — closing it would close the shared ZipInputStream it wraps.
  */
-internal inline fun readCsvEntry(reader: BufferedReader, onRow: (GtfsCsvHeader, List<String>) -> Unit) {
+internal inline fun readCsvEntry(db: SQLiteDatabase, reader: BufferedReader, onRow: (GtfsCsvHeader, List<String>) -> Unit) {
     val headerLine = reader.readLine() ?: return
     val header = GtfsCsvHeader(parseCsvLine(headerLine))
-    while (true) {
-        val line = reader.readLine() ?: break
-        if (line.isBlank()) continue
-        onRow(header, parseCsvLine(line))
+    var rowsInBatch = 0
+    db.beginTransaction()
+    try {
+        while (true) {
+            val line = reader.readLine() ?: break
+            if (line.isBlank()) continue
+            onRow(header, parseCsvLine(line))
+            rowsInBatch++
+            if (rowsInBatch >= COMMIT_BATCH_SIZE) {
+                db.setTransactionSuccessful()
+                db.endTransaction()
+                db.beginTransaction()
+                rowsInBatch = 0
+            }
+        }
+        db.setTransactionSuccessful()
+    } finally {
+        db.endTransaction()
     }
 }
 
