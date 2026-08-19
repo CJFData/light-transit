@@ -328,6 +328,19 @@ LightNfcTapReader(
 )
 ```
 
+### Connectivity
+
+`LightConnectivity` lets you query or monitor your device's network connection state. Use `currentStatus`
+for a single shot query, or `observeNetworkStatus` to get a `Flow` that will update any time the status changes.
+
+```kotlin
+lightConnectivity.observeNetworkStatus().collect {
+    // it.hasWifi
+    // it.isMetered (metered generally means a cellular network that charges for data I/O)
+    // it.isConnected
+}
+```
+
 ### Talking to LightOS
 
 `callRemoteServiceMethod(method, payload)` sends a typed request to the LightOS server (or to `:sdk:emulator` in dev) and returns a `LightResult<Response>`. The set of available methods lives in `:sdk:shared`'s `LightServiceMethod`. Example:
