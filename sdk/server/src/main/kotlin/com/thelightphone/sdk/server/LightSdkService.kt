@@ -228,6 +228,24 @@ class LightSdkService : Service() {
                 )
             }
 
+            LightServiceMethod.OpenDialer -> {
+                val request = LightServiceMethod.OpenDialer.decodeRequest(payload!!)
+                val phoneNumber = request.phoneNumber.trim()
+                if (phoneNumber.isEmpty()) {
+                    return@runCatching LightResult.Error(
+                        LightResult.ErrorCode.InvalidParameters,
+                        "missing phoneNumber",
+                    )
+                }
+                LightSdkServer.onOpenDialer(
+                    callingUid,
+                    request.copy(phoneNumber = phoneNumber),
+                )
+                LightResult.Success(
+                    LightServiceMethod.OpenDialer.encodeResponse(Unit)
+                )
+            }
+
             null -> {
                 // The app that wraps this server may be able to handle custom methods
                 LightSdkServer.customServiceMethodResolver.invoke(callingUid, methodId, payload)

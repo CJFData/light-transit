@@ -158,6 +158,16 @@ object LightSdkServer {
             Log.w(TAG, "Unhandled device key event: $event")
         }
 
+    /**
+     * Open the phone dialer for [request.phoneNumber].
+     *
+     * Settable from enclosing application!! May be run on any thread
+     */
+    var onOpenDialer: (callingUid: Int, request: LightServiceMethod.OpenDialer.Request) -> Unit =
+        { _, request ->
+            Log.e(TAG, "OpenDialer not configured by server: phoneNumber=${request.phoneNumber}")
+        }
+
     var foregroundSelfWithCallback: (componentToReturnTo: ComponentName) -> Unit = {
         Log.e(TAG, "Server wants to foreground itself but does not know how!")
     }

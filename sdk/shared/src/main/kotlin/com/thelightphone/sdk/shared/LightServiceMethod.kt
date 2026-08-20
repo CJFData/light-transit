@@ -133,6 +133,17 @@ sealed interface LightServiceMethod<TRequest, TResponse> {
             val componentToRelaunch: String?,
         )
     }
+
+    object OpenDialer : LightServiceMethod<OpenDialer.Request, Unit> {
+        override val id = "OpenDialer"
+        override val requestSerializer = serializer<Request>()
+        override val responseSerializer = serializer<Unit>()
+
+        @Serializable
+        data class Request(
+            val phoneNumber: String,
+        )
+    }
 }
 
 val allMethods: Map<String, LightServiceMethod<*, *>> = listOf(
@@ -144,4 +155,5 @@ val allMethods: Map<String, LightServiceMethod<*, *>> = listOf(
     LightServiceMethod.RequestPermissionComponent,
     LightServiceMethod.DeviceKeyEvent,
     LightServiceMethod.GetUserPreferences,
+    LightServiceMethod.OpenDialer,
 ).associateBy { it.id }
