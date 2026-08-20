@@ -56,6 +56,11 @@ class DepartureListViewModel(
     private val headsign: String?,
     private val stopId: String,
     private val departurePreferences: DeparturePreferences,
+    /** True when the stop that led here was picked while [FirstStopSelectionScreen] was itself
+     * showing tomorrow's schedule -- carries that choice forward so this screen opens already on
+     * tomorrow instead of re-defaulting to today (which would likely just be empty again, the
+     * same "nothing found" state the rider was trying to get past). */
+    startOnTomorrow: Boolean = false,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -68,7 +73,7 @@ class DepartureListViewModel(
      * tapping the "view tomorrow's schedule" row (see [DepartureListScreen.Content]). Every
      * [GtfsRepository] departures query already takes an arbitrary service date rather than
      * assuming "today", so shifting this by one day is the only change [loadDepartures] needs. */
-    private val _showTomorrow = MutableStateFlow(false)
+    private val _showTomorrow = MutableStateFlow(startOnTomorrow)
     val showTomorrow: StateFlow<Boolean> = _showTomorrow
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -127,13 +132,14 @@ class DepartureListScreen(
     private val directionLabel: String,
     private val stopId: String,
     private val stopLabel: String,
+    private val startOnTomorrow: Boolean = false,
 ) : LightScreen<Unit, DepartureListViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<DepartureListViewModel>
         get() = DepartureListViewModel::class.java
 
     override fun createViewModel(): DepartureListViewModel =
-        DepartureListViewModel(dbFile, routeId, directionId, headsign, stopId, DeparturePreferences(lightContext.dataStore))
+        DepartureListViewModel(dbFile, routeId, directionId, headsign, stopId, DeparturePreferences(lightContext.dataStore), startOnTomorrow)
 
     @Composable
     override fun Content() {
@@ -149,16 +155,15 @@ class DepartureListScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    // The header itself doubles as the day toggle -- tapping either line flips
-                    // between today's and tomorrow's schedule (see DepartureListViewModel.toggleDay).
-                    // Every departures query already takes an arbitrary service date, so this is a
-                    // pure UI/state addition, not a new query path.
+                    // Screen name stays on line1 always -- only line2 doubles as the day toggle
+                    // (tapping either line flips between today's and tomorrow's schedule, see
+                    // DepartureListViewModel.toggleDay). Every departures query already takes an
+                    // arbitrary service date, so this is a pure UI/state addition, not a new query
+                    // path. Same line1/line2 convention as FirstStopSelectionScreen's own header,
+                    // one screen earlier in this same flow.
                     center = LightTopBarCenter.TwoLineDetail(
                         line1 = "Departures",
-                        // Kept short -- LightTopBarCenter caps this line's width at 18 grid units
-                        // (see LightTopBar.kt's CENTER_MAX_WIDTH_UNITS), so a full sentence here
-                        // just gets ellipsized on the actual device.
-                        line2 = if (showTomorrow) "Tomorrow — tap for today" else "Tap for tomorrow",
+                        line2 = if (showTomorrow) "Tomorrow - tap for today" else "Today - tap for tomorrow",
                         onClick = { viewModel.toggleDay() },
                     ),
                     rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->

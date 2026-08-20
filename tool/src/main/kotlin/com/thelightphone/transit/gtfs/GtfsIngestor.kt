@@ -411,6 +411,31 @@ private fun loadStops(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Stri
     }
 }
 
+/**
+ * Zero-pads each "HH:MM:SS" segment to at least 2 digits -- GTFS's spec technically requires this,
+ * but not every real-world feed complies (confirmed on Petaluma Transit's stop_times.txt: some rows
+ * use "6:30:00" instead of "06:30:00" for single-digit hours). Every departure/arrival-time
+ * comparison in this app (ORDER BY, >=) is a plain SQL string comparison, which only sorts
+ * correctly when every value is the same zero-padded width -- an un-padded "6:30:00" sorts AFTER
+ * "17:40:00" as a string (since '6' > '1'), silently shoving morning departures to the bottom of
+ * the list. Normalizing once here, at ingestion, keeps every downstream query correct without
+ * having to special-case string comparisons anywhere else. Null/blank passes through unchanged --
+ * GTFS-Flex rows can legitimately have no time at all (see stop_times.txt's own
+ * start_pickup_dropoff_window/end_pickup_dropoff_window columns, not read here) -- as does any
+ * value that doesn't look like 3 colon-separated segments, rather than crashing ingestion on
+ * unexpected real-world formatting.
+ */
+private fun normalizeGtfsTime(raw: String?): String? {
+    if (raw.isNullOrBlank()) return raw
+    val parts = raw.split(":")
+    if (parts.size != 3) return raw
+    return try {
+        parts.joinToString(":") { it.toInt().toString().padStart(2, '0') }
+    } catch (e: NumberFormatException) {
+        raw
+    }
+}
+
 private fun loadStopTimes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         """
@@ -426,8 +451,8 @@ private fun loadStopTimes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: 
         stmt.clearBindings()
         stmt.bindString(1, tripId)
         stmt.bindLong(2, stopSequence)
-        stmt.bindStringOrNull(3, header.get(row, "arrival_time"))
-        stmt.bindStringOrNull(4, header.get(row, "departure_time"))
+        stmt.bindStringOrNull(3, normalizeGtfsTime(header.get(row, "arrival_time")))
+        stmt.bindStringOrNull(4, normalizeGtfsTime(header.get(row, "departure_time")))
         stmt.bindString(5, stopId)
         stmt.bindStringOrNull(6, header.get(row, "stop_headsign"))
         stmt.bindLongOrNull(7, header.get(row, "pickup_type"))

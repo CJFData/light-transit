@@ -17,8 +17,9 @@ private const val MBTA_V3_VEHICLES_URL = "https://pico-transit-proxy.data-32b.wo
 private val mbtaV3Json = Json { ignoreUnknownKeys = true }
 
 /**
- * MBTA's V3 API (https://api-v3.mbta.com) -- the only [AgencyComponent] any agency currently uses.
- * Commuter rail track assignments aren't in GTFS-RT at all: MBTA's dispatch system doesn't decide
+ * MBTA's V3 API (https://api-v3.mbta.com) -- one of two current [LiveVehicleSource] implementations
+ * (the other is [CtaBusTrackerSource], CTA's Bus Tracker). Commuter rail track assignments aren't
+ * in GTFS-RT at all: MBTA's dispatch system doesn't decide
  * (or publish) a trip's track until roughly 10-15 minutes before departure, so most of the time a
  * Vehicle's `stop` relationship still points at its station's generic per-route placeholder
  * platform (e.g. South Station's "NEC-2287", whose own `platform_code` is null) rather than a real
@@ -43,23 +44,21 @@ private val mbtaV3Json = Json { ignoreUnknownKeys = true }
  * on the given routes, letting a caller discover a trip it has no prior schedule snapshot for, not
  * just ones it already knew to ask about.
  *
- * Streaming (the API's `Accept: text/event-stream` mode, which would push updates as they happen
- * instead of on a fixed poll) was tried first and found to require a registered API key --
- * unauthenticated requests get a flat 406 Not Acceptable on that Accept header (verified live,
- * both HTTP/1.1 and HTTP/2). Polling is the fallback the API itself still fully supports
- * unauthenticated. Revisit streaming if a key ever gets registered (see also the rate-limit note
- * below, a separate reason a key might be worth it).
- *
- * No API key for polling: unauthenticated requests get 20 per ~10s per the API's own rate-limit
- * response headers (verified live), comfortably above this app's one batched call per poll cycle
- * (LIVE_VEHICLE_POLL_INTERVAL_MS, also 10s).
+ * Requests are authenticated -- the worker injects `MBTA_API_KEY` as `api_key` on every
+ * `/mbta/v3/vehicles` call (see pico-transit-proxy-worker.js's API_KEY_INJECTIONS), which raises
+ * the rate limit to 1000/min (verified live via the API's own x-ratelimit-limit response header),
+ * comfortably above this app's one batched call per poll cycle (LIVE_VEHICLE_POLL_INTERVAL_MS,
+ * also 10s). Streaming (`Accept: text/event-stream`, which would push updates instead of polling)
+ * is available now that a key is registered but not yet implemented here -- still a plain GET poll.
  *
  * JSON:API responses are decoded by hand for just the fields read here -- same "smallest subset
  * that reads the real wire format" approach GtfsRealtime.kt already takes for GTFS-RT's protobuf
  * feeds, rather than pulling in a full JSON:API client.
  */
 object MbtaV3VehicleSource : LiveVehicleSource {
-    override suspend fun vehiclesByRoute(routeIds: Set<String>): Map<String, LiveVehicleInfo> {
+    override val coveredLineTypes: Set<LineType> = setOf(LineType.COMMUTER_RAIL)
+
+    override suspend fun vehiclesByRoute(routeIds: Set<String>, repository: GtfsRepository): Map<String, LiveVehicleInfo> {
         if (routeIds.isEmpty()) return emptyMap()
         val client = HttpClient(OkHttp)
         try {

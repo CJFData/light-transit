@@ -6,5 +6,5 @@ versionName = "0.2.3"
 permissions = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE"]
 capabilities = []
 serverPackage = "com.lightos"
-# for emulator testing instead:
+# for emulator builds instead:
 # serverPackage = "com.thelightphone.sdk.emulator"

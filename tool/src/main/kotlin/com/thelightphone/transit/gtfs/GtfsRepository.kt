@@ -22,14 +22,15 @@ data class RouteOption(
 }
 
 /**
- * Groups GTFS's numeric `route_type` into the three categories riders think in. Type 0 (tram/
+ * Groups GTFS's numeric `route_type` into the categories riders think in. Type 0 (tram/
  * light rail, e.g. MBTA's Green Line) is bucketed with Subway rather than broken out separately,
  * since that's how riders colloquially refer to it.
  */
 enum class LineType(val gtfsRouteTypes: Set<Int>, val label: String, val emoji: String) {
     SUBWAY(setOf(0, 1), "Subway", "🚇"),
     COMMUTER_RAIL(setOf(2), "Commuter Rail", "🚆"),
-    BUS(setOf(3), "Bus", "🚌");
+    BUS(setOf(3), "Bus", "🚌"),
+    FERRY(setOf(4), "Ferry", "⛴️");
 
     companion object {
         fun forGtfsRouteType(routeType: Int): LineType? = entries.find { routeType in it.gtfsRouteTypes }
@@ -511,6 +512,35 @@ class GtfsRepository(dbFile: File) {
                 )
             }
         }
+    }
+
+    /**
+     * The single scheduled trip on [routeId] whose FIRST stop_time departs at exactly [startTime],
+     * active on [serviceDate] -- the standard GTFS-RT way to identify a trip when a live source
+     * hands back (route, start_date, start_time) instead of a trip_id directly, e.g. CTA Bus
+     * Tracker's own `stsd`/`stst` fields (see [CtaBusTrackerSource]'s own doc). Null if zero or
+     * more than one trip matches -- an ambiguous match is left unresolved rather than guessed at,
+     * so a caller just doesn't show a live position for that vehicle this poll rather than ever
+     * linking it to the wrong trip.
+     */
+    fun tripIdForScheduledStart(routeId: String, startTime: String, serviceDate: LocalDate): String? {
+        val serviceDateGtfs = serviceDate.toGtfsDateString()
+        val dayColumn = serviceDate.dayOfWeek.toGtfsColumnName()
+        val tripIds = db.rawQuery(
+            """
+            SELECT t.trip_id
+            FROM trips t
+            JOIN (
+                SELECT trip_id, departure_time, MIN(stop_sequence) AS first_seq
+                FROM stop_times
+                GROUP BY trip_id
+            ) first ON first.trip_id = t.trip_id
+            WHERE t.route_id = ? AND first.departure_time = ?
+              AND ${activeTodayClause(dayColumn)}
+            """.trimIndent(),
+            arrayOf(routeId, startTime, serviceDateGtfs, serviceDateGtfs, serviceDateGtfs),
+        ).use { cursor -> cursor.mapRows { getString(0) } }
+        return tripIds.singleOrNull()
     }
 
     /** A trip's route_type, for picking its live-vehicle emoji (see [LineType]) on the Trip Detail

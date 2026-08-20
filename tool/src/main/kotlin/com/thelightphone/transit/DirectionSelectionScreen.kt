@@ -91,6 +91,24 @@ fun DirectionOption.rowLabel(): String =
         }
         ?: "Direction $directionId"
 
+/**
+ * [rowLabel] with per-group disambiguation: two variants within the same direction_id group can
+ * have genuinely different headsigns that collide into identical text once [rowLabel]'s own
+ * via-clause stripping is applied -- confirmed live on RIPTA route 9 direction 1, whose "Pascoag"
+ * and "Pascoag via Citizens Bank" trips (two real, differently-stopping patterns) both stripped
+ * down to "Toward Pascoag", rendering as an apparent duplicate. Falls back to the full, un-stripped
+ * headsign for just the rows that collide, so a rider never sees two identical-looking taps that
+ * actually lead to different stop lists; a row whose stripped label is already unique within its
+ * own group is untouched.
+ */
+fun List<DirectionOption>.disambiguatedRowLabels(): Map<DirectionOption, String> {
+    val counts = groupingBy { it.rowLabel() }.eachCount()
+    return associateWith { direction ->
+        val label = direction.rowLabel()
+        if (counts[label] == 1) label else direction.headsign?.takeIf { it.isNotBlank() }?.let { "Toward $it" } ?: label
+    }
+}
+
 class DirectionSelectionViewModel(dbFile: File, private val routeId: String) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -214,9 +232,11 @@ class DirectionSelectionScreen(
                                         )
                                     }
                                 }
+                                val disambiguatedLabels = variants.disambiguatedRowLabels()
                                 items(variants) { direction ->
+                                    val label = disambiguatedLabels.getValue(direction)
                                     LightText(
-                                        text = direction.rowLabel(),
+                                        text = label,
                                         variant = LightTextVariant.Copy,
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -229,7 +249,7 @@ class DirectionSelectionScreen(
                                                         routeLabel,
                                                         direction.directionId,
                                                         direction.headsign,
-                                                        direction.rowLabel(),
+                                                        label,
                                                     )
                                                 })
                                             }

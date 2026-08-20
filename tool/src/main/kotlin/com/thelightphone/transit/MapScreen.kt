@@ -236,6 +236,7 @@ enum class StopRelation { TO, AT, FROM }
 fun LineType?.toVehicleIcon(): LightIconConfiguration = when (this) {
     LineType.SUBWAY -> LightIcons.DIRECTIONS_SUBWAY
     LineType.COMMUTER_RAIL -> LightIcons.DIRECTIONS_TRAIN
+    LineType.FERRY -> LightIcons.DIRECTIONS_FERRY
     LineType.BUS, null -> LightIcons.DIRECTIONS_BUS
 }
 
@@ -598,28 +599,33 @@ class MapViewModel(
             repository.getStopDescriptions(groupedStopIds.toList()).mapValues { (_, desc) -> platformLabelFromStopDesc(desc) }
         }
 
-        // Commuter rail's track assignment isn't in GTFS-RT at all, and isn't fixed like subway/
-        // Silver Line platforms -- MBTA typically doesn't decide (or publish) it until roughly
-        // 10-15 minutes before departure (see MbtaV3VehicleSource's own doc), so most of the time
-        // there's simply no assignment yet. That's the normal case, not an error: a trip missing
-        // from this map (fetch failure, or genuinely no live V3 report yet) just falls back to its
-        // ordinary GTFS-RT match below, same as every other mode -- never blocked on this lookup
-        // succeeding. Scoped by ROUTE (every commuter rail route already known to serve the primary
-        // station, from whatever's in scheduledArrivalsByStopId so far) rather than by a fixed trip
-        // list -- a station's routes are stable even when its exact trip snapshot isn't, and
-        // filtering by route is also the only option V3 actually supports here (see
-        // LiveVehicleSource's own doc).
+        // A richer live source (MBTA V3, CTA Bus Tracker, ...) typically knows something GTFS-RT
+        // VehiclePositions doesn't -- MBTA's V3 also carries commuter rail's platform/track
+        // assignment, which isn't in GTFS-RT at all and isn't fixed like subway/Silver Line
+        // platforms (MBTA typically doesn't decide/publish it until roughly 10-15 minutes before
+        // departure -- see MbtaV3VehicleSource's own doc). A trip missing from this map (fetch
+        // failure, or genuinely nothing reported yet) just falls back to its ordinary GTFS-RT match
+        // below, same as every other mode -- never blocked on this lookup succeeding. Scoped by
+        // ROUTE, not stop or trip -- see LiveVehicleSource's own doc for why -- restricted to
+        // whichever LineTypes this agency's own source declares it covers (coveredLineTypes), so
+        // e.g. MBTA's V3 call never includes subway route_ids (pure waste, already resolved via
+        // parent_station) and CTA's Bus Tracker call never includes rail. One agency has at most one
+        // LiveVehicleSource, so this is a single generic lookup regardless of which agency it is --
+        // MapScreen itself never names a specific source type.
         val primaryStopIds = context.centerStation?.memberStopIds ?: listOf(stopId)
-        val commuterRailRouteIds = primaryStopIds.flatMapTo(mutableSetOf()) { id ->
-            scheduledArrivalsByStopId[id].orEmpty()
-                .filter { LineType.forGtfsRouteType(it.route.routeType) == LineType.COMMUTER_RAIL }
-                .map { it.route.routeId }
-        }
-        val mbtaV3VehiclesByTripId = agency.component<LiveVehicleSource>()
-            ?.takeIf { commuterRailRouteIds.isNotEmpty() }
+        val liveVehicleSource = agency.component<LiveVehicleSource>()
+        val liveSourceRouteIds = liveVehicleSource?.let { source ->
+            primaryStopIds.flatMapTo(mutableSetOf()) { id ->
+                scheduledArrivalsByStopId[id].orEmpty()
+                    .filter { LineType.forGtfsRouteType(it.route.routeType) in source.coveredLineTypes }
+                    .map { it.route.routeId }
+            }
+        }.orEmpty()
+        val liveVehiclesByTripId = liveVehicleSource
+            ?.takeIf { liveSourceRouteIds.isNotEmpty() }
             ?.let { source ->
                 try {
-                    source.vehiclesByRoute(commuterRailRouteIds)
+                    source.vehiclesByRoute(liveSourceRouteIds, repository)
                 } catch (e: Exception) {
                     Log.e("MapScreen", "Live vehicle fetch failed", e)
                     emptyMap()
@@ -638,7 +644,7 @@ class MapViewModel(
         val knownPrimaryTripIds = primaryStopIds.flatMapTo(mutableSetOf()) { id ->
             scheduledArrivalsByStopId[id].orEmpty().map { it.tripId }
         }
-        val missingLiveTripIds = (vehiclePositionsByTripId.keys + mbtaV3VehiclesByTripId.keys) - knownPrimaryTripIds
+        val missingLiveTripIds = (vehiclePositionsByTripId.keys + liveVehiclesByTripId.keys) - knownPrimaryTripIds
         if (missingLiveTripIds.isNotEmpty()) {
             repository.getScheduledArrivalsForTrips(missingLiveTripIds, primaryStopIds).forEach { arrival ->
                 val existing = scheduledArrivalsByStopId[arrival.stopId].orEmpty()
@@ -652,22 +658,23 @@ class MapViewModel(
             val scheduledArrivals = scheduledArrivalsByStopId[activeStopId] ?: return emptyList()
             return scheduledArrivals.mapNotNull { arrival ->
                 val lineType = LineType.forGtfsRouteType(arrival.route.routeType)
-                // Commuter rail prefers MBTA's V3 API for position AND status/sequence together --
-                // never mixing sources for one vehicle, so "is it arrived" can't disagree with
-                // itself across two feeds with different update cadences (see MbtaV3VehicleSource's
-                // own doc). Falls back to the ordinary GTFS-RT match below when V3 has nothing for
-                // this trip. Every other mode always uses GTFS-RT, unchanged.
-                val v3Vehicle = if (lineType == LineType.COMMUTER_RAIL) mbtaV3VehiclesByTripId[arrival.tripId] else null
+                // Only consult liveVehiclesByTripId for a mode this agency's own source actually
+                // covers (see coveredLineTypes) -- e.g. CTA Bus Tracker's map is keyed by trip_id
+                // same as MBTA V3's, but a subway/rail arrival on CTA must never look itself up
+                // here, since Bus Tracker never populated an entry for it in the first place.
+                val preferredLiveVehicle = liveVehicleSource
+                    ?.takeIf { lineType != null && lineType in it.coveredLineTypes }
+                    ?.let { liveVehiclesByTripId[arrival.tripId] }
 
                 val lat: Double
                 val lon: Double
                 val currentStatus: Int?
                 val currentSeq: Int?
-                if (v3Vehicle != null) {
-                    lat = v3Vehicle.latitude
-                    lon = v3Vehicle.longitude
-                    currentStatus = v3Vehicle.currentStatus
-                    currentSeq = v3Vehicle.currentStopSequence
+                if (preferredLiveVehicle != null) {
+                    lat = preferredLiveVehicle.latitude
+                    lon = preferredLiveVehicle.longitude
+                    currentStatus = preferredLiveVehicle.currentStatus
+                    currentSeq = preferredLiveVehicle.currentStopSequence
                 } else {
                     val vehicle = vehiclePositionsByTripId[arrival.tripId] ?: return@mapNotNull null
                     val position = vehicle.position ?: return@mapNotNull null
@@ -718,7 +725,7 @@ class MapViewModel(
                 // platform this vehicle still renders fine -- just at its own true GPS position with
                 // no platform label, the same catch-all every other unresolved vehicle already falls
                 // back to.
-                val assignedStopId = v3Vehicle?.assignedStopId
+                val assignedStopId = preferredLiveVehicle?.assignedStopId
                 val platformLabel = if (lineType == LineType.COMMUTER_RAIL) {
                     assignedStopId?.let { platformLabelByStopId[it] }
                 } else {
@@ -841,6 +848,7 @@ internal fun buildSeeEverythingBuses(
     showBus: Boolean = true,
     showSubway: Boolean = true,
     showCommuterRail: Boolean = true,
+    showFerry: Boolean = true,
 ): List<BusMarker> {
     val fetchRadiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(centerLat, zoom)
     val inBounds = vehiclePositionsByTripId.filterValues { vehicle ->
@@ -865,6 +873,7 @@ internal fun buildSeeEverythingBuses(
             LineType.BUS, null -> showBus
             LineType.SUBWAY -> showSubway
             LineType.COMMUTER_RAIL -> showCommuterRail
+            LineType.FERRY -> showFerry
         }
         if (!modeShown) return@mapNotNull null
         val routeLabel = routeInfo.route.shortName?.takeIf { it.isNotBlank() } ?: routeInfo.route.displayName
@@ -1171,6 +1180,7 @@ internal fun MapCanvas(
     val busIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_BUS, VEHICLE_MARKER_ICON_PX, iconTint)
     val subwayIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_SUBWAY, VEHICLE_MARKER_ICON_PX, iconTint)
     val trainIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_TRAIN, VEHICLE_MARKER_ICON_PX, iconTint)
+    val ferryIconBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_FERRY, VEHICLE_MARKER_ICON_PX, iconTint)
 
     Canvas(
         modifier = modifier
@@ -1488,6 +1498,7 @@ internal fun MapCanvas(
         fun vehicleIconBitmapFor(bus: BusMarker): Bitmap = when (bus.vehicleIcon) {
             LightIcons.DIRECTIONS_SUBWAY -> subwayIconBitmap
             LightIcons.DIRECTIONS_TRAIN -> trainIconBitmap
+            LightIcons.DIRECTIONS_FERRY -> ferryIconBitmap
             else -> busIconBitmap
         }
 

@@ -39,6 +39,7 @@ private val ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_SUBWAY, "Subway / Light Rail vehicle"),
     IconLegendEntry(LightIcons.DIRECTIONS_BUS, "Bus vehicle"),
     IconLegendEntry(LightIcons.DIRECTIONS_TRAIN, "Commuter Rail vehicle"),
+    IconLegendEntry(LightIcons.DIRECTIONS_FERRY, "Ferry vehicle"),
     IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Multi-platform station (tap to see all its platforms)"),
     IconLegendEntry(LightIcons.DIRECTIONS_ARRIVAL, "Selected stop (large) / nearby stop (small) on the map"),
     IconLegendEntry(LightIcons.DOWNLOAD_ARROW, "Agency schedule not yet downloaded"),

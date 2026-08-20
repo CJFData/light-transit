@@ -2,7 +2,7 @@
 
 Pico Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a live map that shows exactly where your ride actually is — no ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-Right now Pico Transit knows its way around **MBTA**, **RIPTA**, **RTD Denver**, **LTC Ontario** (London, Ontario), and **STM Montréal**, with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
+Right now Pico Transit knows its way around **MBTA**, **RIPTA**, **RTD Denver** (plus Bustang, Colorado's statewide coach service), **LTC Ontario** (London, Ontario), **STM Montréal**, **CTA**, **Metra**, **Pace**, **NYC Subway**, **LIRR**, **Metro-North**, **LA Metro**, and around 50 SF Bay Area operators (BART, Muni, AC Transit, Caltrain, VTA, and dozens more via 511.org's regional feed) — with more agencies hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
 
 Pico Transit can be used alongside the light phone's directions tool for more context on your commutes, or standalone, covering buses, commuter rail.subway systems, and transit stations.
 
@@ -23,7 +23,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 
 ## 🗺️ What can it do?
 
-- 🏠 **Pick your agency** — MBTA, RIPTA, RTD Denver, LTC Ontario, or STM Montréal — and Pico Transit downloads their schedule right onto your phone. First launch (or switching agencies later from Settings) opens this as its own welcome screen; once picked, the home screen shows a ticking clock, your agency's name, and a loading indicator until its schedule is ready.
+- 🏠 **Pick your agency** — MBTA, RIPTA, RTD Denver, LTC Ontario, STM Montréal, and dozens more (see the full list above) — and Pico Transit downloads their schedule right onto your phone. First launch (or switching agencies later from Settings) opens this as its own welcome screen; once picked, the home screen shows a ticking clock, your agency's name, and a loading indicator until its schedule is ready.
   
   ![alt text](docs/screenshots/Screenshot_20260810_171500.png)
   ![alt text](docs/screenshots/Screenshot_20260810_171800.png)
@@ -58,7 +58,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
    ![alt text](docs/screenshots/Screenshot_20260810_172200.png)
 
 
-- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus). Flip on "See Everything" (Settings) to drop the usual "just this stop's own vehicles" filter and plot every live vehicle in view instead, labeled with just its route until you tap it; narrow it back down by tapping a stop ("Filter by stop" — tags each vehicle TO/FROM/AT that stop) or by mode (Bus/Subway/Commuter Rail).
+- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus, ferry). Flip on "See Everything" (Settings) to drop the usual "just this stop's own vehicles" filter and plot every live vehicle in view instead, labeled with just its route until you tap it; narrow it back down by tapping a stop ("Filter by stop" — tags each vehicle TO/FROM/AT that stop) or by mode (Bus/Subway/Commuter Rail).
   
   ![alt text](docs/screenshots/Screenshot_20260801_200838.png)
   ![alt text](docs/screenshots/Screenshot_20260801_204556.png)
@@ -121,7 +121,7 @@ That's it — happy transit-ing! 🚏🚌🚆
 - **No device GPS is used anywhere** — the SDK doesn't expose it to tools yet. Nearby-stop and location search are powered by Nominatim (OpenStreetMap) and IP-based geolocation instead. Be kind to their free APIs! 🙏
 - **Stations are deduplicated using GTFS's `parent_station`** — a big station with several platforms (subway entrances, commuter rail tracks, etc.) shows up as one marker/entry, not one per platform, while still resolving to the right platform's `stop_id` under the hood for schedule lookups. Only real platforms and boarding areas count as "member platforms" for this — GTFS also links entrances, elevators, and escalator nodes to the same parent station, and those are filtered out so a big hub's map isn't cluttered with dozens of non-boardable points.
 - **Boarding a trip is a saved reference, not a background tracker** — Pico Transit never polls a live feed while the app itself isn't open. "You've reached your stop" detection only runs while Trip Detail or the home screen is actually visible and polling, the same way every other bit of live tracking in the app works.
-- **Commuter rail track assignments come from MBTA's V3 API, not GTFS-RT** — GTFS-RT never publishes which specific track a commuter rail trip will use, and MBTA's own dispatch system usually doesn't decide until 10-15 minutes before departure. Pico Transit polls the V3 API (`api-v3.mbta.com`, no key required) for this and for commuter rail's own live vehicle positions, falling back to the standard GTFS-RT feed if a trip has no V3 match yet.
+- **Commuter rail track assignments come from MBTA's V3 API, not GTFS-RT** — GTFS-RT never publishes which specific track a commuter rail trip will use, and MBTA's own dispatch system usually doesn't decide until 10-15 minutes before departure. Pico Transit polls the V3 API (`api-v3.mbta.com`) for this and for commuter rail's own live vehicle positions, falling back to the standard GTFS-RT feed if a trip has no V3 match yet. CTA's own Bus Tracker API is wired the same way for buses, matching a live vehicle back to a scheduled trip by its route + scheduled departure time rather than a GTFS-RT trip_id.
 
 ## 🙌 Credits
 

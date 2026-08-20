@@ -12,6 +12,8 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **RTD Denver** — added via a community contribution, including GTFS-RT decode fixes and secondary-feed support.
 - **Bustang** (Colorado's statewide intercity coach) — merged directly into RTD Denver: its routes, stops, schedules, and live vehicles all show up alongside RTD's own.
 - **LTC Ontario** (London, Ontario) — newly added, along with fixes for its zero-trip routes and an HTTP-only static feed (see below).
+- **SF Bay Area, ~40 agencies via 511.org** — BART, Muni, AC Transit, Caltrain, and VTA get full live tracking; dozens more (county shuttles, ferries, express buses) get at least live schedules, most with live vehicles too. All of it rides one shared regional realtime feed behind the scenes, so adding this many agencies didn't multiply the number of live-data requests being made — the proxy fetches the region's feed once and hands each agency its own slice.
+- **CTA** (Chicago) — buses are tracked live via CTA's own Bus Tracker API, matched back to real scheduled trips by route + scheduled start time. 'L' trains are schedule-only for now — Train Tracker identifies trains by run number with no reliable way to tie that back to a specific scheduled trip, so live train positions are a future addition, not a today thing.
 
 ## 🗺️ Core features
 
@@ -21,6 +23,7 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **Explore/Leave now** — type a location or let the app guess via IP geolocation, and get the closest stops ranked by distance; remembers your last search.
 - **Live ETAs** — real-time predictions with On Time / Late / Early badges wherever an agency's live feed supports it.
 - **Live map** — your stop pinned with nearby stops and live vehicles shown with mode-specific icons; a "See Everything" mode drops the per-stop filter to show every live vehicle in view, filterable by stop or mode.
+- **⛴️ Ahoy — ferries!** Boats finally get their own icon instead of vanishing from the map or getting lumped in with buses. Same dark/light theming as every other vehicle mode, so a ferry marker looks right at home next to the subway and commuter rail icons it's been sailing alongside all along.
 - **Stations** — every real multi-platform station, deduplicated via GTFS `parent_station` so a hub shows as one entry, with a zoomed-in map of just its real platforms (entrances/elevators/escalators filtered out). MBTA commuter rail track assignments come from MBTA's V3 API once a track is assigned, ~10–15 minutes before departure.
 - **Board a trip** — tap Play from any Trip Detail screen to make it your current trip, track your position via the vehicle marker, mark an alight stop, and get a "You've reached your stop! 🎉" celebration when you arrive.
 - **Home screen trip status** — while boarded, the home screen swaps its usual heading for your route, live ETA, stops remaining, and an optional progress bar with a vehicle marker crawling from boarding stop to alight stop.
@@ -43,6 +46,7 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - **Stations search keyboard** — the search keyboard silently stopped accepting input on reopen due to a stale ViewModel callback; fixed by hoisting the text field state.
 - **STM Montréal crashed on real hardware while downloading its schedule** — confirmed via on-device logcat as an `OutOfMemoryError` inside Ktor's response handling: the old download path buffered STM's entire multi-hundred-MB zip into one in-memory byte array before writing anything to disk, which blew past the phone's heap even though it never reproduced in the emulator. Fixed by streaming the HTTP response straight to disk instead, so memory use stays bounded no matter the feed's size.
 - **STM Montréal also crashed while parsing its schedule** — STM's `stop_times.txt` alone is ~5.1M rows; loading a feed that size inside one long-held SQLite transaction let the transaction's journal grow unbounded in memory. Fixed by committing in 50,000-row batches per table instead of one transaction for the whole feed.
+- **Petaluma Transit departures listed in a strange order** — its feed doesn't zero-pad single-digit hours in `stop_times.txt` ("6:30:00" instead of "06:30:00"), and every departure-time comparison in the app is a plain string comparison, so unpadded morning times sorted *after* the whole afternoon ("6:30:00" > "17:40:00" as text). Fixed by normalizing every arrival/departure time to zero-padded `HH:MM:SS` once, at ingestion — not agency-specific in principle, so this protects against any other feed with the same real-world formatting slip.
 
 ## 🔧 Under the hood
 
