@@ -237,10 +237,7 @@ class LightSdkService : Service() {
                         "missing phoneNumber",
                     )
                 }
-                LightSdkServer.onOpenDialer(
-                    callingUid,
-                    request.copy(phoneNumber = phoneNumber),
-                )
+                LightSdkServer.onOpenDialer(callingUid, phoneNumber)
                 LightResult.Success(
                     LightServiceMethod.OpenDialer.encodeResponse(Unit)
                 )

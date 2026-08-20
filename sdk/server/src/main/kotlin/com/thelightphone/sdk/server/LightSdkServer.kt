@@ -159,13 +159,13 @@ object LightSdkServer {
         }
 
     /**
-     * Open the phone dialer for [request.phoneNumber].
+     * Open the phone dialer for [phoneNumber]
      *
      * Settable from enclosing application!! May be run on any thread
      */
-    var onOpenDialer: (callingUid: Int, request: LightServiceMethod.OpenDialer.Request) -> Unit =
-        { _, request ->
-            Log.e(TAG, "OpenDialer not configured by server: phoneNumber=${request.phoneNumber}")
+    var onOpenDialer: (callingUid: Int, phoneNumber: String) -> Unit =
+        { _, phoneNumber ->
+            Log.e(TAG, "OpenDialer not configured by server: phoneNumber=$phoneNumber")
         }
 
     var foregroundSelfWithCallback: (componentToReturnTo: ComponentName) -> Unit = {
