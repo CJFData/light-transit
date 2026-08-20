@@ -143,4 +143,4 @@ internal class LightAudioService : MediaSessionService() {
 internal fun shouldStartIdleStop(isPlaying: Boolean, handleOpen: Boolean): Boolean =
     !isPlaying && !handleOpen
 
-internal const val IDLE_STOP_MS = 60_000L
+internal const val IDLE_STOP_MS = 15 * 60_000L
