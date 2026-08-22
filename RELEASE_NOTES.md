@@ -65,4 +65,4 @@ Thanks to [Jose Briones](https://github.com/jbriones95) for his continued work i
 
 Thanks to [Guy Dupont](https://github.com/dupontgu) on the Light team for adding `LightConnectivity` updates to `light-sdk` ([lightphone/light-sdk#166](https://github.com/lightphone/light-sdk/pull/166)), the network-state API that made the "Only download over Wi-Fi" setting possible — and, more broadly, to the whole Light Phone team for all the work that's gone into making this SDK a genuine pleasure to build on, and the LightOS developer community such a positive, supported, and all-around amazing place to be.
 
-Thanks to Claude (Anthropic) for collaborating on much of Pico Transit's development, including the "Only download over Wi-Fi" setting and the comment/documentation audit noted above.
+Thanks to Claude (Anthropic) for extensive collaboration throughout Pico Transit's development — including learning Kotlin from scratch, implementing the "Only download over Wi-Fi" setting, and working through a pass on the codebase's comments and documentation together.
