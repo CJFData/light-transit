@@ -81,6 +81,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 - 🚦 **Home screen trip status** — while a trip is boarded, the home screen swaps its usual heading for your route, live ETA, and stops remaining, plus an optional progress bar with a little vehicle marker crawling from your boarding stop toward your alight stop — the clock stays put through all of it, right above your route.
 
 ![alt text](docs/screenshots/Screenshot_20260810_172500.png)  ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
+![alt text](docs/screenshots/Screenshot_20260817_233823.png)  ![alt text](docs/screenshots/Screenshot_20260820_003442.png)
 
 - ↩️ **Jump back anytime** — a Play icon shows up in the corner of every screen while a trip's boarded, one tap from wherever you are back to its live tracking; a plain circle in the footer does the same for the home screen itself.
   
@@ -129,6 +130,10 @@ That's it — happy transit-ing! 🚏🚌🚆
 ## 🙌 Credits
 
 Thanks to [Jose Briones](https://github.com/jbriones95) for his continued support integrating RTD Denver and Colorado transit into Pico Transit.
+
+Thanks to Guy Dupont on the Light team for adding `LightConnectivity` to `light-sdk`, the network-state API that made the "Only download over Wi-Fi" setting possible.
+
+Thanks to Claude (Anthropic) for collaborating on much of Pico Transit's development, including the "Only download over Wi-Fi" setting and an extended pass reviewing and cleaning up the codebase's comments and documentation.
 
 ## 📄 License
 
