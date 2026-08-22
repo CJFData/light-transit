@@ -98,16 +98,15 @@ class StopConnectionsViewModel(
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
-            // Inside the same try/catch as the rest of this block (not a separate unguarded call
-            // before it) so a screen popped mid-query -- e.g. several rapid-fire goBack() calls in
-            // a row, like BackToHomeFooter's "jump to Home" loop -- can't crash the app just
-            // because this repository got closed out from under an in-flight query on the way out.
+            // Inside the same try/catch as the rest of this block (not a separate unguarded call before it)
+            // so a screen popped mid-query -- e.g. several rapid-fire goBack() calls in a row, like
+            // BackToHomeFooter's "jump to Home" loop -- can't crash the app just because this
+            // repository got closed out from under an in-flight query on the way out.
             _state.value = try {
-                // A trip only ever stops at one platform of a station, so stopId here is just that
-                // one platform -- resolve its full station (if any) so connections are listed
-                // across every platform actually serving it, not just the one this particular trip
-                // happened to use. Same pattern as UpcomingArrivalsViewModel/
-                // GtfsRepository.getScheduledArrivals(stopIds).
+                // A trip only ever stops at one platform of a station, so stopId here is just that one platform
+                // -- resolve its full station (if any) so connections are listed across every platform
+                // actually serving it, not just the one this trip happened to use. Same pattern as
+                // UpcomingArrivalsViewModel/GtfsRepository.getScheduledArrivals(stopIds).
                 val station = repository.getStationContaining(stopId)
                 isStation.value = station != null
                 val stopIds = station?.memberStopIds ?: listOf(stopId)

@@ -23,9 +23,9 @@ import kotlin.math.pow
 import kotlin.math.tan
 
 /**
- * Standard Web Mercator "slippy map" tile math (see the OSM wiki's "Slippy map tilenames" page) —
+ * Standard Web Mercator "slippy map" tile math (see the OSM wiki's "Slippy map tilenames" page) --
  * shared by both the background tile fetch and marker placement so everything drawn on the map
- * screen comes from one consistent, real-world-accurate coordinate system.
+ * screen comes from one consistent coordinate system.
  */
 private const val TILE_SIZE = 256.0
 private const val EARTH_CIRCUMFERENCE_METERS = 40_075_016.686
@@ -50,19 +50,19 @@ fun metersPerPixel(lat: Double, zoom: Int): Double {
  * The integer zoom that fits every (lat, lon) in [points] within [availableHalfExtentPx] of
  * (centerLat, centerLon) in both axes, clamped to [minZoom]..[maxZoom]. Unlike a textbook
  * "fitBounds" (which re-centers on the bounding box's own centroid), this fits the box around a
- * *fixed* center point — the map screen's selected stop must always render at dead center, so each
- * point's offset is measured from (centerLat, centerLon) directly, not from the box's own middle.
- * A dense cluster of nearby points naturally yields a high (zoomed-in) result; a lone distant point
- * naturally yields a low one — no per-agency density special-casing needed.
+ * fixed center point -- the map screen's selected stop must always render at dead center, so each
+ * point's offset is measured from (centerLat, centerLon) directly. A dense cluster of nearby
+ * points naturally yields a high (zoomed-in) result; a lone distant point naturally yields a low
+ * one -- no per-agency density special-casing needed.
  *
  * Falls back to [fallbackZoom] when [points] is empty or every point is ~coincident with the
- * center, since the fit-to-bounds formula is undefined for a zero-size box -- though in practice
- * that branch is now rarely reached once [minBoundingBoxMiles] is positive, since the floor below
- * already keeps the box away from zero-size on its own.
+ * center, since the fit-to-bounds formula is undefined for a zero-size box -- rarely reached once
+ * [minBoundingBoxMiles] is positive, since the floor below already keeps the box away from
+ * zero-size on its own.
  *
  * [minBoundingBoxMiles] treats the bounding box as at least this wide in each dimension before
  * computing zoom, so a real-world-tiny cluster (e.g. two platforms 30ft apart) doesn't compute an
- * absurdly tight zoom just because the *points* happen to be that close together.
+ * absurdly tight zoom just because the points happen to be that close together.
  */
 fun fitBoundsZoom(
     centerLat: Double,
@@ -108,10 +108,9 @@ fun fitBoundsZoom(
 data class PixelPoint(val x: Float, val y: Float)
 
 /**
- * Pixel offset of (lat, lon) relative to (centerLat, centerLon) at the given zoom — the same
+ * Pixel offset of (lat, lon) relative to (centerLat, centerLon) at the given zoom -- the same
  * projection tile placement uses, but usable on its own for marker placement even when a tile
- * failed to fetch, so bearing/distance-accurate placement never depends on the tile network call
- * succeeding.
+ * failed to fetch, so placement never depends on the tile network call succeeding.
  */
 fun projectRelativeToCenter(centerLat: Double, centerLon: Double, lat: Double, lon: Double, zoom: Int): PixelPoint {
     val (centerX, centerY) = lonLatToTileFraction(centerLat, centerLon, zoom)
@@ -128,9 +127,8 @@ data class FetchedTile(val tileX: Int, val tileY: Int, val bitmap: Bitmap)
 /**
  * Every tile fetched to cover the requested area around one center point, plus the fractional tile
  * coordinates of that center point. Each tile is drawn independently at its own screen offset via
- * [screenOffset] — there's no pre-stitched composite bitmap, so a handful of individually-failed
- * tiles just leave that one patch blank instead of requiring a grid size guessed to be "big enough"
- * up front.
+ * [screenOffset] -- there's no pre-stitched composite bitmap, so a handful of failed tiles just
+ * leave that patch blank instead of requiring a grid size guessed "big enough" up front.
  */
 data class MapTiles(
     val zoom: Int,
@@ -147,9 +145,9 @@ data class MapTiles(
 
 /**
  * A small in-process LRU of decoded tile bitmaps, keyed by "z/x/y", shared by every [MapTileClient]
- * instance and screen visit in this app session — revisiting the Map screen for the same or a
- * nearby stop reuses tiles already downloaded instead of refetching them. Capacity is a tile count,
- * not a byte budget, since every raster tile is the same 256x256 size.
+ * instance and screen visit this session -- revisiting the Map screen for the same or a nearby stop
+ * reuses tiles already downloaded. Capacity is a tile count, not a byte budget, since every raster
+ * tile is the same 256x256 size.
  */
 private object TileCache {
     private const val MAX_ENTRIES = 300
@@ -168,12 +166,12 @@ private object TileCache {
 
 /**
  * Fetches individual raster tiles from one of CARTO's free basemaps (built on OpenStreetMap data),
- * caching decoded bitmaps in [TileCache]. Voyager is the default -- chosen specifically for
- * street-name legibility, since its labels and road contours stay readable at the small sizes this
- * screen renders at, which the darker "Dark Matter" style didn't -- but Dark Matter remains
- * available as an opt-in (see MapPreferences) for anyone who prefers it. A real, descriptive
- * User-Agent is sent on every request, and on-screen "© OpenStreetMap contributors © CARTO"
- * attribution is required wherever these tiles are displayed — see MapScreen's Content().
+ * caching decoded bitmaps in [TileCache]. Voyager is the default -- chosen for street-name
+ * legibility, since its labels and road contours stay readable at the small sizes this screen
+ * renders at, unlike the darker "Dark Matter" style -- but Dark Matter remains available as an
+ * opt-in (see MapPreferences). A real, descriptive User-Agent is sent on every request, and
+ * on-screen "© OpenStreetMap contributors © CARTO" attribution is required wherever these tiles
+ * are displayed -- see MapScreen's Content().
  */
 class MapTileClient {
     private val client = HttpClient(OkHttp)
@@ -190,7 +188,7 @@ class MapTileClient {
 
     /**
      * Every tile needed to cover a [targetRadiusMeters] circle around (lat, lon) at [zoom], fetched
-     * concurrently. Individual tile failures are logged and simply omitted from the result — never
+     * concurrently. Individual tile failures are logged and simply omitted from the result -- never
      * fail the whole map for one bad tile. [darkMode] selects Dark Matter over the default Voyager
      * style; both are cached independently (see [fetchTile]) so switching styles never serves a
      * stale tile from the other one.

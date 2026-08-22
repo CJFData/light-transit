@@ -125,10 +125,9 @@ class StationListScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // A short tap opens the station's own platform map, same as
-                // always; tap-and-hold newly jumps straight to its actual
-                // (live) upcoming arrivals across every platform, skipping
-                // the map for a rider who just wants the next departure.
+                // A short tap opens the station's own platform map, same as always; tap-and-hold newly jumps
+                // straight to its actual (live) upcoming arrivals across every platform, skipping the map
+                // for a rider who just wants the next departure.
                 .pointerInput(station.stopId) {
                     detectTapGestures(
                         onTap = {
@@ -147,10 +146,9 @@ class StationListScreen(
                 .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Weighted so a long station name wraps within its own bounded
-            // share of the row, leaving guaranteed room for the icon, instead
-            // of first greedily measuring against the row's full width -- see
-            // NearbyStopsScreen's identical fix for the same Compose behavior.
+            // Weighted so a long station name wraps within its own bounded share of the row, leaving
+            // guaranteed room for the icon, instead of first greedily measuring against the row's full
+            // width -- see NearbyStopsScreen's identical fix for the same Compose behavior.
             LightText(
                 text = station.displayLabel(),
                 variant = LightTextVariant.Copy,
@@ -173,14 +171,12 @@ class StationListScreen(
      *
      * [textFieldState] is passed in (hoisted to [Content], not created here) rather than via its
      * own `rememberTextFieldState` -- this composable is only ever in composition while search is
-     * active, so a state created locally would be a brand new instance every time search reopens.
-     * `viewModel(key = "StationSearchKeyboard", ...)` below only calls its factory (and so only
-     * ever captures ONE callback/state pair) the very first time this screen's ViewModelStore sees
-     * that key -- every later reopen would silently keep typing into the *first* session's
-     * already-discarded [TextFieldState] while this composable displays a new, empty one, which is
-     * exactly the "stops accepting input until I back all the way out" bug this fixes. Hoisting the
-     * state keeps it the same single instance across every reopen, so the one callback captured on
-     * the first open stays correctly wired for the screen's entire lifetime.
+     * active, so a locally-created state would be a fresh instance every time search reopens.
+     * `viewModel(key = "StationSearchKeyboard", ...)` below only calls its factory the very first
+     * time this screen's ViewModelStore sees that key, so a local state would silently keep typing
+     * into the first session's already-discarded instance on every later reopen. Hoisting the
+     * state keeps it the same single instance across every reopen, so the callback captured on the
+     * first open stays correctly wired for the screen's entire lifetime.
      */
     @Composable
     private fun SearchContent(

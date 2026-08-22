@@ -84,14 +84,14 @@ class AgencyPickerModal(
      * shown (nothing ingests while this is up -- see this class's own doc), not kept live. */
     private val cachedAgencies = MutableStateFlow<Set<GtfsAgency>>(emptySet())
 
-    /** This modal's own ViewModelStore, fresh per show and cleared on [dismiss]. A LightModal's
-     * Content() is composed as a sibling of the current screen in LightActivity, not nested under
-     * that screen's own LocalViewModelStoreOwner (see LightActivity's Content()), so it has no
-     * natural per-instance store to key the inline search keyboard's viewmodel against. Without
-     * this, a store-keyed `viewModel()` call below would resolve against the Activity-level
-     * default store and keep re-using a stale callback bound to a discarded TextFieldState on the
-     * second and later opens -- exactly the "stops accepting input on reopen" bug the Stations
-     * search screen hit for the same underlying reason. */
+    /** Every screen automatically gets its own ViewModel store; a LightModal doesn't, since its
+     * Content() is composed as a sibling of the current screen in LightActivity rather than
+     * nested under it (see LightActivity's Content()) -- so this modal creates and provides its
+     * own, fresh per show and cleared on [dismiss]. Without it, the inline search keyboard's
+     * `viewModel(key = ...)` call below would resolve against the Activity's shared default store
+     * and keep reusing a stale callback bound to a discarded TextFieldState on later opens -- the
+     * same "stops accepting input on reopen" bug the Stations search screen hit for the same
+     * underlying reason. */
     private val viewModelStoreOwner = object : ViewModelStoreOwner {
         override val viewModelStore = ViewModelStore()
     }

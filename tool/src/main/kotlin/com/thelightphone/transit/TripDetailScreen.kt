@@ -67,20 +67,19 @@ sealed class TripDetailState {
     object Loading : TripDetailState()
 
     /**
-     * [liveAtStopSequence] is non-null only when there's a live position to show (no realtime feed
-     * for this agency, this trip isn't currently reporting one, or the vehicle's current_stop_sequence
-     * doesn't match any row still in [stops] would each make it null). Per the GTFS-realtime spec,
-     * current_stop_sequence means "at, arriving at, or en route to" that stop regardless of
-     * current_status -- so matching it against a row's stopSequence alone is enough to place the
-     * live indicator at the stop the vehicle is closest to, including while it's between stops. This
-     * trip's own vehicle type (for that indicator's icon) is tracked separately -- see
-     * [TripDetailViewModel.lineType], since it's known as soon as the trip loads, independent of
-     * whether a live position happens to be available right now.
+     * [liveAtStopSequence] is non-null whenever a live position is available, from GTFS-RT's
+     * current_stop_sequence, GPS-proximity matching, or inference from TripUpdates. It is not itself
+     * filtered against [stops]: if the live sequence falls outside that trimmed range, it stays
+     * non-null even though no row in [stops] will ever match it, so the live indicator just never
+     * renders. Per the GTFS-realtime spec, current_stop_sequence means "at, arriving at, or en route
+     * to" that stop regardless of current_status, so matching it against a row's stopSequence is
+     * enough to place the indicator even between stops. This trip's vehicle type (for that
+     * indicator's icon) comes from [TripDetailViewModel.lineType] separately, since it's known as
+     * soon as the trip loads.
      *
      * [liveStatus] is the same On Time/Late/Early comparison the other live screens show, computed
-     * against the matched stop's own scheduled time -- null whenever there's no TripUpdates
-     * prediction for it yet (a live position with no matching prediction is a real, normal case,
-     * not an error).
+     * against the matched stop's scheduled time. It's null whenever there's no TripUpdates
+     * prediction yet, which is a normal case, not an error.
      */
     data class Loaded(
         val stops: List<TripStopRow>,
@@ -119,9 +118,9 @@ class TripDetailViewModel(
     val state: StateFlow<TripDetailState> = _state
 
     /** This trip's own vehicle mode -- set once as soon as the trip's route loads, independent of
-     * live-position availability (see [TripDetailState.Loaded]'s own doc comment). Used for both
-     * the live-row icon and the Board/Alight row's vehicle-type icon, and threaded into
-     * [BoardedTrip] so HomeScreen can show it too without its own repository lookup. */
+     * live-position availability (see [TripDetailState.Loaded]'s own doc). Used for both the
+     * live-row icon and the Board/Alight row's vehicle-type icon, and threaded into [BoardedTrip]
+     * so HomeScreen can show it too without its own repository lookup. */
     val lineType = MutableStateFlow<LineType?>(null)
 
     /** Collected for this ViewModel's whole lifetime (not just while visible) so Board/Alight/
@@ -166,11 +165,10 @@ class TripDetailViewModel(
                     // since it also feeds the current-stop fallback below, not just the ETA lookup.
                     val tripUpdate = agency.fetchTripUpdate(tripId)
                     // VehiclePositions' own current_stop_sequence is preferred when present; falls
-                    // back to GPS-proximity matching against the vehicle's own raw position (see
-                    // matchCurrentStopByProximity's own doc), and only as a last resort to inferring
-                    // it from TripUpdates' own remaining stops (see
-                    // GtfsRtTripUpdate.inferCurrentStopSequence's own doc) -- confirmed empirically
-                    // that RIPTA's feed needs one of these two fallbacks, since it never populates
+                    // back to GPS-proximity matching against the vehicle's raw position (see
+                    // matchCurrentStopByProximity), and only as a last resort to inferring it from
+                    // TripUpdates' own remaining stops (see GtfsRtTripUpdate.inferCurrentStopSequence)
+                    // -- RIPTA's feed needs one of these two fallbacks, since it never populates
                     // current_stop_sequence itself.
                     val liveStopSequence = vehiclePosition?.currentStopSequence
                         ?: vehiclePosition?.position?.let { pos ->
@@ -301,14 +299,14 @@ class TripDetailScreen(
                     .background(LightThemeTokens.colors.background)
             ) {
                 Box {
-                    // This screen's own Board/Alight toggle -- Play when THIS trip isn't the
-                    // boarded one (tap to board it), Stop when it is (tap to alight). Distinct
-                    // from every other screen's currentTripTopBarButton "return to trip" button
-                    // (which never changes state, just navigates) -- Trip Detail always shows its
-                    // own toggle here instead, even while a DIFFERENT trip is currently boarded
-                    // elsewhere. No rightButton here (LightTopBar only takes one) since a trip
-                    // switch also needs its own warning icon alongside the toggle -- a plain Row
-                    // stacked on top instead, matching HomeScreen's own two-icon corner.
+                    // This screen's own Board/Alight toggle -- Play when this trip isn't the
+                    // boarded one (tap to board it), Stop when it is (tap to alight). Distinct from
+                    // every other screen's currentTripTopBarButton "return to trip" button (which
+                    // never changes state, just navigates) -- Trip Detail always shows its own
+                    // toggle, even while a different trip is boarded elsewhere. No rightButton here
+                    // (LightTopBar only takes one) since a trip switch also needs its own warning
+                    // icon alongside the toggle, so a plain Row is stacked on top instead, matching
+                    // HomeScreen's own two-icon corner.
                     LightTopBar(
                         leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                         center = LightTopBarCenter.Text("Trip Detail"),
@@ -415,20 +413,14 @@ class TripDetailScreen(
                                         .fillMaxWidth()
                                         .let { base ->
                                             if (isBoardedHere) {
-                                                // While boarded, a short tap designates/clears this
-                                                // stop as the alight stop instead -- tap-and-hold is
-                                                // still the way to reach its connections, unchanged
-                                                // from before "Tap and hold a stop" existed here for
-                                                // the not-boarded case below. detectTapGestures
-                                                // specifically (not a hand-rolled awaitEachGesture
-                                                // loop, which an earlier version of this used) --
-                                                // that version's unconditional
-                                                // awaitFirstDown().consume() claimed every touch
-                                                // starting on a row, including the start of a swipe,
-                                                // before the LazyColumn's own scroll gesture ever got
-                                                // a chance to recognize the drag. detectTapGestures
-                                                // respects touch slop, so a real swipe still falls
-                                                // through to the list's own scrolling.
+                                                // While boarded, a short tap designates/clears this stop as the alight stop
+                                                // instead -- tap-and-hold still reaches its connections, same as the
+                                                // not-boarded case below. Uses detectTapGestures specifically, not a
+                                                // hand-rolled awaitEachGesture loop: an unconditional
+                                                // awaitFirstDown().consume() claims every touch starting on a row, including
+                                                // the start of a swipe, before LazyColumn's own scroll gesture gets a chance
+                                                // to recognize the drag. detectTapGestures respects touch slop, so a real
+                                                // swipe still falls through to the list's scrolling.
                                                 base.pointerInput(stop.stopId) {
                                                     detectTapGestures(
                                                         onTap = { viewModel.toggleAlightStop(stop.stopId) },
@@ -436,13 +428,10 @@ class TripDetailScreen(
                                                     )
                                                 }
                                             } else {
-                                                // Not boarded: a short tap keeps opening this stop's
-                                                // connections, same as always; tap-and-hold newly
-                                                // opens its actual (live) upcoming arrivals instead --
-                                                // same gesture split as the boarded branch above, just
-                                                // with arrivals in the long-press slot rather than
-                                                // connections, since connections already has the short
-                                                // tap here.
+                                                // Not boarded: a short tap keeps opening this stop's connections, same as
+                                                // always; tap-and-hold newly opens its live upcoming arrivals instead -- same
+                                                // gesture split as the boarded branch above, just with arrivals in the
+                                                // long-press slot since connections already has the short tap here.
                                                 base.pointerInput(stop.stopId) {
                                                     detectTapGestures(
                                                         onTap = { openConnections() },
@@ -465,11 +454,10 @@ class TripDetailScreen(
                                                 modifier = Modifier.padding(end = 8.dp),
                                             )
                                         }
-                                        // Weighted so a long stop name wraps within its own share of
-                                        // the row instead of first greedily measuring against the
-                                        // row's full width and only then discovering there's no room
-                                        // left for the trailing time -- see NearbyStopsScreen's
-                                        // identical fix for the same underlying Compose behavior.
+                                        // Weighted so a long stop name wraps within its own share of the row instead
+                                        // of first greedily measuring against the row's full width and only then
+                                        // discovering there's no room for the trailing time -- see NearbyStopsScreen's
+                                        // identical fix for the same Compose behavior.
                                         Row(
                                             modifier = Modifier.weight(1f),
                                             verticalAlignment = Alignment.Top,
@@ -500,10 +488,9 @@ class TripDetailScreen(
                                             text = s.liveStatus?.label() ?: "Live",
                                             variant = LightTextVariant.Detail,
                                             lighten = true,
-                                            // Indented to align under the stop name, not the vehicle
-                                            // icon before it (1.2f size + the icon's own 8dp end
-                                            // padding) -- this is a sibling of that Row above, not a
-                                            // child of it, so it needs its own matching start padding.
+                                            // Indented to align under the stop name, not the vehicle icon before it
+                                            // (1.2f size + the icon's own 8dp end padding) -- a sibling of that Row, not
+                                            // a child of it, so it needs its own matching start padding.
                                             modifier = Modifier.padding(start = 1.2f.gridUnitsAsDp() + 8.dp),
                                         )
                                     }

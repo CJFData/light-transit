@@ -16,14 +16,12 @@ import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3RepeatableKeyboardCallback
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Feeds keystrokes from Light's own public `light-keyboard` library
- * (github.com/lightphone/light-keyboard -- "to be used in LightOS, community tools, and/or as an
- * Android system keyboard") into a [TextFieldState]. Shared by every screen in this app that docks
- * the embedded keyboard inline alongside its own content (a live-filtered list, a single-line
- * search field with a "Search" affordance below it) instead of using sdk/ui's full-screen
- * `LightTextInputEditor` -- that composable's own keystroke-handling glue is deliberately internal
- * to sdk/ui, so this mirrors its logic directly against the public `light-keyboard` API rather than
- * reaching into it.
+ * Feeds keystrokes from Light's own public `light-keyboard` library into a [TextFieldState].
+ * Shared by every screen in this app that docks the embedded keyboard inline alongside its own
+ * content (a live-filtered list, a single-line search field) instead of using sdk/ui's
+ * full-screen `LightTextInputEditor` -- that composable's own keystroke-handling glue is
+ * deliberately internal to sdk/ui, so this mirrors its logic directly against the public
+ * `light-keyboard` API rather than reaching into it.
  */
 class InlineTextFieldKeyboardCallback(
     private val state: TextFieldState,

@@ -40,7 +40,7 @@ data class BoardedTrip(
 /**
  * Tracks "the current trip" (Trip Detail's Board/Alight feature) -- persisted via the SDK's
  * Preferences DataStore, the same mechanism [AgencyPreferences] uses, so it survives navigating
- * away and even an app restart. Deliberately a saved *reference* back to Trip Detail rather than a
+ * away and even an app restart. Deliberately a saved reference back to Trip Detail rather than a
  * background tracker: real-time "have we reached the alight stop" detection only ever happens
  * while that screen is open (its existing live-position poll), matching how live tracking already
  * works everywhere else in this app -- there's no SDK mechanism for meaningfully-real-time

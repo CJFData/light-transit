@@ -64,12 +64,11 @@ private const val COMMIT_BATCH_SIZE = 50_000
  * zip entry ends, committing to [db] every [COMMIT_BATCH_SIZE] rows rather than holding one
  * transaction open for the whole table. A single transaction spanning an entire large table (STM
  * Montreal's stop_times.txt alone is ~5.1M rows) was confirmed to crash on a real Light Phone III,
- * though it never reproduced in the emulator — SQLite keeps that whole transaction's journal live
- * until it commits, and each row's bind/insert call crosses the JNI boundary, so the memory this
- * holds onto scales with the table's size rather than staying bounded. Every other agency's tables
- * are small enough that this was never an issue for them.
+ * though it never reproduced in the emulator -- SQLite keeps that transaction's journal live until
+ * it commits, and each row's bind/insert call crosses the JNI boundary, so memory scales with the
+ * table's size rather than staying bounded.
  *
- * [reader] is never closed here — closing it would close the shared ZipInputStream it wraps.
+ * [reader] is never closed here -- closing it would close the shared ZipInputStream it wraps.
  */
 internal inline fun readCsvEntry(db: SQLiteDatabase, reader: BufferedReader, onRow: (GtfsCsvHeader, List<String>) -> Unit) {
     val headerLine = reader.readLine() ?: return

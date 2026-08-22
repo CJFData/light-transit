@@ -15,11 +15,11 @@ import kotlinx.serialization.protobuf.ProtoBuf
 import kotlinx.serialization.protobuf.ProtoNumber
 
 /**
- * Minimal mirror of the GTFS-realtime.proto schema — only the fields this app reads. Field
- * numbers match the public spec exactly (verified by hand-decoding a live RIPTA feed byte-for-
- * byte during development). No official protobuf/gtfs-realtime-bindings library is on the SDK's
- * dependency allow-list, so this is decoded via kotlinx-serialization-protobuf instead, which
- * passes the allow-list check on a startsWith-prefix technicality (see build.gradle.kts).
+ * Minimal mirror of the GTFS-realtime.proto schema -- only the fields this app reads. Field
+ * numbers match the public spec exactly (verified by hand-decoding a live RIPTA feed byte-for-byte
+ * during development). No official protobuf/gtfs-realtime-bindings library is on the SDK's
+ * dependency allow-list, so this decodes via kotlinx-serialization-protobuf instead, which passes
+ * the allow-list check on a startsWith-prefix technicality (see build.gradle.kts).
  */
 @Serializable
 data class GtfsRtFeedMessage(
@@ -31,7 +31,7 @@ data class GtfsRtFeedMessage(
         entity.mapNotNull { it.tripUpdate }.associateBy { it.trip.tripId }
     }
 
-    /** trip_id -> its VehiclePosition, for the ETA radar screen. */
+    /** trip_id -> its VehiclePosition, used to place live vehicle markers on the Map screen. */
     val vehiclePositionsByTripId: Map<String, GtfsRtVehiclePosition> by lazy {
         entity.mapNotNull { it.vehicle }.associateBy { it.trip.tripId }
     }
@@ -59,18 +59,17 @@ object GtfsRtVehicleStatus {
 }
 
 /**
- * Field numbers here were re-verified by hand-decoding real live bytes from MBTA, RIPTA, *and* RTD
+ * Field numbers here were re-verified by hand-decoding real live bytes from MBTA, RIPTA, and RTD
  * Denver (not just assumed from the public spec, which turned out to be wrong for field 4): 3 and 4
  * were confirmed as genuinely distinct fields by finding MBTA messages where both appear at once
  * with clearly different value ranges (3 = larger, sequence-like numbers; 4 = a small 0-2 enum-like
- * range). No agency's live feed ever sends a `stop_id` string at the top level — the field the
- * public spec places at 4 — so that property doesn't exist here at all; declaring it as a String
- * there is what caused every previous crash (a real varint on the wire, decoded as a string).
- * Fields 7/8 (a bare vehicle-number string and a [GtfsRtVehicleDescriptor]) are unused by this app
- * but still declared, since an undeclared field previously faulted the whole decode instead of
- * being skipped. Field 9 (occupancy_status) is RTD-specific -- present on ~90% of its live vehicles
- * but absent from both MBTA's and RIPTA's feeds -- and unused by this app but declared for the same
- * reason.
+ * range). No agency's live feed ever sends a `stop_id` string at the top level -- the field the
+ * public spec places at 4 -- so that property doesn't exist here; declaring it as a String there is
+ * wrong, since a real varint on the wire would decode incorrectly as a string. Fields 7/8 (a bare
+ * vehicle-number string and a [GtfsRtVehicleDescriptor]) are unused by this app but still declared,
+ * since this hand-rolled decoder faults on any undeclared field rather than skipping it. Field 9
+ * (occupancy_status) is RTD-specific -- present on ~90% of its live vehicles but absent from both
+ * MBTA's and RIPTA's feeds -- and unused by this app but declared for the same reason.
  */
 @Serializable
 data class GtfsRtVehiclePosition(
@@ -92,9 +91,10 @@ data class GtfsRtVehicleDescriptor(
 )
 
 /**
- * lat/lon are proto `float` (4-byte), not `double` — verified against MBTA's live feed bytes.
- * bearing/speed declared for the same reason as [GtfsRtVehiclePosition]'s trailing fields — RIPTA's
- * feed includes them, and an undeclared field faulted the whole decode instead of being skipped.
+ * lat/lon are proto `float` (4-byte), not `double` -- verified against MBTA's live feed bytes.
+ * bearing/speed are declared even though unused, for the same reason as
+ * [GtfsRtVehiclePosition]'s trailing fields: this hand-rolled decoder faults on any undeclared
+ * field rather than skipping it, and RIPTA's live feed includes both.
  */
 @Serializable
 data class GtfsRtPosition(
@@ -105,10 +105,10 @@ data class GtfsRtPosition(
 )
 
 /**
- * Fields 3 (vehicle descriptor) and 4 (timestamp) are unused by this app but declared anyway --
- * RTD Denver sends field 4 on every single live TripUpdate (verified by hand-decoding its real
- * feed bytes), and an undeclared field previously faulted the whole decode instead of being
- * skipped (see [GtfsRtVehiclePosition]'s doc comment). Fields 6-8 are LTC London-specific --
+ * Fields 3 (vehicle descriptor) and 4 (timestamp) are unused by this app but declared anyway,
+ * since this hand-rolled decoder faults on any undeclared field rather than skipping it (see
+ * [GtfsRtVehiclePosition]'s doc comment) -- RTD Denver sends field 4 on every live TripUpdate
+ * (verified by hand-decoding its real feed bytes). Fields 6-8 are LTC London-specific --
  * verified by hand-decoding its live feed, present on every one of its TripUpdates: field 6 is a
  * vendor bundle re-nesting trip_id/start_date/start_time/shape_id plus translated headsign
  * strings; field 7 is always zero-length; field 8 is a short numeric id (block/run-like). All
@@ -132,23 +132,22 @@ data class GtfsRtTripUpdate(
     /**
      * Infers which stop the vehicle currently occupies purely from this TripUpdate's own remaining
      * [stopTimeUpdate] entries, for agencies whose VehiclePositions feed never populates
-     * current_stop_sequence at all -- confirmed empirically for RIPTA (0 of 64 live vehicles had it
-     * set, hand-decoding real feed bytes), unlike MBTA where it's reliably present. Well-behaved
-     * GTFS-RT producers drop already-passed stops from a TripUpdate's own stop_time_update list as
-     * the trip progresses, so the lowest stop_sequence still present is the next stop the vehicle
-     * hasn't yet reached -- the same stop current_stop_sequence would point to together with an
-     * INCOMING_AT/IN_TRANSIT_TO status. Only ever used as a fallback when VehiclePositions itself
-     * came up empty (see TripDetailScreen/HomeScreen's own callers) -- a real current_stop_sequence
-     * is always preferred when available.
+     * current_stop_sequence at all -- confirmed empirically for RIPTA (never populated across live
+     * sampling), unlike MBTA where it's reliably present. Well-behaved GTFS-RT producers drop
+     * already-passed stops from a TripUpdate's own stop_time_update list as the trip progresses, so
+     * the lowest stop_sequence still present is the next stop the vehicle hasn't yet reached -- the
+     * same stop current_stop_sequence would point to together with an INCOMING_AT/IN_TRANSIT_TO
+     * status. Only ever used as a fallback when VehiclePositions itself came up empty; a real
+     * current_stop_sequence is always preferred when available.
      */
     fun inferCurrentStopSequence(): Int? = stopTimeUpdate.mapNotNull { it.stopSequence }.minOrNull()
 }
 
 /**
  * RIPTA's feed also sends start_time/start_date/route_id here (verified by hand-decoding RIPTA's
- * real feed bytes) — declared even though unused, since an undeclared field in a *nested* message
- * desynced the decoder's byte position for everything decoded after it, corrupting the rest of the
- * enclosing VehiclePosition/TripUpdate rather than just being harmlessly skipped. Fields 4
+ * real feed bytes) -- declared even though unused, since an undeclared field inside a *nested*
+ * message desyncs this decoder's byte position for everything after it, corrupting the rest of the
+ * enclosing VehiclePosition/TripUpdate rather than being harmlessly skipped. Fields 4
  * (schedule_relationship) and 6 (direction_id) are RTD-specific -- present on every one of its live
  * trip descriptors -- and declared for the same reason.
  */
@@ -182,7 +181,7 @@ data class GtfsRtStopTimeUpdate(
 /** Field 4 is LTC London-specific -- a second timestamp-shaped varint present on nearly every
  * arrival/departure event in its live feed, hand-verified to genuinely differ from [time] in most
  * samples (not just a duplicate encoding of it) -- purpose unconfirmed, declared unused for the
- * same undeclared-field-faults-decode reason as [GtfsRtTripUpdate]'s doc comment. */
+ * same reason as [GtfsRtTripUpdate]'s doc comment. */
 @Serializable
 data class GtfsRtStopTimeEvent(
     @ProtoNumber(1) val delay: Int? = null,
@@ -193,10 +192,10 @@ data class GtfsRtStopTimeEvent(
 class GtfsRealtimeException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * Fetches and decodes a GTFS-RT feed — TripUpdates and VehiclePositions are separate published
+ * Fetches and decodes a GTFS-RT feed -- TripUpdates and VehiclePositions are separate published
  * feeds but both decode into this same FeedMessage/FeedEntity wrapper (each entity just populates
- * whichever of trip_update/vehicle applies to that feed), so one fetch function covers both.
- * [url] is always a redirect that resolves to the real feed on the client's behalf, so a single
+ * whichever of trip_update/vehicle applies to that feed), so one fetch function covers both. [url]
+ * always resolves through a redirect layer to the real feed on this app's behalf, so a single
  * request here is enough -- no redirect-following needed at this layer.
  */
 object GtfsRealtimeClient {
@@ -221,14 +220,13 @@ object GtfsRealtimeClient {
 private fun secondaryFeedPrefix(index: Int) = "feed${index + 1}:"
 
 /**
- * Looks up a single trip's live TripUpdate from whichever of this agency's realtime feeds
- * actually owns [tripId] -- its own primary feed for an unprefixed id, or the matching
- * [SecondaryGtfsFeed]'s own feed for a "feed{n}:"-prefixed one (see [secondaryFeedPrefix]) --
- * fetching only that ONE feed rather than every feed the agency has, since a caller here always
- * already knows exactly which trip it wants (typically a boarded trip's own id, polled in a
- * loop). Null for a trip_id whose owning feed has no realtime URL, or whose fetch fails or has no
- * matching entry -- identical to every other "not currently live" case this app already treats
- * uniformly.
+ * Looks up a single trip's live TripUpdate from whichever of this agency's realtime feeds owns
+ * [tripId] -- its own primary feed for an unprefixed id, or the matching [SecondaryGtfsFeed]'s
+ * feed for a "feed{n}:"-prefixed one (see [secondaryFeedPrefix]) -- fetching only that one feed
+ * rather than every feed the agency has, since a caller here always already knows exactly which
+ * trip it wants (typically a boarded trip's own id, polled in a loop). Null for a trip_id whose
+ * owning feed has no realtime URL, or whose fetch fails or has no matching entry -- identical to
+ * every other "not currently live" case this app already treats uniformly.
  */
 suspend fun GtfsAgency.fetchTripUpdate(tripId: String): GtfsRtTripUpdate? {
     components.filterIsInstance<SecondaryGtfsFeed>().forEachIndexed { index, feed ->
@@ -278,14 +276,13 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String): GtfsRtVehiclePositi
 /**
  * Result of polling an agency's own realtime feed together with every [SecondaryGtfsFeed]
  * component's -- [primary] is the agency's own fetched [GtfsRtFeedMessage] (null if it has no
- * realtime URL at all, or its fetch failed), kept around so a caller's existing status/staleness
- * handling (offline banners, [GtfsRtFeedHeader.isStale]) stays keyed off the primary feed exactly
- * as it was before secondary feeds existed -- a secondary feed's own freshness isn't surfaced
- * separately today. [byTripId] additionally folds in every reachable secondary feed's own
- * trip_id -> value map, prefixed to match the shared database's trip_ids (see
- * [secondaryFeedPrefix]), so a caller iterating scheduled trips finds live data for a merged
- * secondary-feed trip (e.g. a Bustang trip under RTD Denver) exactly the same way it finds the
- * primary agency's own.
+ * realtime URL, or its fetch failed), kept around so a caller's existing status/staleness handling
+ * (offline banners, [GtfsRtFeedHeader.isStale]) stays keyed off the primary feed exactly as before
+ * secondary feeds existed -- a secondary feed's own freshness isn't surfaced separately today.
+ * [byTripId] additionally folds in every reachable secondary feed's own trip_id -> value map,
+ * prefixed to match the shared database's trip_ids (see [secondaryFeedPrefix]), so a caller
+ * iterating scheduled trips finds a merged secondary-feed trip's live data (e.g. a Bustang trip
+ * under RTD Denver) the same way it finds the primary agency's own.
  */
 class MergedRealtimeFeed<T>(val primary: GtfsRtFeedMessage?, val byTripId: Map<String, T>)
 
@@ -347,12 +344,11 @@ data class ArrivalEta(
 )
 
 /**
- * Converts a GTFS scheduled "HH:MM:SS" time (hour may exceed 24 for a post-midnight trip on
- * [serviceDate]'s service day) to an absolute Unix epoch-seconds instant, for comparison against
- * GTFS-RT's absolute timestamps. [zoneId] must be the specific agency's own -- see
- * [todayForGtfs]'s doc comment, the same reasoning applies here: a GTFS time string is only
- * meaningful relative to the agency's own clock, not whatever zone the rider's device happens to
- * be in.
+ * Converts a GTFS scheduled "HH:MM:SS" time (hour may exceed 24 for a post-midnight trip still
+ * counted on [serviceDate]'s service day) to an absolute Unix epoch-seconds instant, for comparison
+ * against GTFS-RT's absolute timestamps. [zoneId] must be the specific agency's own -- see
+ * [todayForGtfs]'s doc, the same reasoning applies: a GTFS time string is only meaningful relative
+ * to the agency's own clock, not whatever zone the rider's device happens to be in.
  */
 fun gtfsTimeToEpochSeconds(rawTime: String, serviceDate: LocalDate, zoneId: ZoneId): Long? {
     val parts = rawTime.split(":")
@@ -365,7 +361,7 @@ fun gtfsTimeToEpochSeconds(rawTime: String, serviceDate: LocalDate, zoneId: Zone
 
 /**
  * Combines a static scheduled time with a matching GTFS-RT StopTimeUpdate (if any) into an ETA
- * and status. With no realtime match, returns a non-live ETA with a null status — callers should
+ * and status. With no realtime match, returns a non-live ETA with a null status -- callers should
  * render that as "just the scheduled time, no badge" per spec. [zoneId] should always be the
  * specific trip's own agency's [GtfsAgency.zoneId] -- see [gtfsTimeToEpochSeconds]'s own doc.
  */

@@ -48,11 +48,10 @@ class ReachedStopModal(
  * (matches "the stop they just alighted at" from the feature spec, and self-guards against
  * re-triggering the modal on a later poll, since the boarded trip will no longer match once this
  * runs) and shows the celebration via [LightModalManager], which draws on top of whatever screen
- * is current. Shared between [com.thelightphone.transit.TripDetailViewModel] (only checks while
- * showing THIS trip's own detail screen) and [com.thelightphone.transit.HomeScreenViewModel]
- * (checks regardless of which trip's detail screen, if any, is open) -- either way, this only ever
- * runs while ONE of those two screens is actually visible and polling, matching
- * [BoardedTripPreferences]'s own doc comment on why there's no background equivalent.
+ * is current. Shared between [TripDetailViewModel] (only checks while showing THIS trip's own
+ * detail screen) and [HomeScreenViewModel] (checks regardless of which trip's detail screen, if
+ * any, is open) -- either way, this only runs while one of those two screens is visible and
+ * polling, matching [BoardedTripPreferences]'s own doc on why there's no background equivalent.
  */
 suspend fun checkReachedAlightStop(
     boardedTrip: BoardedTrip,

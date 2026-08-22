@@ -13,14 +13,13 @@ import com.thelightphone.sdk.ui.LightIcons
 import java.io.File
 
 /**
- * The "Current Trip" entry point every screen's own [com.thelightphone.sdk.ui.LightTopBar] shows in
- * its rightButton slot -- present whenever there's a boarded trip (see [BoardedTripPreferences]),
- * gone otherwise, so it's always one tap away from wherever the rider happens to be in the app, not
- * just HomeScreen's own dedicated (vehicle-icon + Play) entry. Called from within a screen's own
- * Content() (needs [dataStore]/[filesDir] from its own `lightContext`, both protected there) rather
- * than as a receiver/extension, since [com.thelightphone.sdk.SimpleLightScreen.navigateTo] can't be
- * called from outside that class either -- [onOpenTripDetail] is the caller's own
- * `navigateTo { TripDetailScreen(...) }` wrapper.
+ * The "Current Trip" entry point every screen's own [LightTopBar] shows in its rightButton slot --
+ * present whenever there's a boarded trip (see [BoardedTripPreferences]), gone otherwise, so it's
+ * always one tap away from wherever the rider happens to be, not just HomeScreen's own dedicated
+ * (vehicle-icon + Play) entry. Called from within a screen's own Content() (needs
+ * [dataStore]/[filesDir] from its own `lightContext`) rather than as a receiver/extension, since
+ * [SimpleLightScreen.navigateTo] can't be called from outside that class either --
+ * [onOpenTripDetail] is the caller's own `navigateTo { TripDetailScreen(...) }` wrapper.
  */
 @Composable
 fun currentTripTopBarButton(

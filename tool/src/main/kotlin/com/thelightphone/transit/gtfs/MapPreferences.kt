@@ -48,25 +48,24 @@ class MapPreferences(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { prefs -> prefs[doubleTapStationKey] = enabled }
     }
 
-    /** Off by default, same reasoning as [tapHoldArrivalsEnabledFlow] -- expanding a nearby stop
-     * to also track ITS vehicles is an extra opt-in on top of the Map screen's default (just the
-     * selected stop's own vehicles). Controlled from the Settings screen rather than a toggle
-     * drawn directly on the Map canvas -- see [com.thelightphone.transit.MapViewModel.nearbyVehiclesEnabled],
-     * which now just reads this persisted value instead of owning its own in-memory one. */
+    /** Off by default, same reasoning as [tapHoldArrivalsEnabledFlow] -- expanding a nearby stop to
+     * also track ITS vehicles is an extra opt-in on top of the Map screen's default (just the
+     * selected stop's own vehicles). Controlled from the Settings screen rather than a toggle on
+     * the Map canvas -- see [com.thelightphone.transit.MapViewModel.nearbyVehiclesEnabled], which
+     * reads this persisted value instead of owning its own in-memory one. */
     val trackTappedStopsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[trackTappedStopsKey] ?: false }
 
     suspend fun setTrackTappedStopsEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[trackTappedStopsKey] = enabled }
     }
 
-    /** On by default -- the Map screen and Station sub-map drop the usual schedule-anchored
-     * vehicle matching entirely and instead plot EVERY live vehicle (any route, any agency feed)
-     * whose position falls within the map's own rendered radius, labeled with just its route
-     * short name until tapped (see BusMarker.shortLabel/tripDescription). Turned off, the map
-     * reverts to the narrower default: only vehicles whose own trip is actually scheduled to
-     * serve a stop currently in view, matched against that stop's own upcoming departures rather
-     * than shown by raw position alone -- fewer markers, but each one is guaranteed relevant to
-     * a stop on screen. */
+    /** On by default -- the Map screen and Station sub-map drop the usual schedule-anchored vehicle
+     * matching and instead plot every live vehicle (any route, any agency feed) whose position
+     * falls within the map's rendered radius, labeled with just its route short name until tapped
+     * (see BusMarker.shortLabel/tripDescription). Off, the map reverts to the narrower default:
+     * only vehicles whose own trip is scheduled to serve a stop currently in view, matched
+     * against that stop's upcoming departures -- fewer markers, but each is guaranteed relevant
+     * to a stop on screen. */
     val seeEverythingEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[seeEverythingKey] ?: true }
 
     suspend fun setSeeEverythingEnabled(enabled: Boolean) {

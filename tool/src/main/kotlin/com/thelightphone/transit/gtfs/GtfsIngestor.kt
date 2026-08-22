@@ -33,20 +33,18 @@ private const val MAX_REDIRECTS = 5
 fun gtfsDbFile(filesDir: File, agency: GtfsAgency): File =
     File(filesDir, "gtfs/${agency.id}/transit.db")
 
-/** Deletes every agency's downloaded/ingested GTFS data (zip, database, and cached ETag/schema
- * metadata) -- the Settings screen's "Clear schedule cache" action. A no-op if nothing's been
- * downloaded yet. Bumps [GtfsCacheClearedSignal] so HomeScreenViewModel can react and re-ingest
- * whichever agency is currently selected, since deleting the files underneath it otherwise leaves
- * that agency's screens pointed at a database that no longer exists. */
+/** Deletes every agency's downloaded schedule (zip, database, and cached ETag/schema metadata) --
+ * the Settings screen's "Clear schedule cache" action. A no-op if nothing's downloaded yet. Bumps
+ * [GtfsCacheClearedSignal] so HomeScreenViewModel can re-ingest the currently selected agency,
+ * since otherwise its screens would point at a database that no longer exists. */
 fun clearAllCachedSchedules(filesDir: File) {
     File(filesDir, "gtfs").deleteRecursively()
     GtfsCacheClearedSignal.version.value++
 }
 
-/** Bumped by [clearAllCachedSchedules] -- a plain in-process counter (not a DataStore-backed
- * preference) since this only needs to signal other live screens for the remainder of this
- * process, never to persist across app restarts. Same "shared singleton Flow" pattern as
- * [HomeVisibility]. */
+/** Bumped by [clearAllCachedSchedules] -- a plain in-process counter (not DataStore-backed) since
+ * this only needs to signal other live screens for the rest of this process, never to persist
+ * across restarts. Same "shared singleton Flow" pattern as [HomeVisibility]. */
 object GtfsCacheClearedSignal {
     val version = MutableStateFlow(0)
 }
@@ -67,10 +65,10 @@ class GtfsIngestor(
 
     /**
      * Re-downloads only when the feed has actually changed: a HEAD request's ETag/Last-Modified is
-     * compared against what was stored alongside the cached database from the last successful
-     * download. Unchanged -> the existing SQLite database is used as-is, no network transfer beyond
-     * the HEAD request. Changed, or nothing cached yet, or the check itself is inconclusive -> falls
-     * back to a full re-download, since that's always safe (just not always necessary).
+     * compared against what was cached from the last successful download. Unchanged means the
+     * existing SQLite database is used as-is. Anything else -- changed, nothing cached yet, or an
+     * inconclusive check -- falls back to a full re-download, since that's always safe, just not
+     * always necessary.
      */
     suspend fun ingest(agency: GtfsAgency, onStatus: (GtfsIngestStatus) -> Unit) = ingestMutex.withLock {
         ingestInternal(agency, onStatus)
@@ -91,12 +89,10 @@ class GtfsIngestor(
         val schemaVersionFile = File(agencyDir, "schema_version.txt")
         val cachedSchemaVersion = schemaVersionFile.takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull()
 
-        // Checked before any network activity at all (not just before the zip download) -- the
-        // "Only download over Wi-Fi" setting's whole point is that a rider on cellular never pays
-        // for a GTFS refresh, including the small HEAD-only update check below. Whatever's already
-        // on disk (possibly stale, possibly nothing at all) is left exactly as it is; the caller
-        // (HomeScreenViewModel) is what decides whether a stale-but-present database is still
-        // usable, and retries once Wi-Fi comes back.
+        // Checked before any network activity at all, not just the zip download -- "Only download over
+        // Wi-Fi" means a rider on cellular never pays for a refresh, including the HEAD-only update check
+        // below. Whatever's already on disk is left as-is; HomeScreenViewModel decides whether a
+        // stale-but-present database is still usable, and retries once Wi-Fi comes back.
         if (networkPreferences.wifiOnlyDownloadsEnabledFlow.first() && !connectivity.currentStatus.isWifi) {
             onStatus(GtfsIngestStatus.WaitingForWifi)
             return
@@ -209,19 +205,15 @@ class GtfsIngestor(
     /**
      * Some feeds (e.g. RTD Denver's static GTFS feed) redirect through a hop that needs resolving
      * relative to the URL that produced it. Ktor's HttpRedirect plugin refuses to follow an
-     * HTTPS->HTTP downgrade by default (and Android blocks cleartext traffic anyway), so it hands
-     * back the original redirect response instead of an error. Redirects are followed manually
-     * here, upgrading any http:// hop to https:// rather than ever actually connecting over plain
-     * HTTP.
+     * HTTPS->HTTP downgrade by default (and Android blocks cleartext traffic anyway), so redirects
+     * are followed manually here, upgrading any http:// hop to https:// rather than connecting over
+     * plain HTTP.
      *
      * Streams the response body straight to [destination] via [prepareGet]/[bodyAsChannel] rather
-     * than `client.get(url)` + `response.body<ByteArray>()` -- the latter (via Ktor's SavedCall)
-     * buffers the *entire* response into one in-memory byte array before it's ever written to disk,
-     * which OOM'd on a real Light Phone III for STM Montreal's multi-hundred-MB zip (confirmed via
-     * on-device logcat: `OutOfMemoryError` inside `SavedCallKt.save`/`SourcesKt.readByteArray`,
-     * against a ~128MB heap growth limit). Streaming keeps memory use bounded regardless of feed
-     * size. This is separate from [COMMIT_BATCH_SIZE]'s fix, which addresses OOM risk during
-     * parsing/loading, not downloading.
+     * than `client.get(url)` + `response.body<ByteArray>()`, which buffers Ktor's entire response
+     * into memory before it's written to disk -- fine for small feeds but OOMs on multi-hundred-MB
+     * ones like STM Montreal's. Streaming keeps memory use bounded regardless of feed size. Separate
+     * from [COMMIT_BATCH_SIZE]'s fix, which addresses OOM risk during parsing, not downloading.
      */
     private suspend fun downloadZip(url: String, destination: File) {
         val client = HttpClient(OkHttp) {
@@ -253,13 +245,11 @@ class GtfsIngestor(
         }
     }
 
-    /** No outer transaction wraps the whole zip here -- each table's own [readCsvEntry] call
-     * commits itself in batches instead (see that function's own doc for why a single transaction
-     * spanning a table the size of STM Montreal's stop_times.txt crashed on real hardware). The
-     * ingest pipeline's actual safety net is [ingestInternal]'s temp-file-then-atomic-move, not
-     * this function's own atomicity -- a failure partway through here just leaves the temp database
-     * mid-load and never reaches the move, so the previous good database (if any) is untouched
-     * either way. */
+    /** No outer transaction wraps the whole zip -- each table's own [readCsvEntry] commits itself in
+     * batches instead (see that function's doc for why one transaction spanning a table the size of
+     * STM Montreal's stop_times.txt crashed on real hardware). The real safety net is
+     * [ingestInternal]'s temp-file-then-atomic-move: a failure partway through here just leaves the
+     * temp database mid-load and never reaches the move, so the previous good database is untouched. */
     private fun parseAndLoad(zipFile: File, db: SQLiteDatabase, idPrefix: String, secondaryFeedName: String?) {
         ZipFile(zipFile).use { archive ->
             val entries = archive.entries()
@@ -277,8 +267,8 @@ class GtfsIngestor(
 
     companion object {
         /** [secondaryFeedName] (see [SecondaryGtfsFeed.name]) is only consulted by [loadRoutes] and
-         * [loadStops] -- every other loader here ignores its fourth parameter entirely, it just
-         * needs to accept one so all eight can share one map's function type. */
+         * [loadStops]. Every other loader here ignores its fourth parameter entirely; it just
+         * needs to accept one so all nine can share one map's function type. */
         private val TABLE_LOADERS: Map<String, (SQLiteDatabase, BufferedReader, String, String?) -> Unit> = mapOf(
             "routes.txt" to ::loadRoutes,
             "trips.txt" to { db, reader, idPrefix, _ -> loadTrips(db, reader, idPrefix) },
@@ -294,11 +284,10 @@ class GtfsIngestor(
 }
 
 /**
- * Resolves absolute and relative redirects while never following a redirect back to plain HTTP.
- * Needed because some feeds (e.g. RTD Denver's static GTFS feed, which 308s every request to a bare
- * "/api/download?..." path) send a *relative* Location -- a plain `startsWith("http://")` check let
- * that through unresolved, straight to the HTTP client, which parsed the bare path as a request to
- * https://localhost/... and failed with a cleartext error.
+ * Resolves absolute and relative redirects while never following one back to plain HTTP. Needed
+ * because some feeds (e.g. RTD Denver's, which 308s to a bare "/api/download?..." path) send a
+ * relative Location -- a plain `startsWith("http://")` check let that through unresolved, parsed as
+ * a request to https://localhost/... and failing with a cleartext error.
  */
 private fun secureRedirectUrl(currentUrl: String, location: String): String {
     val resolved = URI(currentUrl).resolve(location).toString()
@@ -324,11 +313,9 @@ private fun clearGtfsTables(db: SQLiteDatabase) {
 private fun prefixedId(prefix: String, id: String?): String? = id?.takeIf { it.isNotEmpty() }?.let { prefix + it }
 
 /** Disambiguates a secondary feed's own route/stop name against the parent agency's -- e.g.
- * Bustang's "West Line" merged under RTD Denver becomes "West Line - Bustang" so a rider can tell
- * it's not one of RTD's own, unless [secondaryFeedName] is already part of [name] (some of
- * Bustang's own text already spells this out, e.g. trip_headsigns like "West - Bustang West
- * Line"), in which case appending it again would just be redundant. [secondaryFeedName] is null
- * for the primary feed itself -- nothing is ever appended to an agency's own routes/stops. */
+ * Bustang's "West Line" merged under RTD Denver becomes "West Line - Bustang", unless
+ * [secondaryFeedName] is already part of [name]. Null for the primary feed itself, so nothing is
+ * ever appended to an agency's own routes/stops. */
 private fun disambiguatedName(name: String?, secondaryFeedName: String?): String? {
     if (name == null || secondaryFeedName == null || name.contains(secondaryFeedName, ignoreCase = true)) return name
     return "$name - $secondaryFeedName"
@@ -487,11 +474,10 @@ private fun loadCalendar(db: SQLiteDatabase, reader: BufferedReader, idPrefix: S
     }
 }
 
-/** Attribution text is only ever shown for the agency's *primary* feed (idPrefix == "") -- a
- * secondary merged feed (e.g. RTD's own Bustang addition) never overwrites the primary agency's own
- * feed_info/agency row, since [GtfsRepository.getFeedAttribution] always wants "whose feed is this
- * screen showing", not whichever feed happened to parse last. See [clearGtfsTables] for why this
- * doesn't also need its own delete call here. */
+/** Attribution text is only ever shown for the agency's primary feed (idPrefix == "") -- a
+ * secondary merged feed never overwrites the primary agency's own feed_info/agency row, since
+ * [GtfsRepository.getFeedAttribution] wants "whose feed is this", not whichever parsed last. See
+ * [clearGtfsTables] for why this doesn't need its own delete call here. */
 private fun loadFeedInfo(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     if (idPrefix.isNotEmpty()) return
     val stmt = db.compileStatement(
@@ -540,10 +526,9 @@ private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader, idPref
     }
 }
 
-/** directions.txt is an optional GTFS extension -- absent for most agencies, in which case this
- * table simply stays empty and GtfsRepository.getDirections falls back to a headsign-derived
- * label. Plain INSERT (not OR REPLACE) is safe since (route_id, direction_id) is documented as a
- * guaranteed-unique key within the file itself. */
+/** directions.txt is an optional GTFS extension, absent for most agencies -- when empty, this
+ * table stays empty and GtfsRepository.getDirections falls back to a headsign-derived label. Plain
+ * INSERT (not OR REPLACE) is safe since (route_id, direction_id) is a guaranteed-unique key. */
 private fun loadDirections(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         "INSERT INTO directions (route_id, direction_id, direction, direction_destination) VALUES (?, ?, ?, ?)"

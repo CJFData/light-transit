@@ -8,11 +8,10 @@ package com.thelightphone.transit.gtfs
  *
  * Its own GTFS-RT TripUpdates/VehiclePositions feeds live on RTD's open-data host under a
  * "cdot/Bustang_" prefixed path, distinct from RTD's own "rtd/" feeds -- verified live and
- * hand-decoded byte-for-byte on 2026-08-07 (field-by-field, via a raw wire-format Python decode
- * script, same approach as every other agency added so far): every field on the wire already
- * matches GtfsRealtime.kt's existing schema (populated by MBTA/RIPTA/RTD/LTC's own feeds), with
- * nothing undeclared -- unlike every other agency added so far, this one needed no schema changes
- * at all.
+ * hand-decoded byte-for-byte, field-by-field, via a raw wire-format Python decode script, same
+ * approach used for every other agency here. Every field on the wire already matches
+ * GtfsRealtime.kt's existing schema, with nothing undeclared -- no schema changes were needed for
+ * this one.
  */
 val BustangSecondaryFeed = SecondaryGtfsFeed(
     name = "Bustang",
@@ -24,13 +23,12 @@ val BustangSecondaryFeed = SecondaryGtfsFeed(
 /**
  * LA Metro (LACMTA) publishes bus and rail as two separate static GTFS zips rather than one
  * combined feed -- merged here the same way Bustang merges into RTD, since it's the same real
- * operator just split for publishing convenience, not two agencies a rider would think of
- * separately. Realtime: no [SecondaryGtfsFeed] URLs set below since none exists in a form this app
- * can use yet -- LA Metro's only live vehicle/trip data is Swiftly (a third-party platform, gated
- * behind an API-key application process, and documented by Swiftly itself as server-to-server, not
- * meant for individual client polling) or api.metro.net (a custom JSON REST API despite its
- * "GTFS-rt" branding -- not GTFS-RT protobuf at all, so it wouldn't decode via
- * [GtfsRealtimeClient.fetchFeed] without a bespoke adapter, not a URL swap).
+ * operator just split for publishing convenience. Realtime: no [SecondaryGtfsFeed] URLs set below
+ * since none exists in a form this app can use yet -- LA Metro's only live vehicle/trip data is
+ * Swiftly (a third-party platform, gated behind an API-key application, and documented by Swiftly
+ * itself as server-to-server, not meant for individual client polling) or api.metro.net (a custom
+ * JSON REST API rather than actual GTFS-RT protobuf, so wiring it in would need custom translation
+ * code, not just a URL swap).
  */
 val LaMetroRailSecondaryFeed = SecondaryGtfsFeed(
     name = "Rail",

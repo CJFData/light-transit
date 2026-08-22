@@ -8,10 +8,10 @@ import java.io.File
  * device won't pick up on its own. `CREATE TABLE IF NOT EXISTS` only runs during a real ingest
  * (see [openGtfsDatabase]/[GtfsIngestor]), and ingest is normally skipped whenever the remote
  * feed's ETag/Last-Modified hasn't changed -- so a cached database from before a schema change
- * would otherwise keep silently missing the new table/column forever, until that agency's feed
- * happens to publish an update for unrelated reasons. [GtfsIngestor] persists this value
- * alongside each cached feed's metadata and forces one full re-ingest whenever it doesn't match,
- * independent of the feed's own ETag/Last-Modified.
+ * would otherwise keep silently missing the new table/column, until that agency's feed happens to
+ * publish an update for unrelated reasons. [GtfsIngestor] persists this value alongside each
+ * cached feed's metadata and forces one full re-ingest whenever it doesn't match, independent of
+ * the feed's own ETag/Last-Modified.
  */
 internal const val GTFS_SCHEMA_VERSION = 1
 
@@ -104,11 +104,11 @@ private object GtfsSchema {
         ) WITHOUT ROWID
         """,
         "CREATE INDEX IF NOT EXISTS idx_calendar_dates_service_id ON calendar_dates(service_id)",
-        // feed_info.txt is optional per the GTFS spec, so agency.txt (required) is kept as a
-        // fallback attribution source -- see GtfsRepository.getFeedAttribution. Neither table has
-        // a natural single-row key (feed_info.txt has none at all; a feed can list several
-        // agency.txt rows), so both are just re-populated wholesale on each ingest, same as every
-        // other table here, and read back as "whichever row comes first".
+        // feed_info.txt is optional per the GTFS spec, so agency.txt (required) is kept as a fallback
+        // attribution source -- see GtfsRepository.getFeedAttribution. Neither table has a natural
+        // single-row key (feed_info.txt has none at all; a feed can list several agency.txt rows), so
+        // both are re-populated wholesale on each ingest, same as every other table here, and read
+        // back as "whichever row comes first".
         """
         CREATE TABLE IF NOT EXISTS feed_info (
             feed_publisher_name TEXT,
@@ -141,10 +141,10 @@ private object GtfsSchema {
  * Opens (creating if needed) the SQLite database backing one agency's ingested GTFS data.
  *
  * Uses [SQLiteDatabase.openOrCreateDatabase]'s file-based entry point rather than
- * [android.database.sqlite.SQLiteOpenHelper] or Room, because both of those require an
- * android.content.Context, which isn't reachable from tool code (SealedLightContext keeps
- * its Context internal, and importing android.content.Context directly is blocked by the SDK
- * build plugin).
+ * [android.database.sqlite.SQLiteOpenHelper] or Room, since both require an
+ * android.content.Context, which isn't reachable from tool code (SealedLightContext keeps its
+ * Context internal, and importing android.content.Context directly is blocked by the SDK build
+ * plugin).
  */
 fun openGtfsDatabase(dbFile: File): SQLiteDatabase {
     dbFile.parentFile?.mkdirs()

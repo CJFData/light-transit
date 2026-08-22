@@ -12,19 +12,18 @@ import java.time.ZoneId
  * their own; every URL below is now a redirect that resolves to HTTPS, so no cleartext exception
  * is needed for any agency here (the old `:netconfig` module is gone).
  *
- * To add a new agency: append an entry below with a unique [id] (uniqueness is enforced at
- * class-load time, see the companion `init` block), its [displayName], its static [feedUrl], and
- * its [timeZoneId] (copy it straight from that feed's own agency.txt `agency_timezone` column --
- * don't guess from the city name). Leave either realtime URL null if that feed doesn't exist.
- * Nothing else needs a matching change -- every screen and preference store iterates [entries]
- * rather than switching on individual agencies. Three things worth checking against the agency's
- * *live* feed before trusting a new entry: (1) all three URLs should resolve to plain HTTPS, same
- * as RIPTA/LTC above; (2) GtfsRealtime.kt's hand-rolled protobuf schema only
- * declares the specific field numbers seen in MBTA/RIPTA/RTD's real feeds so far -- an undeclared
- * field on a new agency's feed can fault the whole GTFS-RT decode (see that file's doc comments),
- * so hand-verify a live sample against it; (3) [timeZoneId] only matters once it differs from
+ * To add a new agency: append an entry below with a unique [id] (enforced at class-load time, see
+ * the companion `init` block), its [displayName], its static [feedUrl], and its [timeZoneId]
+ * (copy it straight from that feed's own agency.txt `agency_timezone` column -- don't guess from
+ * the city name). Leave either realtime URL null if that feed doesn't exist. Nothing else needs a
+ * matching change -- every screen and preference store iterates [entries] rather than switching on
+ * individual agencies. Three things worth checking against the agency's live feed first: (1) all
+ * three URLs should resolve to plain HTTPS, same as RIPTA/LTC above; (2) GtfsRealtime.kt's
+ * hand-rolled protobuf schema only declares field numbers seen in agencies added so far -- an
+ * undeclared field on a new feed can fault the whole GTFS-RT decode (see that file's doc
+ * comments), so hand-verify a live sample; (3) [timeZoneId] only matters once it differs from
  * every agency added before it -- verify it against the feed's own agency.txt regardless, since a
- * wrong value fails silently (no crash, just wrong ETAs) rather than loudly.
+ * wrong value fails silently rather than loudly.
  */
 enum class GtfsAgency(
     val id: String,
@@ -34,18 +33,17 @@ enum class GtfsAgency(
     val realtimeVehiclePositionsUrl: String?,
     /** This agency's own IANA timezone, exactly as declared in its GTFS feed's agency.txt
      * `agency_timezone` column (verified against each agency's real feed, not assumed) -- every
-     * GTFS scheduled time is only meaningful relative to the agency's OWN clock, not the rider's
+     * GTFS scheduled time is only meaningful relative to the agency's own clock, not the rider's
      * device's, so this (not `ZoneId.systemDefault()`) is what [todayForGtfs]/
-     * [currentGtfsTimeOfDay]/[gtfsTimeToEpochSeconds] must be anchored to. This only differs from
-     * the device's own zone when the rider's phone isn't physically in the agency's own timezone
-     * (checking a schedule remotely, or a manually-overridden clock) -- MBTA/RIPTA/LTC all happen
-     * to share Eastern with this project's own test devices, which is why RTD (the first
-     * Mountain-zone agency added) was the first to expose this having been wrong. */
+     * [currentGtfsTimeOfDay]/[gtfsTimeToEpochSeconds] must be anchored to. Only differs from the
+     * device's own zone when the phone isn't physically in the agency's timezone -- MBTA/RIPTA/LTC
+     * all happen to share Eastern with this project's test devices, which is why RTD (the first
+     * Mountain-zone agency) was the first to expose this having been wrong. */
     val timeZoneId: String,
-    /** Optional extra data sources beyond the feed URLs above -- see [AgencyComponent]. Empty
-     * for any agency that doesn't have one (e.g. RIPTA, today). A [SecondaryGtfsFeed] entry here
-     * is how an agency merges in another feed's static (and, if it ever publishes one, realtime)
-     * data -- see [GtfsAgency.RTD]'s Bustang entry. */
+    /** Optional extra data sources beyond the feed URLs above -- see [AgencyComponent]. Empty for
+     * any agency that doesn't have one. A [SecondaryGtfsFeed] entry here is how an agency merges
+     * in another feed's static (and, if it ever publishes one, realtime) data -- see
+     * [GtfsAgency.RTD]'s Bustang entry. */
     val components: List<AgencyComponent> = emptyList(),
 ) {
     MBTA(
@@ -101,25 +99,14 @@ enum class GtfsAgency(
     // one-time regional-feed sample -- a single snapshot, not proof an agency has no live data.
     // BART's VehiclePositions is the one confirmed exception (see that entry).
     //
-    // Static feeds stay independent: 26 entries below have a real, independently-verified
-    // direct-download static GTFS URL (agency's own domain or an aggregator it actually links to,
-    // same as Caltrain's Trillium URL) -- cross-checked against MobilityData's own catalog
-    // (github.com/MobilityData/mobility-database-catalogs) 2026-08-20, which turned up 4 agencies
-    // (Union City Transit, VINE Transit, Commute.org Shuttles, FAST) that an earlier manual search
-    // had missed and originally routed through 511 instead -- moved to direct here once
-    // MobilityData's own listed URL was independently confirmed live (still physically grouped
-    // with the 511-only entries below rather than moved up here, since grouping is cosmetic --
-    // feedUrl is what actually governs behavior). That same pass found 3 agencies (ACE, Petaluma
-    // Transit, SMART) whose then-current direct URL was one MobilityData's catalog marks
-    // deprecated in favor of 511 -- moved to 511 rather than keep a deprecated source live-but-
-    // unsupported (see each entry's own comment). The other 14 go through 511's datafeed API
-    // instead -- the one place this group still uses a per-agency 511 route (that API has no
-    // regional equivalent; still gets the proxy's normal 6h static-cache treatment) -- 10 of those
-    // because no independently-discoverable static feed exists at all, SamTrans because its only
-    // direct download is an unstable CMS media-asset link, and the 3 deprecated-direct agencies
-    // above (see each entry's own comment). Every timezone was confirmed against the feed's own
-    // agency.txt except those 14, which used the well-established America/Los_Angeles regional
-    // default instead, since they can't be downloaded without the proxy's own server-side key.
+    // Static feeds stay independent, and prefer a direct download from the agency's own domain (or
+    // an aggregator it actually links to, e.g. Caltrain's Trillium URL) over 511's datafeed API. An
+    // entry only routes its static feed through 511 when no independent download exists, or the
+    // one that does is no longer current -- see that entry's own comment. Agencies whose static
+    // feed goes through 511 generally use the region's America/Los_Angeles timezone default rather
+    // than a per-feed agency.txt lookup, since they can't be downloaded without the proxy's own
+    // server-side key -- AC Transit is the one exception, its `US/Pacific` value confirmed
+    // directly from the feed before it moved to 511.
 
     /** VehiclePositions always comes back empty here -- a real, freshly-timestamped 0-entity
      * FeedMessage, not a caching/rate-limit artifact (confirmed by cache-busting, by comparing
@@ -129,8 +116,8 @@ enum class GtfsAgency(
      * anywhere -- structurally absent, not a sampling-window gap. Costs only the
      * moving-vehicle-dot-on-map visualization; ETAs come from TripUpdates alone, and
      * TripDetailScreen's live current-stop indicator still works via inferCurrentStopSequence()
-     * (the same fallback RIPTA's feed relies on). TripUpdates: 43/43 sampled trip_ids matched
-     * exactly against this agency's own static trips.txt. */
+     * (the same fallback RIPTA's feed relies on). TripUpdates trip_ids have matched cleanly
+     * against this agency's own static trips.txt in sampling so far. */
     BART(
         "bart",
         "BART",
@@ -140,11 +127,8 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "BA")),
     ),
-    /** 589/589 sampled TripUpdates trip_ids and 269/269 sampled VehiclePositions trip_ids matched
-     * exactly against Muni's own static trips.txt. ~1.9M stop_times rows (~37% of STM's row
-     * count) -- real size, should be fine under the streaming-download/batched-commit fixes
-     * already shipped, but worth a real device ingest test before trusting it the way STM's own
-     * test was needed. */
+    /** A large feed (~1.9M stop_times rows) -- already covered by the streaming-download/batched-
+     * commit fixes shipped for STM Montreal's similarly large feed, no size concern. */
     SFMTA_MUNI(
         "sfmta_muni",
         "SFMTA Muni",
@@ -154,15 +138,13 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SF")),
     ),
-    /** Static feed URL embeds a token AC Transit itself publishes as a public documentation
-     * example (not a secret). Realtime comes from the shared regional feed rather than AC
-     * Transit's own domain (needs an individually-registered token this project never obtained).
-     * timeZoneId is `US/Pacific` exactly as declared in this feed's own agency.txt (a legacy
-     * tzdata alias -- resolves fine via ZoneId.of(), left as-is per this file's own rule). */
+    /** Static feed routed through 511's datafeed API rather than a direct URL. timeZoneId is
+     * `US/Pacific` exactly as declared in this feed's own agency.txt (a legacy tzdata alias --
+     * resolves fine via ZoneId.of(), left as-is per this file's own rule). */
     AC_TRANSIT(
         "ac_transit",
         "AC Transit",
-        "https://api.actransit.org/transit/gtfs/download?token=2512B81107A09D2DC44895CDDC650D47",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFAC/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFAC/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFAC/vehiclepositions",
         timeZoneId = "US/Pacific",
@@ -202,9 +184,9 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CC")),
     ),
-    /** ACE's own CDN URL still resolved live as of 2026-08-20, but MobilityData's catalog marks it
-     * deprecated in favor of 511's datafeed API -- switched to that instead of keeping a
-     * deprecated source live-but-unsupported. Tiny feed (~10-station commuter rail line). */
+    /** ACE's own CDN URL still resolves live, but is no longer current -- switched to 511's
+     * datafeed API instead of keeping a deprecated source live-but-unsupported. Tiny feed
+     * (~10-station commuter rail line). */
     ACE(
         "ace",
         "ACE",
@@ -302,9 +284,9 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MV")),
     ),
-    /** The Trillium URL Petaluma Transit's own site links to still resolved live as of
-     * 2026-08-20, but MobilityData's catalog marks it deprecated in favor of 511's datafeed API --
-     * switched to that instead of keeping a deprecated source live-but-unsupported. */
+    /** The Trillium URL Petaluma Transit's own site links to still resolves live, but is no
+     * longer current -- switched to 511's datafeed API instead of keeping a deprecated source
+     * live-but-unsupported. */
     PETALUMA_TRANSIT(
         "petaluma_transit",
         "Petaluma Transit",
@@ -325,9 +307,8 @@ enum class GtfsAgency(
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "RV")),
     ),
     /** sonomamarintrain.org's own site has no direct GTFS link -- Trillium was SMART's registered
-     * source, and that URL still resolved live as of 2026-08-20, but MobilityData's catalog marks
-     * it deprecated in favor of 511's datafeed API -- switched to that instead of keeping a
-     * deprecated source live-but-unsupported. */
+     * source, and that URL still resolves live, but is no longer current -- switched to 511's
+     * datafeed API instead of keeping a deprecated source live-but-unsupported. */
     SMART(
         "smart",
         "SMART",
@@ -347,11 +328,9 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SB")),
     ),
-    /** Trillium-hosted, confirmed live. Tiny feed. MobilityData's catalog flags this feed
-     * "inactive" (re-checked 2026-08-20) -- the URL itself still returns a real, current-looking
-     * GTFS zip, so this may just mean MobilityData isn't actively monitoring it rather than the
-     * service having actually shut down; worth a periodic re-check rather than trusting either
-     * signal alone. */
+    /** Trillium-hosted, confirmed live. Tiny feed. Flagged inactive elsewhere, but the URL
+     * itself still returns a real, current-looking GTFS zip -- worth a periodic re-check rather
+     * than trusting that flag alone. */
     SAN_LEANDRO_LINKS(
         "san_leandro_links",
         "San Leandro LINKS",
@@ -361,11 +340,10 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SL")),
     ),
-    /** Static feed routed through 511's datafeed API rather than SamTrans' own domain -- their
-     * only direct download is a CMS media-asset link (samtrans.com/media/37384/download) with a
-     * numeric ID that isn't guaranteed stable across their own file replacements, unlike every
-     * other direct-download entry in this group. Confirmed live in this project's own
-     * regional-feed sample. */
+    /** Static feed routed through 511's datafeed API rather than a direct URL -- SamTrans' only
+     * public download is a CMS media-asset link with no independently-stable identifier to build
+     * a permanent URL around, so 511 is the more durable source here. Confirmed live in this
+     * project's own regional-feed sample. */
     SAMTRANS(
         "samtrans",
         "SamTrans",
@@ -390,9 +368,7 @@ enum class GtfsAgency(
     /** Santa Rosa CityBus' own Syncromatics vendor subdomain, confirmed live -- serves a real zip
      * (PK magic bytes, valid agency.txt/stops.txt entries) despite a misleading `text/plain`
      * response content-type, verified by inspecting the raw bytes directly rather than trusting
-     * the header. Not in MobilityData's catalog at all (checked 2026-08-20; its own listed
-     * current source is 511's datafeed API) -- an independently-discovered third source, same
-     * situation as ACE's own CDN above. */
+     * the header. An independently-discovered source, same situation as ACE's own CDN above. */
     SANTA_ROSA_CITYBUS(
         "santa_rosa_citybus",
         "Santa Rosa CityBus",
@@ -439,13 +415,15 @@ enum class GtfsAgency(
     // 10 of the entries below have no independently-discoverable static GTFS download at all --
     // 511's datafeed API is their only public source, so as an exception their feedUrl goes
     // through the proxy's 511 passthrough instead of a direct agency URL (still gets the normal 6h
-    // static-cache treatment). SamTrans is here because its only direct download is an unstable
-    // CMS media-asset link, and ACE/Petaluma Transit/SMART are here because MobilityData's catalog
-    // marks their formerly-direct URL deprecated in favor of 511 (see this group's own
-    // top-of-block comment, and each entry's own comment). Commute.org Shuttles/FAST/Union City
-    // Transit/VINE Transit, further down, DO have a direct feedUrl now (see this group's own
-    // top-of-block comment) -- left physically grouped here with the rest of this batch rather
-    // than moved, since that's cosmetic and doesn't affect behavior.
+    // static-cache treatment). SamTrans is here because its only public download has no
+    // independently-stable identifier to build a permanent URL around, ACE/Petaluma Transit/SMART
+    // are here because MobilityData's catalog marks their formerly-direct URL deprecated in favor
+    // of 511 (see this group's own top-of-block comment, and each entry's own comment), and AC
+    // Transit is here because its prior direct URL relied on a token with no confirmed source,
+    // dropped rather than kept unverified (see that entry's own comment). Commute.org
+    // Shuttles/FAST/Union City Transit/VINE Transit, further down, DO have a direct feedUrl now
+    // (see this group's own top-of-block comment) -- left physically grouped here with the rest of
+    // this batch rather than moved, since that's cosmetic and doesn't affect behavior.
 
     /** No independent static feed found (checked trideltatransit.com directly) -- 511-datafeed-
      * API only, via the proxy. Confirmed live in this project's own regional-feed sample. */
@@ -469,9 +447,8 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AF")),
     ),
-    /** The URL surfaced by search (commute.org/files/gtfs/Masterzip.zip) is dead -- but
-     * MobilityData's catalog lists a separate, Trillium-hosted URL this project's own manual
-     * search missed, confirmed live 2026-08-20. */
+    /** The URL surfaced by search (commute.org/files/gtfs/Masterzip.zip) is dead -- a separate,
+     * Trillium-hosted URL resolves live instead. */
     COMMUTE_ORG_SHUTTLES(
         "commute_org_shuttles",
         "Commute.org Shuttles",
@@ -507,8 +484,8 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "EE")),
     ),
-    /** fasttransit.org itself has no GTFS link -- but MobilityData's catalog lists a separate,
-     * Trillium-hosted URL this project's own manual search missed, confirmed live 2026-08-20. */
+    /** fasttransit.org itself has no GTFS link -- a separate, Trillium-hosted URL resolves live
+     * instead. */
     FAST_TRANSIT(
         "fast_transit",
         "FAST",
@@ -577,9 +554,8 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "TF")),
     ),
-    /** Transitland's own authoritative-source field points at 511's datafeed API, but
-     * MobilityData's catalog separately lists a Trillium-hosted URL this project's own earlier
-     * search missed, confirmed live 2026-08-20. */
+    /** Transitland's own authoritative-source field points at 511's datafeed API, but a separate
+     * Trillium-hosted URL also resolves live. */
     UNION_CITY_TRANSIT(
         "union_city_transit",
         "Union City Transit",
@@ -600,9 +576,8 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "VC")),
     ),
-    /** vinetransit.com itself has no GTFS/developer link -- but MobilityData's catalog lists a
-     * separate, Trillium-hosted URL this project's own manual search missed, confirmed live
-     * 2026-08-20. Confirmed live in this project's own regional-feed sample too
+    /** vinetransit.com itself has no GTFS/developer link -- a separate, Trillium-hosted URL
+     * resolves live instead. Confirmed live in this project's own regional-feed sample too
      * (VehiclePositions). */
     VINE_TRANSIT(
         "vine_transit",
@@ -614,12 +589,12 @@ enum class GtfsAgency(
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "VN")),
     ),
 
-    /** Bus (primary) + Rail ([LaMetroRailSecondaryFeed], see that file's own doc) -- LACMTA
-     * publishes them as two separate static zips for the same real operator, merged the same way
-     * Bustang merges into RTD. Realtime: Swiftly (API-key application, server-to-server per
-     * Swiftly's own docs, not meant for individual client polling) or api.metro.net (a custom JSON
-     * REST API despite its "GTFS-rt" branding -- not GTFS-RT protobuf, needs a bespoke adapter, not
-     * a URL swap) -- neither wired here. */
+    /** Bus (primary) + Rail ([LaMetroRailSecondaryFeed], see that file's own doc) -- LACMTA publishes
+     * them as two separate static zips for the same real operator, merged the same way Bustang merges
+     * into RTD. Realtime isn't wired: Swiftly requires an API-key application and is server-to-server
+     * per its own docs, not meant for individual client polling; api.metro.net is a custom JSON REST
+     * API rather than actual GTFS-RT protobuf, so wiring it in would need custom translation code,
+     * not just a URL swap. */
     LA_METRO(
         "la_metro",
         "LA Metro (No Live)",
@@ -663,10 +638,9 @@ enum class GtfsAgency(
         null,
         timeZoneId = "America/Chicago",
     ),
-    /** No GTFS-RT feed exists for Pace at all -- confirmed, live predictions are only shown on
-     * Pace's own Bus Tracker web page, never published as a downloadable feed. Static schedule only.
-     * Pace's own GTFS itself only covers routes with their "Intelligent Bus System" equipment
-     * installed, so even this static feed may not represent every Pace route. */
+    /** No GTFS-RT feed exists for Pace at all -- confirmed, live predictions are only shown on Pace's
+     * own Bus Tracker web page, never published as a downloadable feed. Static schedule only, scoped
+     * to routes with their "Intelligent Bus System" equipment installed. */
     PACE(
         "pace",
         "Pace (No Live)",
@@ -675,16 +649,14 @@ enum class GtfsAgency(
         null,
         timeZoneId = "America/Chicago",
     ),
-    /** Realtime needs real work before it's safe to wire in, more than any agency added so far: it's
-     * split across 8 separate live feeds with non-overlapping trip_id ranges (one per line group --
-     * verified live), no API key needed but a real User-Agent header is required (HEAD requests get
-     * a 403, likely a WAF rule). Every entity on every feed carries NYCT's own protobuf extension
-     * (TripDescriptor field 1001 -- train_id/is_assigned/direction -- present on 100% of both
-     * TripUpdates and VehiclePositions sampled) plus FeedEntity fields 2/5, VehiclePosition field 6,
-     * and StopTimeUpdate fields 7 and 1001 (also 100% present), none of which GtfsRealtime.kt
-     * declares today -- this isn't an edge case to shrug off the way some other agencies' unused
-     * fields were, the whole feed would fault on decode exactly like RIPTA/LTC/RTD did before their
-     * fixes. Static feed itself is small (565K stop_times rows), no size concern. */
+    /** Realtime isn't wired in yet -- same as a few other agencies here for now. It'll take more
+     * work than most once it happens: split across 8 separate live feeds with non-overlapping
+     * trip_id ranges (one per line group -- verified live), needs a real User-Agent header (a HEAD
+     * request without one gets a 403, likely a WAF rule), and every entity carries several
+     * NYCT-specific protobuf fields (TripDescriptor field 1001, FeedEntity fields 2/5,
+     * VehiclePosition field 6, StopTimeUpdate fields 7 and 1001) that GtfsRealtime.kt would need to
+     * declare first, since this hand-rolled decoder faults on any undeclared field rather than
+     * skipping it. */
     NYC_SUBWAY(
         "nyc_subway",
         "NYC Subway (No Live)",
@@ -694,13 +666,10 @@ enum class GtfsAgency(
         timeZoneId = "America/New_York",
     ),
     /** Realtime: no key needed, HTTPS, one combined TripUpdates+VehiclePositions feed -- wired in
-     * below. GtfsRealtime.kt's schema needed one addition for this ([GtfsRtStopTimeUpdate]'s field
-     * 1005, the MTA railroads' own scheduled/actual-track extension) -- hand-verified live against
-     * this exact feed (wire type 2, decodes as valid UTF-8 track labels), see that field's own doc
-     * comment. calendar_dates.txt-only (no calendar.txt) is fine -- verified
-     * GtfsRepository's activeTodayClause already handles a service_id with zero `calendar` rows via
-     * its independent calendar_dates-addition branch, same standard GTFS pattern many agencies use.
-     * Tiny feed (24K stop_times rows). */
+     * below. Shares [GtfsRtStopTimeUpdate]'s field 1005 (see that field's own doc for verification
+     * detail). calendar_dates.txt-only (no calendar.txt) is fine -- verified GtfsRepository's
+     * activeTodayClause already handles a service_id with zero `calendar` rows via its independent
+     * calendar_dates-addition branch, same pattern many agencies use. */
     LIRR(
         "lirr",
         "LIRR",
@@ -710,11 +679,10 @@ enum class GtfsAgency(
         timeZoneId = "America/New_York",
     ),
     /** Same situation as LIRR -- no key, HTTPS, one combined feed, wired in below. Shares
-     * [GtfsRtStopTimeUpdate]'s field 1005 (hand-verified live against this feed too, same nested
-     * track-label shape as LIRR's, though the sub-field contents differ slightly -- e.g. a
-     * "Departed" status string where LIRR's was another track code). No calendar.txt in this feed
-     * either (only calendar_dates.txt) -- confirmed fine for the same reason noted on [LIRR].
-     * ~380K stop_times rows, no size concern. */
+     * [GtfsRtStopTimeUpdate]'s field 1005 (see that field's own doc) -- this feed's sub-field
+     * contents differ slightly from LIRR's, e.g. a "Departed" status string where LIRR's was a
+     * track code. No calendar.txt in this feed either (only calendar_dates.txt) -- confirmed fine
+     * for the same reason noted on [LIRR]. */
     METRO_NORTH(
         "metro_north",
         "Metro-North",
@@ -730,19 +698,19 @@ enum class GtfsAgency(
      * "what time is it right now for this agency" call. */
     val zoneId: ZoneId by lazy { ZoneId.of(timeZoneId) }
 
-    /** Fetches this agency's own instance of a given [AgencyComponent] type, if it has one -- e.g.
-     * `agency.component<PlatformAssignmentSource>()`. Null for any agency/type combination that
-     * isn't declared in [components], including every non-MBTA agency today. */
+    /** Fetches this agency's own instance of a given [AgencyComponent] type, if it has one, e.g.
+     * `agency.component<MbtaV3VehicleSource>()`. Null for any agency/type combination not
+     * declared in [components]. */
     inline fun <reified T : AgencyComponent> component(): T? = components.filterIsInstance<T>().firstOrNull()
 
     companion object {
         init {
-            // [id] doubles as the "gtfs/{id}/" cache directory name (see [forDbFile]/[gtfsDbFile]) and
-            // the DEFAULT_AGENCY/BOARDED_AGENCY preference value -- a copy-pasted entry with an
-            // unchanged id silently merges its cache and preferences with whichever other agency
-            // already owns that id, rather than failing loudly. Catching it here, at class-load time,
-            // means a bad copy-paste fails immediately instead of surfacing as "why is agency X showing
-            // agency Y's data."
+            // [id] doubles as the "gtfs/{id}/" cache directory name (see [forDbFile]/[gtfsDbFile]) and the
+            // DEFAULT_AGENCY/BOARDED_AGENCY preference value -- a copy-pasted entry with an unchanged id
+            // silently merges its cache and preferences with whichever other agency already owns that
+            // id, rather than failing loudly. Catching it here, at class-load time, means a bad
+            // copy-paste fails immediately instead of surfacing as "why is agency X showing agency Y's
+            // data."
             val duplicateIds = entries.groupBy { it.id }.filterValues { it.size > 1 }.keys
             check(duplicateIds.isEmpty()) {
                 "GtfsAgency ids must be unique, got duplicates: $duplicateIds"
@@ -751,10 +719,10 @@ enum class GtfsAgency(
 
         /**
          * Recovers which agency a screen's [dbFile] belongs to, from the same "gtfs/{id}/transit.db"
-         * path convention [gtfsDbFile] builds it with — so a screen only needs to carry [dbFile] (which
-         * it already does, to run any query at all) to know which agency's live feeds to poll, rather
-         * than needing `agency` threaded through as a second, separate parameter everywhere. Driven
-         * entirely by [id], so it stays correct with no changes needed if a third agency is added later.
+         * path convention [gtfsDbFile] builds it with -- so a screen only needs [dbFile] (already
+         * required to run any query) to know which agency's live feeds to poll, rather than
+         * threading `agency` through as a second parameter everywhere. Driven entirely by [id], so
+         * it stays correct with no changes if a third agency is added later.
          */
         fun forDbFile(dbFile: File): GtfsAgency? = entries.find { it.id == dbFile.parentFile?.name }
     }

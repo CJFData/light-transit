@@ -49,21 +49,21 @@ import java.io.File
 // A station's real platforms can be literally co-located (verified against real MBTA South Station
 // data -- every platform shares identical lat/lon), so this floor is far smaller than the main Map
 // screen's MIN_BOUNDING_BOX_MILES; otherwise every station would render at the same fixed zoom
-// regardless of how spread out (or not) its platforms actually are.
+// regardless of how spread out its platforms actually are.
 private const val STATION_MIN_BOUNDING_BOX_MILES = 0.02
 // Deliberately larger than the main Map screen's own MAP_TARGET_RADIUS_PIXELS (420f): that value
 // reserves margin for a center pin/label/street-context block this screen never draws (see
-// showCenterPin = false), and the main map's fit also has to leave room to breathe around a whole
-// neighborhood of *unrelated* nearby stops -- here every point being fit is itself a platform the
-// rider actually cares about, so it's fine (in fact preferable, per explicit product feedback) to
-// fill more of the frame with them. Pushed close to a real device's own half-width (see MapScreen's
-// own comment on the LP3's 1080x1240px canvas) while still leaving room for the compass letters.
+// showCenterPin = false), and the main map also leaves room around unrelated nearby stops -- here
+// every point being fit is a platform the rider actually cares about, so filling more of the frame
+// is fine (per product feedback, even preferable). Pushed close to a real device's own half-width
+// (see MapScreen's comment on the LP3's 1080x1240px canvas) while leaving room for the compass
+// letters.
 private const val STATION_ZOOM_TARGET_RADIUS_PIXELS = 500f
 private const val STATION_MIN_ZOOM = 17
-// Same ceiling as the main Map screen's own MAX_ZOOM -- the CARTO tile server this app fetches from
-// (see MapTileClient) isn't verified to serve anything past this, so this stays the hard cap even
-// though the fit-to-bounds formula above will now usually reach it for a real station's platform
-// cluster (unlike before, where the main map's own smaller target radius rarely got close).
+// Same ceiling as the main Map screen's own MAX_ZOOM -- the CARTO tile server this app fetches
+// from (see MapTileClient) isn't verified to serve anything past this, so it stays the hard cap
+// even though the fit-to-bounds formula above now usually reaches it for a real station's
+// platform cluster.
 private const val STATION_MAX_ZOOM = 20
 private const val STATION_FALLBACK_ZOOM = 20
 // Same cadence as the main Map screen's own LIVE_VEHICLE_POLL_INTERVAL_MS -- only ever used at all
@@ -188,10 +188,10 @@ class MapStationViewModel(
                     null
                 }
 
-                // Each platform's own label (e.g. "Track 1"), not prefixed with the station name --
-                // same real-South-Station-verified technique Upcoming Arrivals already uses for
-                // platform disambiguation (see GtfsRepository.platformLabelFromStopDesc). Falls back
-                // to the platform's own stop_name when stop_desc has nothing more specific.
+                // Each platform's own label (e.g. "Track 1"), not prefixed with the station name -- same
+                // South-Station-verified technique Upcoming Arrivals already uses for platform
+                // disambiguation (see GtfsRepository.platformLabelFromStopDesc). Falls back to the
+                // platform's own stop_name when stop_desc has nothing more specific.
                 val descriptions = repository.getStopDescriptions(memberStopIds)
                 val platformMarkers = platforms.map { platform ->
                     val label = platformLabelFromStopDesc(descriptions[platform.stopId]) ?: platform.stopName
@@ -292,10 +292,10 @@ class MapStationViewModel(
 /**
  * A zoomed-in sub-map of just one multi-platform station's own platforms ("Map-Station mode"),
  * reached by double-tapping a station marker on the main Map screen (see MapScreen's
- * doubleTapStationEnabled/onOpenStation). Reuses the exact same [MapCanvas] the main Map screen
- * draws with -- same tiles/pin style/tap-to-reveal-label behavior -- just with no privileged center
- * pin (every platform is an equal small pin) and the station's name in the scrim instead. Shows
- * live vehicles of its own only when "See Everything" (Settings toggle) is on -- see
+ * doubleTapStationEnabled/onOpenStation). Reuses the same [MapCanvas] the main Map screen draws
+ * with -- same tiles/pin style/tap-to-reveal-label behavior -- just with no privileged center pin
+ * (every platform is an equal small pin) and the station's name in the scrim instead. Shows live
+ * vehicles of its own only when "See Everything" (Settings toggle) is on -- see
  * MapStationViewModel's own doc.
  */
 class MapStationScreen(
@@ -378,22 +378,21 @@ class MapStationScreen(
                         onOpenStation = { _, _ -> },
                         showCenterPin = false,
                         scrimTitle = stationLabel,
-                        // Tap-and-hold the scrim title for the whole station's own upcoming arrivals
-                        // -- consistent with tap-and-hold meaning "show actual arrivals" everywhere
-                        // else in the app (a single platform pin here, a stop on the main Map screen,
-                        // Schedule's stop list, the Stations list).
+                        // Tap-and-hold the scrim title for the whole station's own upcoming arrivals -- consistent with
+                        // tap-and-hold meaning "show actual arrivals" everywhere else in the app (a single
+                        // platform pin here, a stop on the main Map screen, Schedule's stop list, the
+                        // Stations list).
                         onScrimTitleLongPressed = {
                             navigateTo(screenFactory = { activity ->
                                 UpcomingArrivalsScreen(activity, dbFile, agency, memberStopIds, stationLabel)
                             })
                         },
-                        // Double-tap the scrim title to zoom back OUT to the main Map screen, centered
-                        // on this same station -- symmetric with double-tapping a station marker on
-                        // the main map to zoom IN here (see MapScreen's own onOpenStation). Any one of
-                        // this station's own member platform ids resolves back to the full station
-                        // (via MapViewModel's own getStationContaining lookup, the same one every
-                        // other entry point into a station's map already goes through), so which
-                        // specific platform id gets passed doesn't matter.
+                        // Double-tap the scrim title to zoom back out to the main Map screen, centered on this same
+                        // station -- symmetric with double-tapping a station marker on the main map to zoom
+                        // in here (see MapScreen's own onOpenStation). Any one of this station's member
+                        // platform ids resolves back to the full station (via MapViewModel's own
+                        // getStationContaining lookup, the same one every other station entry point goes
+                        // through), so which specific platform id gets passed doesn't matter.
                         onScrimTitleDoubleTapped = {
                             navigateTo(screenFactory = { activity ->
                                 MapScreen(activity, dbFile, agency, memberStopIds.first(), stationLabel)

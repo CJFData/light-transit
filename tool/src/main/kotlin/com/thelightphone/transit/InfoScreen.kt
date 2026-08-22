@@ -60,11 +60,9 @@ private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.CIRCLE, "Home -- every other screen's own footer button; jumps back to HomeScreen"),
 )
 
-/** Settings screen's own on/off toggles -- every one of them (Tap and hold a stop, Tap and hold --
- * Schedules, Tap and hold -- Stations, Tap and hold -- Vehicles, Double-tap to open a station,
- * Track tapped stops, See everything, Filter by stop, Modes shown's three per-mode toggles, Trip
- * progress bar, Daily message, Randomize daily message) renders as one of these two icons next to
- * their label, per SettingsScreen's own ToggleRow. */
+/** Settings screen's own on/off toggles -- every one of them renders as one of these two icons
+ * next to their label, per SettingsScreen's own ToggleRow. See SettingsScreen.kt for the current
+ * list of toggles. */
 private val TOGGLE_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "Setting is on -- tap the row to turn it off"),
     IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Setting is off -- tap the row to turn it on"),

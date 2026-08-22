@@ -91,10 +91,10 @@ sealed class UpcomingArrivalsState {
     object Loading : UpcomingArrivalsState()
 
     /**
-     * [isOffline] is true when there's no live feed connection at all this session — either the
-     * agency has no [GtfsAgency.realtimeTripUpdatesUrl] (RIPTA) or the fetch itself failed — as
+     * [isOffline] is true when there's no live feed connection at all this session -- either the
+     * agency has no [GtfsAgency.realtimeTripUpdatesUrl] (RIPTA) or the fetch itself failed -- as
      * opposed to a feed that connected fine but simply has no update for one particular trip,
-     * which is normal and shown per-row with no badge rather than as a screen-wide state.
+     * which is shown per-row with no badge rather than as a screen-wide state.
      */
     data class Loaded(
         val arrivals: List<ArrivalRow>,
@@ -108,8 +108,8 @@ sealed class UpcomingArrivalsState {
 class UpcomingArrivalsViewModel(
     dbFile: File,
     private val agency: GtfsAgency,
-    /** Every child platform stop_id belonging to the selected stop -- more than one entry means
-     * this is a real multi-platform grouped station (see GtfsRepository.groupStationsByParent), in
+    /** Every child platform stop_id belonging to the selected stop -- more than one entry means this
+     * is a real multi-platform grouped station (see GtfsRepository.groupStationsByParent), in
      * which case arrivals across every platform are unioned and each is labeled with its own
      * platform. A plain stop is just its own single-element list. */
     private val stopIds: List<String>,
@@ -121,22 +121,21 @@ class UpcomingArrivalsViewModel(
     val state: StateFlow<UpcomingArrivalsState> = _state
 
     /** Whether the selected stop is itself a real, qualifying multi-platform station -- see
-     * GtfsRepository.getStationContaining, the same single source of truth every other screen's
-     * transfer icon uses. Resolved via [stopIds]'s first entry rather than checking its length,
-     * since a caller may pass just one representative id even for a station (e.g. the Map screen's
+     * GtfsRepository.getStationContaining, the same source of truth every other screen's transfer
+     * icon uses. Resolved via [stopIds]'s first entry rather than checking its length, since a
+     * caller may pass just one representative id even for a station (e.g. the Map screen's
      * tap-and-hold shortcut). Kept separate from [state] so the icon can render as soon as this
-     * quick lookup resolves, without waiting on the (network-bound) arrivals fetch below. */
+     * quick lookup resolves, without waiting on the network-bound arrivals fetch below. */
     val isStation = MutableStateFlow(false)
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
-            // Own try/catch (not folded into the state one below) so a screen popped mid-query --
-            // e.g. several rapid-fire goBack() calls in a row, like BackToHomeFooter's "jump to
-            // Home" loop -- can't crash the app just because this repository got closed out from
-            // under an in-flight query on the way out. Same reasoning applies to every DB call in
-            // this coroutine, not just this one, but this is the one call that used to sit outside
-            // any try/catch at all.
+            // Own try/catch (not folded into the state one below) so a screen popped mid-query -- e.g.
+            // several rapid-fire goBack() calls in a row, like BackToHomeFooter's "jump to Home" loop --
+            // can't crash the app just because this repository got closed out from under an in-flight
+            // query on the way out. Same reasoning applies to every DB call in this coroutine, not just
+            // this one.
             try {
                 isStation.value = repository.getStationContaining(stopIds.first()) != null
             } catch (e: Exception) {
@@ -146,10 +145,9 @@ class UpcomingArrivalsViewModel(
                 val today = todayForGtfs(agency.zoneId)
                 val scheduled = repository.getScheduledArrivals(stopIds, currentGtfsTimeOfDay(agency.zoneId), today)
 
-                // Merged with any SecondaryGtfsFeed component's own realtime feed (e.g. Bustang
-                // under RTD Denver) -- see MergedRealtimeFeed's own doc. [feed.primary] (used below
-                // for staleness/offline) stays keyed off the agency's own primary feed only,
-                // unchanged from before secondary feeds existed.
+                // Merged with any SecondaryGtfsFeed component's own realtime feed (e.g. Bustang under RTD
+                // Denver) -- see MergedRealtimeFeed's own doc. [feed.primary] (used below for
+                // staleness/offline) stays keyed off the agency's own primary feed only.
                 val feed = agency.fetchMergedTripUpdates("UpcomingArrivalsScreen")
 
                 val rows = scheduled.mapNotNull { arrival ->
@@ -325,9 +323,8 @@ class UpcomingArrivalsScreen(
                                                 size = 1.2f,
                                                 modifier = Modifier.padding(end = 8.dp),
                                             )
-                                            // Status renders directly under the route/direction text
-                                            // it describes (same weighted column) rather than as a
-                                            // sibling of the whole Row -- otherwise it lines up flush
+                                            // Status renders directly under the route/direction text it describes (same weighted column)
+                                            // rather than as a sibling of the whole Row -- otherwise it lines up flush
                                             // with the mode icon's left edge instead of the text.
                                             Column(
                                                 modifier = Modifier

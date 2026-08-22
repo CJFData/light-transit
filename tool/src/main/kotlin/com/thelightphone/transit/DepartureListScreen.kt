@@ -69,10 +69,9 @@ class DepartureListViewModel(
     private val _state = MutableStateFlow<DepartureListState>(DepartureListState.Loading)
     val state: StateFlow<DepartureListState> = _state
 
-    /** Whether the list below is showing tomorrow's service day instead of today's -- toggled by
-     * tapping the "view tomorrow's schedule" row (see [DepartureListScreen.Content]). Every
-     * [GtfsRepository] departures query already takes an arbitrary service date rather than
-     * assuming "today", so shifting this by one day is the only change [loadDepartures] needs. */
+    /** Whether the list below shows tomorrow's service day instead of today's, toggled by tapping
+     * the header (see [DepartureListScreen.Content]). Departures queries already accept an
+     * arbitrary service date, so shifting this by one day is all [loadDepartures] needs to do. */
     private val _showTomorrow = MutableStateFlow(startOnTomorrow)
     val showTomorrow: StateFlow<Boolean> = _showTomorrow
 
@@ -155,12 +154,11 @@ class DepartureListScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    // Screen name stays on line1 always -- only line2 doubles as the day toggle
-                    // (tapping either line flips between today's and tomorrow's schedule, see
-                    // DepartureListViewModel.toggleDay). Every departures query already takes an
-                    // arbitrary service date, so this is a pure UI/state addition, not a new query
-                    // path. Same line1/line2 convention as FirstStopSelectionScreen's own header,
-                    // one screen earlier in this same flow.
+                    // Screen name stays on line1 always -- only line2 doubles as the day toggle (tapping either
+                    // line flips between today's and tomorrow's schedule, see DepartureListViewModel.toggleDay).
+                    // Every departures query already takes an arbitrary service date, so this is a pure UI/state
+                    // addition, not a new query path. Same line1/line2 convention as FirstStopSelectionScreen's own
+                    // header, one screen earlier in this flow.
                     center = LightTopBarCenter.TwoLineDetail(
                         line1 = "Departures",
                         line2 = if (showTomorrow) "Tomorrow - tap for today" else "Today - tap for tomorrow",

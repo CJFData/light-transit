@@ -326,14 +326,11 @@ class NearbyStopsScreen(
                                                 .fillMaxWidth()
                                                 .lightClickable {
                                                     navigateTo(screenFactory = { activity ->
-                                                        // The full member list, not just one child
-                                                        // platform -- a deduplicated station (see
-                                                        // GtfsRepository.groupStationsByParent) can
-                                                        // have several platforms each serving
-                                                        // different lines (e.g. South Station), and
-                                                        // arrivals need to be unioned across all of
-                                                        // them, not just whichever one happened to be
-                                                        // the dedup representative.
+                                                        // The full member list, not just one child platform -- a deduplicated station (see
+                                                        // GtfsRepository.groupStationsByParent) can have several platforms
+                                                        // each serving different lines (e.g. South Station), and arrivals
+                                                        // need to be unioned across all of them, not just whichever one
+                                                        // happened to be the dedup representative.
                                                         UpcomingArrivalsScreen(
                                                             activity,
                                                             dbFile,
@@ -346,12 +343,10 @@ class NearbyStopsScreen(
                                                 .padding(vertical = 12.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            // Weighted so a long stop name wraps within its own
-                                            // share of the row instead of first greedily measuring
-                                            // against the row's *full* width (Compose's default for
-                                            // an unweighted Text) and only then discovering there's
-                                            // no room left for the distance label -- that's what was
-                                            // pushing distanceLabel() off the right edge.
+                                            // Weighted so a long stop name wraps within its own share of the row instead of first
+                                            // greedily measuring against the row's full width and only then
+                                            // discovering there's no room for the distance label, pushing it off
+                                            // the right edge.
                                             Row(
                                                 modifier = Modifier.weight(1f),
                                                 verticalAlignment = Alignment.CenterVertically,

@@ -42,9 +42,9 @@ sealed class DirectionSelectionState {
     data class Loaded(val directions: List<DirectionOption>) : DirectionSelectionState()
     /** Distinguished from [Loaded] with an empty list -- see [GtfsRepository.routeHasTrips]'s own
      * doc. This route genuinely has no trips scheduled at all, so there's nowhere useful to
-     * auto-skip to (unlike an empty-but-has-trips [Loaded], which auto-advances straight to stop
+     * auto-skip to (unlike an empty-but-has-trips [Loaded], which auto-advances to stop
      * selection). Rendered here instead, so back navigation behaves normally rather than bouncing
-     * straight back into a dead-end "Nothing found in today's schedule" screen every time. */
+     * into a dead-end "Nothing found in today's schedule" screen. */
     object NoTrips : DirectionSelectionState()
     data class Error(val message: String) : DirectionSelectionState()
 }
@@ -58,10 +58,10 @@ private val viaClauseRegex = Regex(""" via .*""", RegexOption.IGNORE_CASE)
  * directions are "Inbound"/"Outbound", "Northbound"/"Southbound", or something else -- direction_id
  * alone carries no fixed meaning. Falls back to a headsign-derived "Toward X" label for any agency
  * that doesn't publish it. Used by every screen that shows a [DirectionOption] on its own, outside
- * a grouped picker (arrivals, stop connections, the map) -- those are always built directly from a
- * specific trip's own headsign with no directionName/destination attached, so this only ever
- * exercises the headsign branch in practice today. NOT used within [DirectionSelectionScreen]
- * itself -- see [rowLabel]'s own doc for why that needs different precedence. */
+ * a grouped picker (arrivals, stop connections, the map), which are built directly from a specific
+ * trip's own headsign with no directionName/destination attached, so this only exercises the
+ * headsign branch in practice today. NOT used within [DirectionSelectionScreen] itself -- see
+ * [rowLabel]'s own doc for why that needs different precedence. */
 fun DirectionOption.displayLabel(): String {
     directionName?.takeIf { it.isNotBlank() }?.let { name ->
         return destination?.takeIf { it.isNotBlank() }?.let { "$name to $it" } ?: name
@@ -76,11 +76,10 @@ fun DirectionOption.displayLabel(): String {
 /** The picker row's own text (and the label carried onward to every downstream screen once a
  * direction is chosen) -- always headsign-first, unlike [displayLabel]. Several distinct headsign
  * variants can share one direction_id (see [GtfsRepository.getDirections]'s own doc for real
- * examples), so they also share the exact same directions.txt-curated directionName/destination;
- * if this preferred directionName the way [displayLabel] does, every variant within a group would
- * render as the identical text ("Outbound to Worcester" for both the Worcester AND Framingham
- * entries), which defeats the entire point of keeping them separately selectable. Falls back to
- * the directionName/destination text only when a row has no headsign at all. */
+ * examples), so they also share the same directions.txt-curated directionName/destination; if this
+ * preferred directionName the way [displayLabel] does, every variant within a group would render
+ * as identical text, defeating the point of keeping them separately selectable. Falls back to the
+ * directionName/destination text only when a row has no headsign at all. */
 fun DirectionOption.rowLabel(): String =
     headsign?.takeIf { it.isNotBlank() }
         ?.replace(viaClauseRegex, "")
@@ -96,10 +95,10 @@ fun DirectionOption.rowLabel(): String =
  * have genuinely different headsigns that collide into identical text once [rowLabel]'s own
  * via-clause stripping is applied -- confirmed live on RIPTA route 9 direction 1, whose "Pascoag"
  * and "Pascoag via Citizens Bank" trips (two real, differently-stopping patterns) both stripped
- * down to "Toward Pascoag", rendering as an apparent duplicate. Falls back to the full, un-stripped
- * headsign for just the rows that collide, so a rider never sees two identical-looking taps that
- * actually lead to different stop lists; a row whose stripped label is already unique within its
- * own group is untouched.
+ * down to "Toward Pascoag", rendering as an apparent duplicate. Falls back to "Toward " plus the
+ * full, un-stripped headsign for just the rows that collide, so a rider never sees two
+ * identical-looking taps that actually lead to different stop lists; a row whose stripped label is
+ * already unique within its own group is untouched.
  */
 fun List<DirectionOption>.disambiguatedRowLabels(): Map<DirectionOption, String> {
     val counts = groupingBy { it.rowLabel() }.eachCount()
@@ -156,10 +155,10 @@ class DirectionSelectionScreen(
         val state by viewModel.state.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
-        // Only reachable when this route DOES have trips (see DirectionSelectionState.NoTrips's
-        // own doc) -- every one of them just has a null direction_id, so there's nothing
-        // meaningful to distinguish here; skip straight to stop selection instead of showing an
-        // empty list with nothing to tap.
+        // Only reachable when this route DOES have trips (see DirectionSelectionState.NoTrips's own
+        // doc) -- every one of them just has a null direction_id, so there's nothing meaningful to
+        // distinguish here; skip straight to stop selection instead of showing an empty list with
+        // nothing to tap.
         LaunchedEffect(state) {
             val loaded = state as? DirectionSelectionState.Loaded ?: return@LaunchedEffect
             if (loaded.directions.isEmpty()) {
@@ -210,14 +209,12 @@ class DirectionSelectionScreen(
                     )
 
                     is DirectionSelectionState.Loaded -> {
-                        // Grouped by direction_id (never more than 2 real groups -- see
-                        // GtfsRepository.getDirections's own doc) with a section header only when
-                        // the feed's directions.txt gives every group a real name -- e.g. MBTA's
-                        // Framingham/Worcester Line reads as "Outbound: Toward Worcester, Toward
-                        // Framingham" / "Inbound: Toward South Station" instead of 4 flat, unrelated-
-                        // looking entries. Any agency without directions.txt (RIPTA/LTC/RTD today)
-                        // has every directionName null, so showHeaders is false and this renders as
-                        // the exact same flat list it always has -- no visual change for them.
+                        // Grouped by direction_id (never more than 2 real groups -- see GtfsRepository.getDirections's
+                        // own doc) with a section header only when the feed's directions.txt gives every group a
+                        // real name -- e.g. MBTA's Framingham/Worcester Line reads as "Outbound: Toward
+                        // Worcester, Toward Framingham" / "Inbound: Toward South Station" instead of 4 flat,
+                        // unrelated-looking entries. Any agency without directions.txt has every directionName
+                        // null, so showHeaders is false and this renders as the same flat list it always has.
                         val groups = s.directions.groupBy { it.directionId }.entries.sortedBy { it.key }
                         val showHeaders = s.directions.all { !it.directionName.isNullOrBlank() }
                         LazyColumn(modifier = Modifier.weight(1f)) {

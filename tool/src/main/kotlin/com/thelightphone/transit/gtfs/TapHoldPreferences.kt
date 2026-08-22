@@ -13,10 +13,10 @@ private val tapHoldVehicleKey = booleanPreferencesKey("TAP_HOLD_VEHICLE_ENABLED"
 
 /**
  * Settings toggles for "tap and hold a stop to see its actual arrivals" outside the Map screen,
- * which has its own toggle (see MapPreferences.tapHoldArrivalsEnabledFlow) -- Schedule mode's stop
- * selection list and the Stations browse list each get their own here. Both on by default, unlike
- * the Map screen's (off by default) -- these two are purely additive, since the short tap keeps
- * doing exactly what it always did either way; only tap-and-hold's new behavior is gated.
+ * which has its own toggle (see MapPreferences.tapHoldArrivalsEnabledFlow). Schedule mode's stop
+ * selection list and the Stations browse list each get their own here, both on by default like
+ * the Map screen's. All three are purely additive: the short tap keeps doing exactly what it
+ * always did either way, and only tap-and-hold's new behavior is gated.
  */
 class TapHoldPreferences(private val dataStore: DataStore<Preferences>) {
 

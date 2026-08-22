@@ -16,26 +16,23 @@ private val ctaBusJson = Json { ignoreUnknownKeys = true }
 
 /**
  * CTA Bus Tracker (ctabustracker.com/bustime/api/v3) -- proprietary REST/JSON, not GTFS-RT, but
- * still resolves a real GTFS trip_id per vehicle (see below), so this implements [LiveVehicleSource]
- * itself rather than needing its own separate shape, and shares MapScreen's single generic
- * live-vehicle merge with MBTA.
+ * still resolves a real GTFS trip_id per vehicle, so this implements [LiveVehicleSource] itself
+ * rather than needing its own separate shape, sharing MapScreen's single generic live-vehicle
+ * merge with MBTA.
  *
  * getvehicles hands back `stsd`/`stst` -- the trip's own scheduled start date and start time in
- * seconds-past-midnight -- which is the same (route, start_date, start_time) triple the GTFS-RT
- * spec itself uses to identify a trip when its trip_id isn't directly known.
- * [GtfsRepository.tripIdForScheduledStart] looks up the one static trip whose first stop_time
- * matches that triple; ambiguous (more than one match, vanishingly rare in practice) or unmatched
- * vehicles are simply dropped from the returned map for that poll -- same "never force a link"
- * contract as every other live source.
+ * seconds-past-midnight -- the same (route, start_date, start_time) triple GTFS-RT itself uses to
+ * identify a trip when its trip_id isn't directly known. [GtfsRepository.tripIdForScheduledStart]
+ * looks up the one static trip whose first stop_time matches that triple; ambiguous or unmatched
+ * vehicles are simply dropped for that poll -- same "never force a link" contract as every other
+ * live source.
  *
- * getvehicles has no next-stop/current-sequence field at all (only `pdist`, a raw distance-into-
- * pattern figure that isn't resolvable to a stop_sequence without also parsing getpatterns' own
- * geometry -- not fetched here), so [LiveVehicleInfo.currentStatus]/[currentStopSequence] are
- * always null. A caller already treats a null sequence as "no live status opinion, fall back to
- * schedule-time" for every other source with the same gap -- nothing new needed here.
+ * getvehicles has no next-stop/current-sequence field at all, so
+ * [LiveVehicleInfo.currentStatus]/[currentStopSequence] are always null -- a caller already
+ * treats a null sequence as "fall back to schedule-time" for every other source with the same gap.
  *
  * `rt` accepts at most 10 comma-delimited route designators per the API's own limit; a caller
- * asking for more than that only gets the first 10.
+ * asking for more only gets the first 10.
  */
 object CtaBusTrackerSource : LiveVehicleSource {
     override val coveredLineTypes: Set<LineType> = setOf(LineType.BUS)

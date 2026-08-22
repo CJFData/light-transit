@@ -13,11 +13,10 @@ private val includeLongerTripsKey = booleanPreferencesKey("DEPARTURES_INCLUDE_LO
  * Settings toggle for [GtfsRepository.getDeparturesForVariant]'s "reaches at least this far"
  * inclusion rule (see that function's own doc) -- on by default. When off, the departures list
  * falls back to an exact-headsign match only (see [GtfsRepository.getDeparturesForExactVariant]):
- * e.g. picking "Toward Readville" would show only the 5 Readville-headsign trips, never the
- * longer "Toward South Station" ones that also happen to reach Readville along the way. An escape
- * hatch for a rider who specifically doesn't want the broader trips mixed in at all, even though
- * they're never misleading in the other direction (a shorter trip never appears under a longer
- * variant's own listing either way).
+ * e.g. picking "Toward Readville" would show only Readville-headsign trips, never the longer
+ * "Toward South Station" ones that also happen to reach Readville along the way. An escape hatch
+ * for a rider who specifically doesn't want the broader trips mixed in, even though they're never
+ * misleading in the other direction.
  */
 class DeparturePreferences(private val dataStore: DataStore<Preferences>) {
 
