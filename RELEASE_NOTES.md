@@ -56,6 +56,8 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 - No device GPS is used anywhere — nearby-stop and location search run entirely on Nominatim/OpenStreetMap and IP-based geolocation, since the SDK doesn't expose GPS to tools.
 - Boarding a trip is a saved reference, not a background tracker — no live-feed polling happens unless Trip Detail or the home screen is actually open and visible.
 - Pulled in upstream `light-sdk`'s latest: an NFC reader API, detached audio playback, Light Keyboard bumped to v0.0.18, and a `zxing`/`sol4k` dependency-allowlist addition — none of it wired into Pico Transit yet, just picked up by the merge.
+- **Comment and documentation audit** — every code comment across the tool module was reviewed for accuracy against current source and trimmed to durable engineering rationale rather than session-specific narration (dated verification claims, specific sample counts, explanations already covered elsewhere in the codebase). Caught several comments that had drifted from what the code actually does after later feature work (the 511 rollout, CTA Bus Tracker) changed the code underneath them.
+- **AC Transit's static feed URL had an untraceable token embedded in it** — no record of where it came from, never supplied by the project owner. Rather than keep shipping an unverified credential in client source, routed it through the shared 511 proxy instead, matching how the rest of the SF Bay Area group already works.
 
 ## 🙌 Credits
 
