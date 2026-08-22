@@ -63,6 +63,6 @@ A from-scratch companion tool for the Light Phone III: real GTFS schedules, live
 
 Thanks to [Jose Briones](https://github.com/jbriones95) for his continued work integrating RTD Denver and Colorado transit into Pico Transit.
 
-Thanks to Guy Dupont on the Light team for adding `LightConnectivity` updates to `light-sdk` ([lightphone/light-sdk#166](https://github.com/lightphone/light-sdk/pull/166)), the network-state API that made the "Only download over Wi-Fi" setting possible.
+Thanks to [Guy Dupont](https://github.com/dupontgu) on the Light team for adding `LightConnectivity` updates to `light-sdk` ([lightphone/light-sdk#166](https://github.com/lightphone/light-sdk/pull/166)), the network-state API that made the "Only download over Wi-Fi" setting possible — and, more broadly, to the whole Light Phone team for all the work that's gone into making this SDK a genuine pleasure to build on, and the LightOS developer community such a positive, supported, and all-around amazing place to be.
 
 Thanks to Claude (Anthropic) for collaborating on much of Pico Transit's development, including the "Only download over Wi-Fi" setting and the comment/documentation audit noted above.

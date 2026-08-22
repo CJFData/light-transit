@@ -131,7 +131,7 @@ That's it — happy transit-ing! 🚏🚌🚆
 
 Thanks to [Jose Briones](https://github.com/jbriones95) for his continued support integrating RTD Denver and Colorado transit into Pico Transit.
 
-Thanks to Guy Dupont on the Light team for adding `LightConnectivity` to `light-sdk`, the network-state API that made the "Only download over Wi-Fi" setting possible.
+Thanks to [Guy Dupont](https://github.com/dupontgu) on the Light team for adding `LightConnectivity` to `light-sdk`, the network-state API that made the "Only download over Wi-Fi" setting possible — and, more broadly, to the whole Light Phone team for all the work that's gone into making this SDK a genuine pleasure to build on, and the LightOS developer community such a positive, supported, and all-around amazing place to be.
 
 Thanks to Claude (Anthropic) for collaborating on much of Pico Transit's development, including the "Only download over Wi-Fi" setting and an extended pass reviewing and cleaning up the codebase's comments and documentation.
 
