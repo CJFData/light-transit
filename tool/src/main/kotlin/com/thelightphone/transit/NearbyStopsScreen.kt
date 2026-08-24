@@ -46,6 +46,7 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
 import com.thelightphone.sdk.ui.lightClickable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,6 +89,8 @@ class NearbyStopsViewModel(dbFile: File) : LightViewModel<Unit>() {
         viewModelScope.launch(Dispatchers.IO) {
             val prefill = try {
                 ipGeolocator.locate().displayName
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("NearbyStopsScreen", "IP geolocation failed, falling back to blank input", e)
                 ""
@@ -108,6 +111,8 @@ class NearbyStopsViewModel(dbFile: File) : LightViewModel<Unit>() {
                 } else {
                     NearbyStopsMode.GeocodeResults(results)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("NearbyStopsScreen", "Geocoding failed for '$text'", e)
                 NearbyStopsMode.Error("Unable to search that location.")
@@ -121,6 +126,8 @@ class NearbyStopsViewModel(dbFile: File) : LightViewModel<Unit>() {
             _mode.value = try {
                 val ranked = repository.rankStopsByDistance(result.lat, result.lon, NEARBY_STOP_LIMIT)
                 NearbyStopsMode.NearbyStops(ranked)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("NearbyStopsScreen", "Failed to rank nearby stops", e)
                 NearbyStopsMode.Error("Unable to load nearby stops.")

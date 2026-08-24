@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -18,7 +19,7 @@ private val mbtaV3Json = Json { ignoreUnknownKeys = true }
 
 /**
  * MBTA's V3 API (https://api-v3.mbta.com) -- one of two current [LiveVehicleSource] implementations
- * (the other is [CtaBusTrackerSource], CTA's Bus Tracker). Commuter rail track assignments aren't
+ * (the other is [RunAssociatedTripSource], CTA's Bus Tracker). Commuter rail track assignments aren't
  * in GTFS-RT at all: MBTA's dispatch system doesn't decide (or publish) a trip's track until
  * roughly 10-15 minutes before departure, so most of the time a Vehicle's `stop` relationship
  * still points at its station's generic per-route placeholder platform (e.g. South Station's
@@ -87,6 +88,8 @@ object MbtaV3VehicleSource : LiveVehicleSource {
                     assignedStopId = stopId?.takeIf { it in assignedStopIds },
                 )
             }.toMap()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("MbtaV3VehicleSource", "Vehicle fetch failed", e)
             return emptyMap()

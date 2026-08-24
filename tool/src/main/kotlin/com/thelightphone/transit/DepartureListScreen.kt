@@ -34,6 +34,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.lightClickable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +55,8 @@ class DepartureListViewModel(
     /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
      * [directionId] rather than conflated into one nullable signal. */
     private val headsign: String?,
+    /** See [FirstStopSelectionViewModel]'s own doc. */
+    private val lastStopId: String?,
     private val stopId: String,
     private val departurePreferences: DeparturePreferences,
     /** True when the stop that led here was picked while [FirstStopSelectionScreen] was itself
@@ -103,10 +106,12 @@ class DepartureListViewModel(
                 // longer trip that reaches at least as far as the chosen variant (e.g. a
                 // "South Station" train under a "Toward Readville" pick), unless the rider has
                 // turned that off in Settings, in which case it's an exact headsign match only.
-                includeLongerTrips -> repository.getDeparturesForVariant(routeId, directionId, headsign, stopId, serviceDate)
-                else -> repository.getDeparturesForExactVariant(routeId, directionId, headsign, stopId, serviceDate)
+                includeLongerTrips -> repository.getDeparturesForVariant(routeId, directionId, headsign, lastStopId, stopId, serviceDate)
+                else -> repository.getDeparturesForExactVariant(routeId, directionId, headsign, lastStopId, stopId, serviceDate)
             }
             DepartureListState.Loaded(departures)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("DepartureListScreen", "Failed to load departures for stop $stopId", e)
             DepartureListState.Error("Unable to load departures.")
@@ -128,6 +133,8 @@ class DepartureListScreen(
     /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
      * [directionId] rather than conflated into one nullable signal. */
     private val headsign: String?,
+    /** See [FirstStopSelectionViewModel]'s own doc. */
+    private val lastStopId: String?,
     private val directionLabel: String,
     private val stopId: String,
     private val stopLabel: String,
@@ -138,7 +145,7 @@ class DepartureListScreen(
         get() = DepartureListViewModel::class.java
 
     override fun createViewModel(): DepartureListViewModel =
-        DepartureListViewModel(dbFile, routeId, directionId, headsign, stopId, DeparturePreferences(lightContext.dataStore), startOnTomorrow)
+        DepartureListViewModel(dbFile, routeId, directionId, headsign, lastStopId, stopId, DeparturePreferences(lightContext.dataStore), startOnTomorrow)
 
     @Composable
     override fun Content() {

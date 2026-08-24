@@ -74,6 +74,8 @@ import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
+import com.thelightphone.sdk.ui.LightTopBarCenter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -226,6 +228,9 @@ data class BusMarker(
      * an unused placeholder on a marker with this set, since there's no target stop to be an ETA
      * to at all. */
     val liveStatusText: String? = null,
+    /** The agency's own timezone, not the device's -- see [ArrivalRow.zoneId]'s identical doc for
+     * why [etaDisplay] can't use `ZoneId.systemDefault()`. */
+    val zoneId: ZoneId,
 )
 
 /** A "See Everything" + "Filter by stop" vehicle's relationship to the selected stop it matched --
@@ -250,7 +255,7 @@ fun BusMarker.tripDescription(): String {
 }
 
 fun BusMarker.etaDisplay(): String {
-    val time = LocalDateTime.ofInstant(Instant.ofEpochSecond(etaEpochSeconds), ZoneId.systemDefault())
+    val time = LocalDateTime.ofInstant(Instant.ofEpochSecond(etaEpochSeconds), zoneId)
     return "ETA: " + formatGtfsTime("%02d:%02d:00".format(time.hour, time.minute))
 }
 
@@ -440,6 +445,8 @@ class MapViewModel(
                 }
                 val streetContext = try {
                     geocoder.reverseGeocode(stop.lat, stop.lon)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e("MapScreen", "Reverse geocoding failed for stop $stopId", e)
                     null
@@ -471,6 +478,8 @@ class MapViewModel(
                 val fetchRadiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(stop.lat, zoom)
                 val mapTiles = try {
                     tileClient.fetchTilesAround(stop.lat, stop.lon, zoom, fetchRadiusMeters, darkMode)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e("MapScreen", "Map tile fetch failed for stop $stopId", e)
                     null
@@ -496,6 +505,8 @@ class MapViewModel(
                     // from, so there's exactly one live-position fetch in flight at a time.
                     withTimeoutOrNull(LIVE_VEHICLE_POLL_INTERVAL_MS) { refreshTrigger.receive() }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("MapScreen", "Failed to load map for stop $stopId", e)
                 _state.value = MapState.Error("Unable to load bus positions.")
@@ -554,7 +565,17 @@ class MapViewModel(
             }
         }
 
-        if (agency.realtimeVehiclePositionsUrl == null) {
+        // An agency with no standard GTFS-RT VehiclePositions feed at all (e.g. CTA -- both
+        // realtimeVehiclePositionsUrl and realtimeTripUpdatesUrl null) can still have a LiveVehicleSource
+        // (e.g. RunAssociatedTripSource, backed by CTA Bus Tracker's getvehicles) -- checked here, before
+        // either early-return below, so such an agency isn't forced to NOT_SUPPORTED/UNAVAILABLE just
+        // because the standard feed doesn't exist or didn't fetch. Confirmed live: CTA buses have real
+        // getvehicles position data (route 22/36/62 all reporting), but never reached this far because the
+        // realtimeVehiclePositionsUrl==null check below used to return NOT_SUPPORTED unconditionally --
+        // the same class of gap Upcoming Arrivals had before StopPredictionSource was wired in.
+        val liveVehicleSource = agency.component<LiveVehicleSource>()
+
+        if (agency.realtimeVehiclePositionsUrl == null && liveVehicleSource == null) {
             _state.value = MapState.Loaded(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.NOT_SUPPORTED,
@@ -566,9 +587,11 @@ class MapViewModel(
 
         // Merged with any SecondaryGtfsFeed component's own realtime feed (e.g. Bustang under RTD
         // Denver) -- see MergedRealtimeFeed's own doc. Status below is still keyed off the primary
-        // feed only, unchanged from before secondary feeds existed.
+        // feed only, unchanged from before secondary feeds existed. Safe to call even when
+        // realtimeVehiclePositionsUrl is null -- fetchMerged's own primaryUrl?.let guard just yields
+        // primary=null and an empty byTripId map in that case.
         val vehiclePositions = agency.fetchMergedVehiclePositions("MapScreen")
-        if (vehiclePositions.primary == null) {
+        if (vehiclePositions.primary == null && liveVehicleSource == null) {
             _state.value = MapState.Loaded(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.UNAVAILABLE,
@@ -610,8 +633,8 @@ class MapViewModel(
         // whichever LineTypes the agency's own source covers (coveredLineTypes), so MBTA's call never
         // includes subway route_ids and CTA's never includes rail. One agency has at most one
         // LiveVehicleSource, so this is a single generic lookup regardless of which agency it is.
+        // (liveVehicleSource itself is declared earlier, before the NOT_SUPPORTED/UNAVAILABLE checks.)
         val primaryStopIds = context.centerStation?.memberStopIds ?: listOf(stopId)
-        val liveVehicleSource = agency.component<LiveVehicleSource>()
         val liveSourceRouteIds = liveVehicleSource?.let { source ->
             primaryStopIds.flatMapTo(mutableSetOf()) { id ->
                 scheduledArrivalsByStopId[id].orEmpty()
@@ -624,6 +647,8 @@ class MapViewModel(
             ?.let { source ->
                 try {
                     source.vehiclesByRoute(liveSourceRouteIds, repository)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e("MapScreen", "Live vehicle fetch failed", e)
                     emptyMap()
@@ -745,6 +770,7 @@ class MapViewModel(
                     lat = lat,
                     lon = lon,
                     platformLabel = platformLabel,
+                    zoneId = agency.zoneId,
                 )
             }
         }
@@ -907,6 +933,7 @@ internal fun buildSeeEverythingBuses(
                 lon = lon,
                 platformLabel = stopTime.platformLabel,
                 stopRelation = relation,
+                zoneId = zoneId,
             )
         } else {
             BusMarker(
@@ -923,6 +950,7 @@ internal fun buildSeeEverythingBuses(
                 lat = lat,
                 lon = lon,
                 liveStatusText = currentStatusText(vehicle.currentStatus) ?: "Live",
+                zoneId = zoneId,
             )
         }
     }
@@ -956,16 +984,29 @@ class MapScreen(
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
             ) {
-                
+
 // A real LightTopBar in normal layout flow, the same pattern LightQrCodeScanner uses for a
                 // back button over full-bleed content, rather than absolutely overlaying one on
                 // top of the Canvas. That overlay approach only avoided collisions by luck,
                 // depending on the Canvas's own title text staying clear of wherever the icon
                 // happened to sit. This way there's nothing else placed in the icon's row for it to
-                // collide with, by construction. No title text here, since the Map screen doesn't
-                // need to say "Map".
+                // collide with, by construction. Center text is a gesture reminder, shown only for
+                // whichever of the two gestures its own Settings toggle actually has on right now
+                // (see MapState.Loaded.tapHoldArrivalsEnabled/doubleTapStationEnabled) -- never
+                // mentions a gesture the rider has turned off. Neither on means no title at all,
+                // same as before this reminder existed.
+                val loadedState = state as? MapState.Loaded
+                val doubleTapHint = "Double-tap zooms stations".takeIf { loadedState?.doubleTapStationEnabled == true }
+                val tapHoldHint = "Tap & hold shows arrivals".takeIf { loadedState?.tapHoldArrivalsEnabled == true }
+                val topBarCenter = when {
+                    doubleTapHint != null && tapHoldHint != null -> LightTopBarCenter.TwoLineDetail(doubleTapHint, tapHoldHint)
+                    doubleTapHint != null -> LightTopBarCenter.Text(doubleTapHint)
+                    tapHoldHint != null -> LightTopBarCenter.Text(tapHoldHint)
+                    else -> null
+                }
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                    center = topBarCenter,
                     rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
                         navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
                     },

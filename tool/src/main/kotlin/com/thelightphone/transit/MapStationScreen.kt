@@ -35,6 +35,7 @@ import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -183,6 +184,8 @@ class MapStationViewModel(
                 val fetchRadiusMeters = STATION_ZOOM_TARGET_RADIUS_PIXELS * metersPerPixel(centerLat, zoom)
                 val mapTiles = try {
                     tileClient.fetchTilesAround(centerLat, centerLon, zoom, fetchRadiusMeters, darkMode)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e("MapStationScreen", "Map tile fetch failed for platforms $memberStopIds", e)
                     null
@@ -226,6 +229,8 @@ class MapStationViewModel(
                         tapHoldVehicleEnabled,
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("MapStationScreen", "Failed to load station map for platforms $memberStopIds", e)
                 _state.value = MapStationState.Error("Unable to load station map.")

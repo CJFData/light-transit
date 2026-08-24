@@ -40,28 +40,46 @@ private const val ICON_SIZE_UNITS = 1.4f
  * this owns the "keep popping until Home shows up" loop (with a small delay between each pop, see
  * [POP_STEP_DELAY_MS]) so every call site doesn't have to repeat it. See [HomeVisibility]'s own
  * doc for why the loop's stopping condition is safe without a "pop to root" primitive.
+ *
+ * [leadingIcon]/[trailingIcon] are optional flanking slots -- only Trip Detail's own Next/Previous
+ * run stepper uses these today (see TripDetailScreen's own doc), every other call site passes
+ * neither and renders exactly as before. Positioned via independent Box alignments, not a Row, so
+ * the Home circle stays exactly centered regardless of whether zero, one, or both slots are
+ * populated -- a rider toggling between "first run, no Previous" and "not the first run anymore"
+ * shouldn't see Home itself visibly shift.
  */
 @Composable
-fun BackToHomeFooter(onGoBackOnce: () -> Unit) {
+fun BackToHomeFooter(
+    onGoBackOnce: () -> Unit,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(FOOTER_HEIGHT_UNITS.gridUnitsAsDp())
             .padding(top = 0.5f.gridUnitsAsDp()),
-        contentAlignment = Alignment.Center,
     ) {
-        LightIcon(
-            icon = LightIcons.CIRCLE,
-            size = ICON_SIZE_UNITS,
-            contentDescription = "Home",
-            modifier = Modifier.lightClickable {
-                HomeVisibility.scope.launch {
-                    while (!HomeVisibility.isVisible.value) {
-                        onGoBackOnce()
-                        delay(POP_STEP_DELAY_MS)
+        leadingIcon?.let {
+            Box(modifier = Modifier.align(Alignment.CenterStart).padding(start = 2f.gridUnitsAsDp())) { it() }
+        }
+        Box(modifier = Modifier.align(Alignment.Center)) {
+            LightIcon(
+                icon = LightIcons.CIRCLE,
+                size = ICON_SIZE_UNITS,
+                contentDescription = "Home",
+                modifier = Modifier.lightClickable {
+                    HomeVisibility.scope.launch {
+                        while (!HomeVisibility.isVisible.value) {
+                            onGoBackOnce()
+                            delay(POP_STEP_DELAY_MS)
+                        }
                     }
-                }
-            },
-        )
+                },
+            )
+        }
+        trailingIcon?.let {
+            Box(modifier = Modifier.align(Alignment.CenterEnd).padding(end = 2f.gridUnitsAsDp())) { it() }
+        }
     }
 }

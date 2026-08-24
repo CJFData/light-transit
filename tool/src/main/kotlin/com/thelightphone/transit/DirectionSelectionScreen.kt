@@ -31,6 +31,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.lightClickable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,22 +54,32 @@ sealed class DirectionSelectionState {
  * routing detail, not part of the destination riders actually look for. */
 private val viaClauseRegex = Regex(""" via .*""", RegexOption.IGNORE_CASE)
 
+/** A directionName is only worth showing if it's actually a word -- CTA's non-standard trips.txt
+ * "direction" column (see [TripDirectionColumn]) is usually a real cardinal ("North"/"South"), but
+ * confirmed live on several routes (Pink, CTA's own Green Line, Orange) to just be the bare digit
+ * string of whichever direction_id it happens to match, e.g. "0" -- CTA's own data quality gap, not
+ * something introduced by ingestion. A bare digit reads as a copy-paste artifact, not a real
+ * direction, so it's treated the same as no directionName at all and falls through to "Direction
+ * $directionId" -- which for a route like that is no worse (and no better) than what CTA itself
+ * published, just honestly labeled as a fallback instead of dressed up as a real name. */
+private fun String?.asRealDirectionName(): String? = this?.takeIf { it.isNotBlank() && it.toIntOrNull() == null }
+
 /** Prefers the feed's own curated direction/destination (directions.txt -- see [DirectionOption]'s
  * own doc) when published, since it's the only reliable source for whether a route's two
  * directions are "Inbound"/"Outbound", "Northbound"/"Southbound", or something else -- direction_id
  * alone carries no fixed meaning. Falls back to a headsign-derived "Toward X" label for any agency
- * that doesn't publish it. Used by every screen that shows a [DirectionOption] on its own, outside
- * a grouped picker (arrivals, stop connections, the map), which are built directly from a specific
- * trip's own headsign with no directionName/destination attached, so this only exercises the
- * headsign branch in practice today. NOT used within [DirectionSelectionScreen] itself -- see
- * [rowLabel]'s own doc for why that needs different precedence. */
+ * that doesn't publish it, or [lastStopName] (see [DirectionOption]'s own doc) for one that has
+ * neither a headsign nor directions.txt at all -- e.g. CTA. Used by every screen that shows a
+ * [DirectionOption] on its own, outside a grouped picker (arrivals, stop connections, the map),
+ * which are built directly from a specific trip, not a grouped/curated one, so directionName only
+ * ever comes from a real directions.txt file here, never [DirectionSelectionScreen]'s own grouping.
+ * NOT used within [DirectionSelectionScreen] itself -- see [rowLabel]'s own doc for why that needs
+ * different precedence. */
 fun DirectionOption.displayLabel(): String {
-    directionName?.takeIf { it.isNotBlank() }?.let { name ->
+    directionName.asRealDirectionName()?.let { name ->
         return destination?.takeIf { it.isNotBlank() }?.let { "$name to $it" } ?: name
     }
-    return headsign?.takeIf { it.isNotBlank() }
-        ?.replace(viaClauseRegex, "")
-        ?.trim()
+    return (headsign?.takeIf { it.isNotBlank() }?.replace(viaClauseRegex, "")?.trim() ?: lastStopName?.takeIf { it.isNotBlank() })
         ?.let { "Toward $it" }
         ?: "Direction $directionId"
 }
@@ -78,14 +89,15 @@ fun DirectionOption.displayLabel(): String {
  * variants can share one direction_id (see [GtfsRepository.getDirections]'s own doc for real
  * examples), so they also share the same directions.txt-curated directionName/destination; if this
  * preferred directionName the way [displayLabel] does, every variant within a group would render
- * as identical text, defeating the point of keeping them separately selectable. Falls back to the
- * directionName/destination text only when a row has no headsign at all. */
+ * as identical text, defeating the point of keeping them separately selectable. [lastStopName] (see
+ * [DirectionOption]'s own doc) plays headsign's exact same role for an agency with no real headsign
+ * at all -- confirmed live on CTA Route 124: "Toward Clinton & Quincy" westbound, "Toward Navy Pier
+ * Terminal" eastbound. Falls back to the directionName/destination text only when a row has neither
+ * a headsign nor a derived last-stop name. */
 fun DirectionOption.rowLabel(): String =
-    headsign?.takeIf { it.isNotBlank() }
-        ?.replace(viaClauseRegex, "")
-        ?.trim()
+    (headsign?.takeIf { it.isNotBlank() }?.replace(viaClauseRegex, "")?.trim() ?: lastStopName?.takeIf { it.isNotBlank() })
         ?.let { "Toward $it" }
-        ?: directionName?.takeIf { it.isNotBlank() }?.let { name ->
+        ?: directionName.asRealDirectionName()?.let { name ->
             destination?.takeIf { it.isNotBlank() }?.let { "$name to $it" } ?: name
         }
         ?: "Direction $directionId"
@@ -125,6 +137,8 @@ class DirectionSelectionViewModel(dbFile: File, private val routeId: String) : L
                 } else {
                     DirectionSelectionState.Loaded(directions)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("DirectionSelectionScreen", "Failed to load directions for route $routeId", e)
                 DirectionSelectionState.Error("Unable to load directions.")
@@ -163,7 +177,7 @@ class DirectionSelectionScreen(
             val loaded = state as? DirectionSelectionState.Loaded ?: return@LaunchedEffect
             if (loaded.directions.isEmpty()) {
                 navigateTo(screenFactory = { activity ->
-                    FirstStopSelectionScreen(activity, dbFile, routeId, routeLabel, null, null, "Route")
+                    FirstStopSelectionScreen(activity, dbFile, routeId, routeLabel, null, null, null, "Route")
                 })
             }
         }
@@ -210,19 +224,19 @@ class DirectionSelectionScreen(
 
                     is DirectionSelectionState.Loaded -> {
                         // Grouped by direction_id (never more than 2 real groups -- see GtfsRepository.getDirections's
-                        // own doc) with a section header only when the feed's directions.txt gives every group a
-                        // real name -- e.g. MBTA's Framingham/Worcester Line reads as "Outbound: Toward
-                        // Worcester, Toward Framingham" / "Inbound: Toward South Station" instead of 4 flat,
-                        // unrelated-looking entries. Any agency without directions.txt has every directionName
-                        // null, so showHeaders is false and this renders as the same flat list it always has.
+                        // own doc) with a section header only when every group has a real directionName -- e.g.
+                        // MBTA's Framingham/Worcester Line reads as "Outbound: Toward Worcester, Toward
+                        // Framingham" / "Inbound: Toward South Station" instead of 4 flat, unrelated-looking
+                        // entries. Any agency without directions.txt has every directionName null; see
+                        // asRealDirectionName's own doc for the other way a "real" name turns out not to be one.
                         val groups = s.directions.groupBy { it.directionId }.entries.sortedBy { it.key }
-                        val showHeaders = s.directions.all { !it.directionName.isNullOrBlank() }
+                        val showHeaders = s.directions.all { it.directionName.asRealDirectionName() != null }
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             groups.forEach { (directionId, variants) ->
                                 if (showHeaders) {
                                     item {
                                         LightText(
-                                            text = variants.first().directionName ?: "Direction $directionId",
+                                            text = variants.first().directionName.asRealDirectionName() ?: "Direction $directionId",
                                             variant = LightTextVariant.Detail,
                                             lighten = true,
                                             modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
@@ -246,6 +260,7 @@ class DirectionSelectionScreen(
                                                         routeLabel,
                                                         direction.directionId,
                                                         direction.headsign,
+                                                        direction.lastStopId,
                                                         label,
                                                     )
                                                 })

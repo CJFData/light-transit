@@ -51,6 +51,16 @@ data class DirectionOption(
      * whichever headsign is most common among this direction's trips. Null under the same
      * conditions as [directionName]. */
     val destination: String? = null,
+    /** The real stop_id every trip in this group actually ends at, used ONLY as a grouping/matching
+     * fallback for an agency with no [headsign] at all (e.g. CTA) -- see [getDirections]'s own doc.
+     * Always null when [headsign] is non-null; a headsign-having agency already groups/matches by
+     * the real column, so this never needs to kick in. Distinct from [lastStopName] (the display
+     * text) because downstream stop/departure matching needs the real id, not the label -- see
+     * [getStopsForVariant]'s own doc for why conflating the two would silently match zero trips. */
+    val lastStopId: String? = null,
+    /** [lastStopId]'s own stop_name -- e.g. "Navy Pier Terminal" for CTA Route 124's eastbound
+     * group -- purely for display ("Toward Navy Pier Terminal"), see [rowLabel]. */
+    val lastStopName: String? = null,
 )
 
 data class StopOption(
@@ -149,6 +159,24 @@ data class TripRouteInfo(
 )
 
 /**
+ * Joins in one trip's own real last stop (id + name) as `ls.stop_id`/`ls.stop_name` -- see
+ * [DirectionOption]'s own doc for why. Guarded by `t.trip_headsign IS NULL` directly on the first
+ * join, not just in the final SELECT list, so a headsign-having trip never even evaluates the
+ * correlated MAX(stop_sequence) lookup: for every currently-wired agency except CTA, this join
+ * short-circuits on that one column check and costs nothing. Every caller's outer query already
+ * joins `trips t` filtered down to a small set of rows (one stop's upcoming departures, a specific
+ * trip_id set, etc.), so unlike [GtfsRepository.getDirections]'s own version of this same lookup
+ * (which has to explicitly scope to one route to avoid scanning the whole feed), this one can join
+ * `stop_times` directly rather than through a route-scoped derived table -- `t.trip_id` is already
+ * narrow per outer row, so SQLite can use stop_times' own trip_id index straight through.
+ */
+private const val LAST_STOP_JOIN = """
+    LEFT JOIN stop_times lst ON lst.trip_id = t.trip_id AND t.trip_headsign IS NULL
+        AND lst.stop_sequence = (SELECT MAX(st2.stop_sequence) FROM stop_times st2 WHERE st2.trip_id = t.trip_id)
+    LEFT JOIN stops ls ON ls.stop_id = lst.stop_id
+"""
+
+/**
  * Read-only access to one agency's ingested GTFS SQLite database. Every method issues a single
  * targeted query and returns a small result list — never a full table — so screens query
  * directly instead of holding parsed GTFS data in memory.
@@ -199,20 +227,44 @@ class GtfsRepository(dbFile: File) {
      * [DirectionSelectionScreen] uses that to group same-direction_id entries under a real
      * "Inbound"/"Outbound" header when available, without ever hiding a variant. Agencies without
      * directions.txt render as they always have: a flat list of every headsign.
+     *
+     * For a trip with no headsign at all (trip_headsign null -- e.g. every CTA trip), grouping
+     * degrades to (direction_id, null) alone since there's no headsign to split branches by, which
+     * would otherwise flatten real branch/short-turn distinctions the same way a "most common
+     * headsign" collapse would. [lastStopId]/[lastStopName] (see [DirectionOption]'s own doc) fill
+     * that gap: each trip's own real last stop stands in for headsign, both for grouping (confirmed
+     * live on CTA Route 124: its two directions each terminate at one real, consistent stop --
+     * "Clinton & Quincy" westbound, "Navy Pier Terminal" eastbound) and, via [rowLabel], for display.
+     * Only ever populated when trip_headsign is null -- a headsign-having agency already groups and
+     * matches by the real column, so this never needs to kick in for it.
      */
     fun getDirections(routeId: String): List<DirectionOption> =
         // LEFT JOINed on directions.txt's own documented key (route_id, direction_id) -- every
         // trip_headsign variant within a direction_id carries the same joined direction/
         // destination, since that join key doesn't depend on headsign at all.
+        //
+        // last_stop is scoped to this route's own trips (via its own trips join, not a bare
+        // stop_times/stops join) so the correlated MAX(stop_sequence) subquery only ever runs over
+        // one route's trips rather than the whole feed's stop_times table -- matters a lot on an
+        // agency the size of CTA's (~6M stop_times rows total).
         db.rawQuery(
             """
-            SELECT DISTINCT t.direction_id, t.trip_headsign, d.direction, d.direction_destination
+            SELECT DISTINCT t.direction_id, t.trip_headsign, d.direction, d.direction_destination,
+                CASE WHEN t.trip_headsign IS NULL THEN ls.stop_id END,
+                CASE WHEN t.trip_headsign IS NULL THEN ls.stop_name END
             FROM trips t
             LEFT JOIN directions d ON d.route_id = t.route_id AND d.direction_id = t.direction_id
+            LEFT JOIN (
+                SELECT st.trip_id, s.stop_id, s.stop_name
+                FROM stop_times st
+                JOIN stops s ON s.stop_id = st.stop_id
+                JOIN trips rt ON rt.trip_id = st.trip_id AND rt.route_id = ?
+                WHERE st.stop_sequence = (SELECT MAX(st2.stop_sequence) FROM stop_times st2 WHERE st2.trip_id = st.trip_id)
+            ) ls ON ls.trip_id = t.trip_id
             WHERE t.route_id = ? AND t.direction_id IS NOT NULL
-            ORDER BY t.direction_id, t.trip_headsign
+            ORDER BY t.direction_id, t.trip_headsign, ls.stop_id
             """,
-            arrayOf(routeId),
+            arrayOf(routeId, routeId),
         ).use { cursor ->
             cursor.mapRows {
                 DirectionOption(
@@ -220,6 +272,8 @@ class GtfsRepository(dbFile: File) {
                     headsign = getStringOrNull(1),
                     directionName = getStringOrNull(2),
                     destination = getStringOrNull(3),
+                    lastStopId = getStringOrNull(4),
+                    lastStopName = getStringOrNull(5),
                 )
             }
         }
@@ -248,12 +302,17 @@ class GtfsRepository(dbFile: File) {
     fun getStops(routeId: String, directionId: Int?, afterTime: String, today: LocalDate): List<StopOption> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val yesterday = today.minusDays(1)
+        val yesterdayGtfs = yesterday.toGtfsDateString()
+        val yesterdayDayColumn = yesterday.dayOfWeek.toGtfsColumnName()
         val directionClause = if (directionId == null) "t.direction_id IS NULL" else "t.direction_id = ?"
         val args = buildList {
             add(routeId)
             directionId?.let { add(it.toString()) }
             add(afterTime)
             addAll(listOf(todayGtfs, todayGtfs, todayGtfs))
+            add(shiftedToNextDay(afterTime))
+            addAll(listOf(yesterdayGtfs, yesterdayGtfs, yesterdayGtfs))
         }.toTypedArray()
         return db.rawQuery(
             """
@@ -261,8 +320,7 @@ class GtfsRepository(dbFile: File) {
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN stops s ON s.stop_id = st.stop_id
-            WHERE t.route_id = ? AND $directionClause AND st.departure_time >= ?
-              AND ${activeTodayClause(dayColumn)}
+            WHERE t.route_id = ? AND $directionClause AND ${activeTransitDayClause(dayColumn, yesterdayDayColumn)}
             GROUP BY st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
             ORDER BY MIN(st.stop_sequence)
             """,
@@ -291,22 +349,53 @@ class GtfsRepository(dbFile: File) {
      * Deliberately an exact headsign match, not [getDeparturesForVariant]'s broader "reaches at
      * least this far" inclusion -- this list should promise only what the exact chosen variant
      * guarantees today. Same "no departures today" exclusion as [getStops].
+     *
+     * [lastStopId] (see [DirectionOption]'s own doc) plays [headsign]'s exact same narrowing role
+     * for an agency with no headsign at all -- always null whenever [headsign] is non-null, so
+     * exactly one of the three [variantClause] branches below is ever live for a given call.
      */
-    fun getStopsForVariant(routeId: String, directionId: Int, headsign: String?, afterTime: String, today: LocalDate): List<StopOption> {
+    fun getStopsForVariant(routeId: String, directionId: Int, headsign: String?, lastStopId: String?, afterTime: String, today: LocalDate): List<StopOption> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val yesterday = today.minusDays(1)
+        val yesterdayGtfs = yesterday.toGtfsDateString()
+        val yesterdayDayColumn = yesterday.dayOfWeek.toGtfsColumnName()
+        // Same reasoning as getStops's own directionClause -- Android's rawQuery(sql, String[])
+        // throws IllegalArgumentException on a null array element (confirmed live: CTA's trips have
+        // no trip_headsign at all, so this is null on every real call for it), so a null value
+        // needs its own no-bind-arg clause rather than trying to pass null through "IS ?"/"= ?".
+        val variantClause = when {
+            headsign != null -> "t.trip_headsign = ?"
+            // A trip's own real last stop stands in for headsign -- see getDirections's own doc.
+            lastStopId != null -> """
+                t.trip_id IN (
+                    SELECT st2.trip_id FROM stop_times st2
+                    WHERE st2.stop_id = ?
+                      AND st2.stop_sequence = (SELECT MAX(st3.stop_sequence) FROM stop_times st3 WHERE st3.trip_id = st2.trip_id)
+                )
+            """.trimIndent()
+            else -> "t.trip_headsign IS NULL"
+        }
+        val args = buildList {
+            add(routeId)
+            add(directionId.toString())
+            headsign?.let { add(it) } ?: lastStopId?.let { add(it) }
+            add(afterTime)
+            addAll(listOf(todayGtfs, todayGtfs, todayGtfs))
+            add(shiftedToNextDay(afterTime))
+            addAll(listOf(yesterdayGtfs, yesterdayGtfs, yesterdayGtfs))
+        }.toTypedArray()
         return db.rawQuery(
             """
             SELECT st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN stops s ON s.stop_id = st.stop_id
-            WHERE t.route_id = ? AND t.direction_id = ? AND t.trip_headsign IS ? AND st.departure_time >= ?
-              AND ${activeTodayClause(dayColumn)}
+            WHERE t.route_id = ? AND t.direction_id = ? AND $variantClause AND ${activeTransitDayClause(dayColumn, yesterdayDayColumn)}
             GROUP BY st.stop_id, s.stop_name, s.stop_lat, s.stop_lon
             ORDER BY MIN(st.stop_sequence)
             """,
-            arrayOf(routeId, directionId.toString(), headsign, afterTime, todayGtfs, todayGtfs, todayGtfs),
+            args,
         ).use { cursor ->
             cursor.mapRows {
                 StopOption(
@@ -411,26 +500,56 @@ class GtfsRepository(dbFile: File) {
      * since the earlier version cross-joined every one of them against every reference trip
      * needlessly.
      */
-    fun getDeparturesForVariant(routeId: String, directionId: Int, headsign: String?, stopId: String, today: LocalDate): List<Departure> {
+    fun getDeparturesForVariant(routeId: String, directionId: Int, headsign: String?, lastStopId: String?, stopId: String, today: LocalDate): List<Departure> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        // Same reasoning as getStops's own directionClause -- Android's rawQuery(sql, String[])
+        // throws IllegalArgumentException on a null array element (confirmed live: CTA's trips have
+        // no trip_headsign at all), so a null value needs its own no-bind-arg clause rather than
+        // trying to pass null through "IS ?"/"IS NOT ?". [lastStopId] (see [DirectionOption]'s own
+        // doc) plays [headsign]'s exact same role here, including in this "reaches at least as far"
+        // containment check -- a shorter-running trip's own real last stop is a fine substitute for
+        // "which variant is this" the same way its headsign would be.
+        val variantClause = when {
+            headsign != null -> "t.trip_headsign = ?"
+            lastStopId != null -> """
+                t.trip_id IN (
+                    SELECT st2.trip_id FROM stop_times st2
+                    WHERE st2.stop_id = ?
+                      AND st2.stop_sequence = (SELECT MAX(st3.stop_sequence) FROM stop_times st3 WHERE st3.trip_id = st2.trip_id)
+                )
+            """.trimIndent()
+            else -> "t.trip_headsign IS NULL"
+        }
+        val notVariantClause = when {
+            headsign != null -> "t.trip_headsign IS NOT ?"
+            lastStopId != null -> """
+                t.trip_id NOT IN (
+                    SELECT st2.trip_id FROM stop_times st2
+                    WHERE st2.stop_id = ?
+                      AND st2.stop_sequence = (SELECT MAX(st3.stop_sequence) FROM stop_times st3 WHERE st3.trip_id = st2.trip_id)
+                )
+            """.trimIndent()
+            else -> "t.trip_headsign IS NOT NULL"
+        }
+        val variantArg: String? = headsign ?: lastStopId
         val sql = """
             WITH h_trips_at_stop AS (
                 SELECT DISTINCT t.trip_id
                 FROM trips t
                 JOIN stop_times st ON st.trip_id = t.trip_id
-                WHERE t.route_id = ? AND t.direction_id = ? AND t.trip_headsign IS ? AND st.stop_id = ?
+                WHERE t.route_id = ? AND t.direction_id = ? AND $variantClause AND st.stop_id = ?
             ),
             other_candidate_trips AS (
                 SELECT DISTINCT t.trip_id
                 FROM trips t
                 JOIN stop_times st ON st.trip_id = t.trip_id
-                WHERE t.route_id = ? AND t.direction_id = ? AND st.stop_id = ? AND t.trip_headsign IS NOT ?
+                WHERE t.route_id = ? AND t.direction_id = ? AND st.stop_id = ? AND $notVariantClause
             ),
             qualifying_other_trips AS (
-                -- A candidate (already known to carry a DIFFERENT headsign -- see
+                -- A candidate (already known to be a DIFFERENT variant -- see
                 -- other_candidate_trips) qualifies if, for at least one reference trip that itself
-                -- reaches this stop under the chosen headsign, the candidate visits every stop that
+                -- reaches this stop under the chosen variant, the candidate visits every stop that
                 -- reference trip visits (relational containment, not a raw row/stop count).
                 SELECT DISTINCT c.trip_id
                 FROM other_candidate_trips c, h_trips_at_stop h
@@ -446,16 +565,16 @@ class GtfsRepository(dbFile: File) {
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             WHERE t.route_id = ? AND t.direction_id = ? AND st.stop_id = ?
-              AND (t.trip_headsign IS ? OR t.trip_id IN (SELECT trip_id FROM qualifying_other_trips))
+              AND ($variantClause OR t.trip_id IN (SELECT trip_id FROM qualifying_other_trips))
               AND ${activeTodayClause(dayColumn)}
             ORDER BY st.departure_time
         """.trimIndent()
-        val args = arrayOf(
-            routeId, directionId.toString(), headsign, stopId,
-            routeId, directionId.toString(), stopId, headsign,
-            routeId, directionId.toString(), stopId, headsign,
-            todayGtfs, todayGtfs, todayGtfs,
-        )
+        val args = buildList {
+            add(routeId); add(directionId.toString()); variantArg?.let { add(it) }; add(stopId)
+            add(routeId); add(directionId.toString()); add(stopId); variantArg?.let { add(it) }
+            add(routeId); add(directionId.toString()); add(stopId); variantArg?.let { add(it) }
+            addAll(listOf(todayGtfs, todayGtfs, todayGtfs))
+        }.toTypedArray()
         return db.rawQuery(sql, args).use { cursor ->
             cursor.mapRows {
                 Departure(
@@ -475,19 +594,36 @@ class GtfsRepository(dbFile: File) {
      * shows only Readville-headsign trips, never the longer "South Station" ones that happen to
      * reach Readville along the way.
      */
-    fun getDeparturesForExactVariant(routeId: String, directionId: Int, headsign: String?, stopId: String, today: LocalDate): List<Departure> {
+    fun getDeparturesForExactVariant(routeId: String, directionId: Int, headsign: String?, lastStopId: String?, stopId: String, today: LocalDate): List<Departure> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        // Same reasoning as getStops's own directionClause -- see getStopsForVariant's own doc.
+        // [lastStopId] plays [headsign]'s exact same role here too.
+        val variantClause = when {
+            headsign != null -> "t.trip_headsign = ?"
+            lastStopId != null -> """
+                t.trip_id IN (
+                    SELECT st2.trip_id FROM stop_times st2
+                    WHERE st2.stop_id = ?
+                      AND st2.stop_sequence = (SELECT MAX(st3.stop_sequence) FROM stop_times st3 WHERE st3.trip_id = st2.trip_id)
+                )
+            """.trimIndent()
+            else -> "t.trip_headsign IS NULL"
+        }
+        val args = buildList {
+            add(routeId); add(directionId.toString()); (headsign ?: lastStopId)?.let { add(it) }; add(stopId)
+            addAll(listOf(todayGtfs, todayGtfs, todayGtfs))
+        }.toTypedArray()
         return db.rawQuery(
             """
             SELECT st.departure_time, t.trip_id, t.trip_headsign, st.stop_sequence
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
-            WHERE t.route_id = ? AND t.direction_id = ? AND t.trip_headsign IS ? AND st.stop_id = ?
+            WHERE t.route_id = ? AND t.direction_id = ? AND $variantClause AND st.stop_id = ?
               AND ${activeTodayClause(dayColumn)}
             ORDER BY st.departure_time
             """.trimIndent(),
-            arrayOf(routeId, directionId.toString(), headsign, stopId, todayGtfs, todayGtfs, todayGtfs),
+            args,
         ).use { cursor ->
             cursor.mapRows {
                 Departure(
@@ -504,7 +640,7 @@ class GtfsRepository(dbFile: File) {
      * The single scheduled trip on [routeId] whose FIRST stop_time departs at exactly [startTime],
      * active on [serviceDate] -- the standard GTFS-RT way to identify a trip when a live source
      * hands back (route, start_date, start_time) instead of a trip_id directly, e.g. CTA Bus
-     * Tracker's own `stsd`/`stst` fields (see [CtaBusTrackerSource]'s own doc). Null if zero or
+     * Tracker's own `stsd`/`stst` fields (see [RunAssociatedTripSource]'s own doc). Null if zero or
      * more than one trip matches -- an ambiguous match is left unresolved rather than guessed at,
      * so a caller just doesn't show a live position for that vehicle this poll rather than ever
      * linking it to the wrong trip.
@@ -598,25 +734,34 @@ class GtfsRepository(dbFile: File) {
         if (stopIds.isEmpty()) return emptyList()
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val yesterday = today.minusDays(1)
+        val yesterdayGtfs = yesterday.toGtfsDateString()
+        val yesterdayDayColumn = yesterday.dayOfWeek.toGtfsColumnName()
         val placeholders = stopIds.joinToString(",") { "?" }
         val isGrouped = stopIds.size > 1
 
         val sql = """
             SELECT st.departure_time, t.trip_id, st.stop_sequence, s.stop_desc,
                    r.route_id, r.route_short_name, r.route_long_name, r.route_type,
-                   t.direction_id, t.trip_headsign
+                   t.direction_id, t.trip_headsign, d.direction, d.direction_destination, ls.stop_id, ls.stop_name
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN routes r ON r.route_id = t.route_id
             JOIN stops s ON s.stop_id = st.stop_id
-            WHERE st.stop_id IN ($placeholders) AND st.departure_time > ? AND t.trip_id != ?
-              AND ${activeTodayClause(dayColumn)}
+            LEFT JOIN directions d ON d.route_id = t.route_id AND d.direction_id = t.direction_id
+            $LAST_STOP_JOIN
+            WHERE st.stop_id IN ($placeholders) AND t.trip_id != ?
+              AND ${activeTransitDayClause(dayColumn, yesterdayDayColumn, comparison = ">")}
             ORDER BY st.departure_time
         """.trimIndent()
 
         return db.rawQuery(
             sql,
-            (stopIds + listOf(afterTime, excludeTripId, todayGtfs, todayGtfs, todayGtfs)).toTypedArray(),
+            (stopIds + listOf(
+                excludeTripId,
+                afterTime, todayGtfs, todayGtfs, todayGtfs,
+                shiftedToNextDay(afterTime), yesterdayGtfs, yesterdayGtfs, yesterdayGtfs,
+            )).toTypedArray(),
         ).use { cursor ->
             cursor.mapRowsNotNull {
                 val directionId = getIntOrNull(8) ?: return@mapRowsNotNull null
@@ -631,7 +776,10 @@ class GtfsRepository(dbFile: File) {
                         longName = getStringOrNull(6),
                         routeType = getInt(7),
                     ),
-                    direction = DirectionOption(directionId, getStringOrNull(9)),
+                    direction = DirectionOption(
+                        directionId, getStringOrNull(9), directionName = getStringOrNull(10), destination = getStringOrNull(11),
+                        lastStopId = getStringOrNull(12), lastStopName = getStringOrNull(13),
+                    ),
                 )
             }
         }
@@ -754,23 +902,32 @@ class GtfsRepository(dbFile: File) {
     fun getScheduledArrivals(stopId: String, afterTime: String, today: LocalDate, graceSeconds: Int = 0): List<ScheduledArrival> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val yesterday = today.minusDays(1)
+        val yesterdayGtfs = yesterday.toGtfsDateString()
+        val yesterdayDayColumn = yesterday.dayOfWeek.toGtfsColumnName()
         val effectiveAfterTime = if (graceSeconds > 0) subtractSecondsFromGtfsTime(afterTime, graceSeconds) else afterTime
 
         val sql = """
             SELECT st.departure_time, t.trip_id, st.stop_sequence,
                    r.route_id, r.route_short_name, r.route_long_name, r.route_type,
-                   t.direction_id, t.trip_headsign
+                   t.direction_id, t.trip_headsign, d.direction, d.direction_destination, ls.stop_id, ls.stop_name
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN routes r ON r.route_id = t.route_id
-            WHERE st.stop_id = ? AND st.departure_time >= ?
-              AND ${activeTodayClause(dayColumn)}
+            LEFT JOIN directions d ON d.route_id = t.route_id AND d.direction_id = t.direction_id
+            $LAST_STOP_JOIN
+            WHERE st.stop_id = ?
+              AND ${activeTransitDayClause(dayColumn, yesterdayDayColumn)}
             ORDER BY st.departure_time
         """.trimIndent()
 
         return db.rawQuery(
             sql,
-            arrayOf(stopId, effectiveAfterTime, todayGtfs, todayGtfs, todayGtfs),
+            arrayOf(
+                stopId,
+                effectiveAfterTime, todayGtfs, todayGtfs, todayGtfs,
+                shiftedToNextDay(effectiveAfterTime), yesterdayGtfs, yesterdayGtfs, yesterdayGtfs,
+            ),
         ).use { cursor ->
             cursor.mapRowsNotNull {
                 val directionId = getIntOrNull(7) ?: return@mapRowsNotNull null
@@ -785,10 +942,71 @@ class GtfsRepository(dbFile: File) {
                         longName = getStringOrNull(5),
                         routeType = getInt(6),
                     ),
-                    direction = DirectionOption(directionId, getStringOrNull(8)),
+                    direction = DirectionOption(
+                        directionId, getStringOrNull(8), directionName = getStringOrNull(9), destination = getStringOrNull(10),
+                        lastStopId = getStringOrNull(11), lastStopName = getStringOrNull(12),
+                    ),
                 )
             }
         }
+    }
+
+    /**
+     * Real scheduled trips still upcoming for one (route_id, direction_id), each trip's own earliest
+     * remaining departure time -- the candidate pool a [FuzzyRunTrips] implementation ordinally pairs
+     * live runs against (see [matchFuzzyRunsOrdinally]). Returned as raw GTFS "HH:MM:SS" strings, not
+     * epoch seconds -- same zone-agnostic convention every other query in this class follows; the
+     * caller (which already has the agency's own zoneId) converts via [gtfsTimeToEpochSeconds].
+     *
+     * `MIN(st.departure_time)` per trip, not the trip's own first stop -- a trip already in progress
+     * relative to [afterTime] should rank by where it currently stands in its own remaining schedule,
+     * the same "how far along is this trip" signal a live run's own soonest predicted time already
+     * represents, not by a stale origin time. A trip within [MIN_REMAINING_STOPS_FOR_CANDIDATE] stops
+     * of its own end is excluded entirely rather than ranked normally -- confirmed live 2026-08-23: on
+     * a subway line with tight headways, a trip only 2 stops from its own terminal can still have a
+     * "soonest remaining stop" time just as close as a genuinely fresh candidate, but almost
+     * certainly already passed whatever stop the rider is actually viewing (a real CTA Blue Line trip
+     * ranked as "soonest" this way had already departed Belmont 17 minutes earlier), silently
+     * poisoning every match at that stop; the same root cause produced MBTA Green Line's own
+     * confirmed early-skewed status. This can't be fixed by ranking alone -- excluding it is what
+     * keeps a route-wide, stop-agnostic candidate pool usable for any specific stop along it.
+     */
+    fun getScheduledTripCandidates(routeId: String, directionId: Int, afterTime: String, today: LocalDate): List<Pair<String, String>> {
+        val todayGtfs = today.toGtfsDateString()
+        val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val yesterday = today.minusDays(1)
+        val yesterdayGtfs = yesterday.toGtfsDateString()
+        val yesterdayDayColumn = yesterday.dayOfWeek.toGtfsColumnName()
+        data class UpcomingStop(val tripId: String, val time: String, val stopSequence: Int, val maxStopSequence: Int)
+        val upcomingStops = db.rawQuery(
+            """
+            SELECT t.trip_id, st.departure_time, st.stop_sequence,
+                   (SELECT MAX(st2.stop_sequence) FROM stop_times st2 WHERE st2.trip_id = t.trip_id)
+            FROM trips t
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            WHERE t.route_id = ? AND t.direction_id = ?
+              AND ${activeTransitDayClause(dayColumn, yesterdayDayColumn)}
+            ORDER BY st.departure_time
+            """,
+            arrayOf(
+                routeId, directionId.toString(),
+                afterTime, todayGtfs, todayGtfs, todayGtfs,
+                shiftedToNextDay(afterTime), yesterdayGtfs, yesterdayGtfs, yesterdayGtfs,
+            ),
+        ).use { cursor ->
+            cursor.mapRows { UpcomingStop(getString(0), getString(1), getInt(2), getInt(3)) }
+        }
+        val seenTripIds = mutableSetOf<String>()
+        val result = mutableListOf<Pair<String, String>>()
+        for (stop in upcomingStops) {
+            // Already ordered by time ascending, so a trip_id's FIRST occurrence here is genuinely
+            // its own earliest remaining stop -- marked seen regardless of the filter below so a
+            // later, further-along stop for the same trip never gets substituted in its place.
+            if (!seenTripIds.add(stop.tripId)) continue
+            if (stop.maxStopSequence - stop.stopSequence < MIN_REMAINING_STOPS_FOR_CANDIDATE) continue
+            result.add(stop.tripId to stop.time)
+        }
+        return result
     }
 
     /**
@@ -802,25 +1020,33 @@ class GtfsRepository(dbFile: File) {
         if (stopIds.isEmpty()) return emptyList()
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
+        val yesterday = today.minusDays(1)
+        val yesterdayGtfs = yesterday.toGtfsDateString()
+        val yesterdayDayColumn = yesterday.dayOfWeek.toGtfsColumnName()
         val placeholders = stopIds.joinToString(",") { "?" }
         val isGrouped = stopIds.size > 1
 
         val sql = """
             SELECT st.departure_time, t.trip_id, st.stop_sequence, st.stop_id, s.stop_desc,
                    r.route_id, r.route_short_name, r.route_long_name, r.route_type,
-                   t.direction_id, t.trip_headsign
+                   t.direction_id, t.trip_headsign, d.direction, d.direction_destination, ls.stop_id, ls.stop_name
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN routes r ON r.route_id = t.route_id
             JOIN stops s ON s.stop_id = st.stop_id
-            WHERE st.stop_id IN ($placeholders) AND st.departure_time >= ?
-              AND ${activeTodayClause(dayColumn)}
+            LEFT JOIN directions d ON d.route_id = t.route_id AND d.direction_id = t.direction_id
+            $LAST_STOP_JOIN
+            WHERE st.stop_id IN ($placeholders)
+              AND ${activeTransitDayClause(dayColumn, yesterdayDayColumn)}
             ORDER BY st.departure_time
         """.trimIndent()
 
         return db.rawQuery(
             sql,
-            (stopIds + listOf(afterTime, todayGtfs, todayGtfs, todayGtfs)).toTypedArray(),
+            (stopIds + listOf(
+                afterTime, todayGtfs, todayGtfs, todayGtfs,
+                shiftedToNextDay(afterTime), yesterdayGtfs, yesterdayGtfs, yesterdayGtfs,
+            )).toTypedArray(),
         ).use { cursor ->
             cursor.mapRowsNotNull {
                 val directionId = getIntOrNull(9) ?: return@mapRowsNotNull null
@@ -836,7 +1062,10 @@ class GtfsRepository(dbFile: File) {
                         longName = getStringOrNull(7),
                         routeType = getInt(8),
                     ),
-                    direction = DirectionOption(directionId, getStringOrNull(10)),
+                    direction = DirectionOption(
+                        directionId, getStringOrNull(10), directionName = getStringOrNull(11), destination = getStringOrNull(12),
+                        lastStopId = getStringOrNull(13), lastStopName = getStringOrNull(14),
+                    ),
                 )
             }
         }
@@ -859,11 +1088,13 @@ class GtfsRepository(dbFile: File) {
         val sql = """
             SELECT st.departure_time, t.trip_id, st.stop_sequence, st.stop_id, s.stop_desc,
                    r.route_id, r.route_short_name, r.route_long_name, r.route_type,
-                   t.direction_id, t.trip_headsign
+                   t.direction_id, t.trip_headsign, d.direction, d.direction_destination, ls.stop_id, ls.stop_name
             FROM trips t
             JOIN stop_times st ON st.trip_id = t.trip_id
             JOIN routes r ON r.route_id = t.route_id
             JOIN stops s ON s.stop_id = st.stop_id
+            LEFT JOIN directions d ON d.route_id = t.route_id AND d.direction_id = t.direction_id
+            $LAST_STOP_JOIN
             WHERE t.trip_id IN ($tripPlaceholders) AND st.stop_id IN ($stopPlaceholders)
         """.trimIndent()
 
@@ -882,7 +1113,10 @@ class GtfsRepository(dbFile: File) {
                         longName = getStringOrNull(7),
                         routeType = getInt(8),
                     ),
-                    direction = DirectionOption(directionId, getStringOrNull(10)),
+                    direction = DirectionOption(
+                        directionId, getStringOrNull(10), directionName = getStringOrNull(11), destination = getStringOrNull(12),
+                        lastStopId = getStringOrNull(13), lastStopName = getStringOrNull(14),
+                    ),
                 )
             }
         }
@@ -899,9 +1133,11 @@ class GtfsRepository(dbFile: File) {
         val placeholders = tripIds.joinToString(",") { "?" }
         val sql = """
             SELECT t.trip_id, r.route_id, r.route_short_name, r.route_long_name, r.route_type,
-                   t.direction_id, t.trip_headsign
+                   t.direction_id, t.trip_headsign, d.direction, d.direction_destination, ls.stop_id, ls.stop_name
             FROM trips t
             JOIN routes r ON r.route_id = t.route_id
+            LEFT JOIN directions d ON d.route_id = t.route_id AND d.direction_id = t.direction_id
+            $LAST_STOP_JOIN
             WHERE t.trip_id IN ($placeholders)
         """.trimIndent()
 
@@ -915,7 +1151,10 @@ class GtfsRepository(dbFile: File) {
                         longName = getStringOrNull(3),
                         routeType = getInt(4),
                     ),
-                    direction = DirectionOption(directionId, getStringOrNull(6)),
+                    direction = DirectionOption(
+                        directionId, getStringOrNull(6), directionName = getStringOrNull(7), destination = getStringOrNull(8),
+                        lastStopId = getStringOrNull(9), lastStopName = getStringOrNull(10),
+                    ),
                 )
             }.toMap()
         }
@@ -1085,6 +1324,14 @@ internal fun platformLabelFromStopDesc(stopDesc: String?): String? {
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0
 
+/** ~33ft, kept a round metric value -- see [matchCurrentStopByProximity]'s own doc for why this
+ * replaced a relative "is the next stop closer than the current one" comparison. */
+private const val PROXIMITY_ARRIVAL_RADIUS_METERS = 10
+
+/** See [GtfsRepository.getScheduledTripCandidates]'s own doc for why a trip this close to its own
+ * end is excluded outright rather than just ranked normally. */
+private const val MIN_REMAINING_STOPS_FOR_CANDIDATE = 3
+
 /** Great-circle distance between two lat/lon points, in meters. */
 fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val dLat = Math.toRadians(lat2 - lat1)
@@ -1117,10 +1364,20 @@ data class StopProximityMatch(
  * [StopProximityMatch.stopSequence] this function returned on the previous poll, or null for the
  * first poll of a trip.
  *
- * Forward-only with hysteresis once an anchor exists: starting from the last matched stop, only
- * ever advances to the next stop in sequence, and only once the vehicle is measurably closer to it
- * than to the one it's leaving. Repeatedly advances (not just by one) so a poll interval that
- * missed several stops in a row still catches up in one call.
+ * Forward-only once an anchor exists: starting from the last matched stop, only ever advances to
+ * the IMMEDIATE next stop in sequence, and only once the vehicle has come within
+ * [PROXIMITY_ARRIVAL_RADIUS_METERS] of that specific stop's own coordinates -- never by comparing
+ * against any stop farther ahead. Repeatedly advances (not just by one) so a poll interval that
+ * missed several closely-spaced stops in a row still catches up in one call, but each step of that
+ * catch-up still only checks its own immediate next stop.
+ *
+ * This is deliberately NOT a relative "is the next stop closer than the current one" comparison
+ * (an earlier version of this function worked that way) -- confirmed live on a real RIPTA trip: a
+ * route that loops or backtracks near downtown can put a stop several positions AHEAD in sequence
+ * geometrically closer than the true current one, before the vehicle has actually traveled the
+ * real path to reach it, causing an incorrect multi-stop forward jump. Only ever evaluating the
+ * immediate next stop's own absolute distance makes a geometrically-close-but-sequentially-distant
+ * stop simply never a candidate at all.
  *
  * A null [lastMatchedStopSequence] (first poll) is a special case: a forward-only walk starting at
  * [stops]' own first entry assumes distance to the vehicle roughly decreases monotonically from
@@ -1147,13 +1404,12 @@ fun matchCurrentStopByProximity(
         ?.let { seq -> stops.indexOfFirst { it.stopSequence == seq } }
         ?.takeIf { it >= 0 }
         ?: (stops.indices.minByOrNull { distanceToIndex(it) ?: Double.MAX_VALUE } ?: 0)
-    var currentDistance = distanceToIndex(index) ?: return null
     while (true) {
         val nextDistance = distanceToIndex(index + 1) ?: break
-        if (nextDistance >= currentDistance) break
+        if (nextDistance > PROXIMITY_ARRIVAL_RADIUS_METERS) break
         index += 1
-        currentDistance = nextDistance
     }
+    val currentDistance = distanceToIndex(index) ?: return null
     return StopProximityMatch(
         stopSequence = stops[index].stopSequence,
         distanceMeters = currentDistance,
@@ -1185,6 +1441,49 @@ private fun activeTodayClause(dayColumn: String): String = """
         SELECT 1 FROM calendar_dates cd
         WHERE cd.service_id = t.service_id AND cd.date = ? AND cd.exception_type = 1
       )
+    )
+""".trimIndent()
+
+/** [afterTime] shifted forward 24 hours, into the numbering space a trip still running from
+ * yesterday's own transit day would use for the same real moment -- see
+ * [activeTransitDayClause]'s own doc. "08:15:30" becomes "32:15:30"; callers never need to reason
+ * about the value itself, just bind it where [activeTransitDayClause] expects it. */
+private fun shiftedToNextDay(afterTime: String): String {
+    val parts = afterTime.split(":")
+    val hour = parts[0].toInt() + 24
+    return "%02d:%s".format(hour, parts.drop(1).joinToString(":"))
+}
+
+/**
+ * The real-time-aware replacement for a plain `st.departure_time >= ? AND ${activeTodayClause(...)}`
+ * pair -- see [activeTodayClause]'s own doc for the calendar/calendar_dates logic this reuses
+ * unchanged, twice. GTFS lets a transit day's own trips run past midnight using hour values >=24
+ * (e.g. "25:30:00" for 1:30 AM) rather than rolling over to a new service_id, precisely so a late
+ * trip stays attached to the transit day it started on rather than the calendar day it happens to
+ * finish on. A query that only checks whether a trip's service is active on the CALENDAR day of
+ * "right now" misses exactly those still-running trips for the first several hours of a new
+ * calendar day, since their own service_id belongs to YESTERDAY's transit day, not today's --
+ * confirmed live 2026-08-24 as the root cause of both a CTA/MBTA fuzzy-run mismatch (a live vehicle
+ * still finishing yesterday's transit day got ordinally paired against today's own first trip,
+ * hours away) and the same gap in Upcoming Arrivals itself.
+ *
+ * Returns an OR'd pair of self-contained clauses, each with its own `st.departure_time >= ?` bound
+ * to its own transit day's numbering: today's own service compared against the plain [afterTime] as
+ * normal, and yesterday's service compared against [afterTime] shifted forward 24 hours via
+ * [shiftedToNextDay] (the equivalent point in yesterday's own >=24:00 numbering). [dayColumn]/
+ * [yesterdayDayColumn] are today's and yesterday's own [DayOfWeek.toGtfsColumnName] values.
+ *
+ * Callers bind, in this order, in place of the old plain afterTime + three today-date params:
+ * [afterTime], today's own three date params (see [activeTodayClause]), [shiftedToNextDay]'s
+ * result, then yesterday's own three date params.
+ *
+ * [comparison] defaults to `>=`; pass `>` for a caller (e.g. [getNextConnections]) that means
+ * "strictly after", not "at or after".
+ */
+private fun activeTransitDayClause(dayColumn: String, yesterdayDayColumn: String, comparison: String = ">="): String = """
+    (
+      (st.departure_time $comparison ? AND ${activeTodayClause(dayColumn)})
+      OR (st.departure_time $comparison ? AND ${activeTodayClause(yesterdayDayColumn)})
     )
 """.trimIndent()
 

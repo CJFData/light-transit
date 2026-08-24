@@ -53,7 +53,10 @@ enum class GtfsAgency(
         "https://pico-transit-proxy.data-32b.workers.dev/mbta/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/mbta/vehiclepositions",
         timeZoneId = "America/New_York",
-        components = listOf(MbtaV3VehicleSource),
+        // See MbtaGreenLineFuzzyRunSource's own doc -- Green Line's own live feed marks the vast
+        // majority of its running vehicles as ADDED trips with no real static trip to match to;
+        // Orange/Red/Blue aren't affected and keep using ordinary trip_id matching.
+        components = listOf(MbtaV3VehicleSource, MbtaGreenLineFuzzyRunSource),
     ),
     RIPTA(
         "ripta",
@@ -609,15 +612,15 @@ enum class GtfsAgency(
      * behind Cloudflare bot-protection and is unverified against GtfsRealtime.kt's schema, so
      * realtime instead comes from
      * CTA's own proprietary, documented APIs, wired as [AgencyComponent]s rather than a
-     * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] swap: [CtaBusTrackerSource] (Bus
+     * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] swap: [RunAssociatedTripSource] (Bus
      * Tracker) matches a live bus back to a real trip_id via its own scheduled-start-time fields
-     * (see that class's own doc) and is fully wired below. CTA Train Tracker ('L' trains) is NOT
-     * similarly trip-matched -- it identifies trains by run number, with no static-GTFS field that
-     * bridges back to a trip_id (confirmed against CTA's own current export), so train positions
-     * are shown as map markers only, never linked to a specific scheduled trip or trip detail
-     * screen. ~6.0M stop_times rows -- larger than STM's 5.1M that already needed the streaming/
-     * batching fixes; same order of magnitude, not UK-BODS-regional scale, but wants its own real
-     * device ingest test before being trusted. */
+     * (see that class's own doc) and is fully wired below. CTA Train Tracker ('L' trains) isn't
+     * wired at all yet -- it identifies trains by run number, with no static-GTFS field that
+     * bridges back to a trip_id, so it's a [FuzzyRunTrips] candidate, not a [RunAssociatedTripSource]
+     * one; declared/scoped below, actual fetching not implemented yet. ~6.0M stop_times rows --
+     * larger than STM's 5.1M that already needed the streaming/batching fixes; same order of
+     * magnitude, not UK-BODS-regional scale, but wants its own real device ingest test before being
+     * trusted. */
     CTA(
         "cta",
         "CTA (Partial Live)",
@@ -625,7 +628,16 @@ enum class GtfsAgency(
         null,
         null,
         timeZoneId = "America/Chicago",
-        components = listOf(CtaBusTrackerSource),
+        // See TripDirectionColumn's own doc -- CTA's trips.txt has no trip_headsign at all, but its
+        // non-standard "direction" column (verified consistent per route_id+direction_id across the
+        // whole feed) stands in for it. See CtaTrainTrackerSource's own doc -- it's scoped to 'L'
+        // route_ids (verified against CTA's own routes.txt) -- Bus Tracker's routes are unaffected,
+        // already run-associated.
+        components = listOf(
+            RunAssociatedTripSource,
+            TripDirectionColumn("direction"),
+            CtaTrainTrackerSource,
+        ),
     ),
     /** Realtime exists (30s refresh, gtfspublic.metrarr.com) but requires submitting Metra's own
      * GTFS-RT license agreement request form before a key is issued -- not wired here,

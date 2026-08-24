@@ -28,6 +28,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.AgencyPreferences
+import com.thelightphone.transit.gtfs.BoardedFuzzyRun
+import com.thelightphone.transit.gtfs.BoardedFuzzyRunPreferences
 import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.FeedAttribution
@@ -36,9 +38,14 @@ import com.thelightphone.transit.gtfs.GtfsCacheClearedSignal
 import com.thelightphone.transit.gtfs.GtfsIngestor
 import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.GtfsRtStopTimeEvent
+import com.thelightphone.transit.gtfs.GtfsRtStopTimeUpdate
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
+import com.thelightphone.transit.gtfs.FuzzyRunTrips
+import com.thelightphone.transit.gtfs.LiveVehicleSource
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.SecondaryGtfsFeed
+import com.thelightphone.transit.gtfs.StopPredictionSource
 import com.thelightphone.transit.gtfs.fetchTripUpdate
 import com.thelightphone.transit.gtfs.fetchVehiclePosition
 import com.thelightphone.transit.gtfs.matchCurrentStopByProximity
@@ -208,6 +215,11 @@ data class ActiveTripStatus(
     /** The boarded trip's own agency timezone -- [etaEpochSeconds] must be rendered against this,
      * not the rider's device zone, same reasoning as every other GTFS time display in the app. */
     val zoneId: ZoneId,
+    /** True only when the fields above came from a [FuzzyRunTrips] source (CTA 'L' trains, MBTA
+     * Green Line) -- an approximate rank-matched pairing, never a certain one (see
+     * [FuzzyRunTrips]'s own doc). [headingSubtitle] must mark this distinctly so a rider never
+     * mistakes an approximation for a confirmed live position while boarded. */
+    val isClosestMatch: Boolean = false,
 )
 
 private fun Long.asClockTime(zoneId: ZoneId): String {
@@ -216,15 +228,19 @@ private fun Long.asClockTime(zoneId: ZoneId): String {
 }
 
 fun ActiveTripStatus.headingSubtitle(): String {
+    // "~" prefix is the only signal a rider gets here that this is a closest-match approximation,
+    // not a confirmed live position -- HomeScreen's single compact line has no room for a separate
+    // "Closest match" label the way Upcoming Arrivals/Trip Detail show one.
+    val approxPrefix = if (isClosestMatch) "~" else ""
     val stopsToDest = when {
         stopsRemaining == null -> null
         stopsRemaining <= 0 -> alightStopName?.let { "Arriving at $it" } ?: "Arriving"
         else -> {
             val stopsWord = if (stopsRemaining == 1) "stop" else "stops"
-            alightStopName?.let { "$stopsRemaining $stopsWord to $it" } ?: "$stopsRemaining $stopsWord away"
+            alightStopName?.let { "$approxPrefix$stopsRemaining $stopsWord to $it" } ?: "$approxPrefix$stopsRemaining $stopsWord away"
         }
     }
-    val etaText = etaEpochSeconds?.let { "ETA ${it.asClockTime(zoneId)}" }
+    val etaText = etaEpochSeconds?.let { "${approxPrefix}ETA ${it.asClockTime(zoneId)}" }
     return listOfNotNull(stopsToDest, etaText).joinToString(" · ").ifBlank {
         if (alightStopName != null) {
             "Boarded"
@@ -238,6 +254,7 @@ class HomeScreenViewModel(
     private val filesDir: File,
     private val preferences: AgencyPreferences,
     private val boardedTripPreferences: BoardedTripPreferences,
+    private val boardedFuzzyRunPreferences: BoardedFuzzyRunPreferences,
     private val homeScreenPreferences: HomeScreenPreferences,
     private val connectivity: LightConnectivity,
     private val networkPreferences: NetworkPreferences,
@@ -250,6 +267,11 @@ class HomeScreenViewModel(
      * to Trip Detail rather than a background tracker. Collected for this ViewModel's whole
      * lifetime so it reflects a Board/Alight tap made on Trip Detail immediately upon returning here. */
     val boardedTrip = MutableStateFlow<BoardedTrip?>(null)
+
+    /** The rider's own explicit Select Run pick (Trip Detail, while boarded) -- see
+     * [BoardedFuzzyRun]'s own doc. Collected for this ViewModel's whole lifetime so a selection made
+     * on Trip Detail is reflected here immediately, same reasoning as [boardedTrip]. */
+    val boardedFuzzyRun = MutableStateFlow<BoardedFuzzyRun?>(null)
 
     /** Live progress toward the boarded trip's alight stop -- see [ActiveTripStatus]'s own doc
      * comment. Null whenever nothing's boarded; otherwise refreshed by [tripStatusPollJob] below. */
@@ -341,6 +363,12 @@ class HomeScreenViewModel(
                 boardedTrip.value = it
                 if (it == null) activeTripStatus.value = null
                 lastMatchedStopSequence = null
+                tripStatusRefreshTrigger.trySend(Unit)
+            }
+        }
+        viewModelScope.launch {
+            boardedFuzzyRunPreferences.boardedFuzzyRunFlow.collect {
+                boardedFuzzyRun.value = it
                 tripStatusRefreshTrigger.trySend(Unit)
             }
         }
@@ -488,20 +516,115 @@ class HomeScreenViewModel(
 
             val vehicle = trip.agency.fetchVehiclePosition(trip.tripId)
             val tripUpdate = trip.agency.fetchTripUpdate(trip.tripId)
+
+            // A richer live source (e.g. CTA Bus Tracker's RunAssociatedTripSource) can locate this
+            // trip's vehicle even when the agency has no standard GTFS-RT feed at all -- same
+            // architecture gap Upcoming Arrivals/Map/Trip Detail had before being wired up; this was
+            // the one screen still missed, confirmed live: Trip Detail showed a moving CTA vehicle
+            // while this progress bar stayed frozen at its starting position the whole trip. Scoped to
+            // this trip's own LineType, same coveredLineTypes rule every other live-source caller uses.
+            val liveVehicleSource = trip.agency.component<LiveVehicleSource>()
+                ?.takeIf { source -> trip.lineType != null && trip.lineType in source.coveredLineTypes }
+            val stopPredictionSource = trip.agency.component<StopPredictionSource>()
+            // Same architecture-gap reasoning as liveVehicleSource above, for CTA 'L' trains/MBTA
+            // Green Line vehicles that have no real trip to resolve to at all -- see FuzzyRunTrips's
+            // own doc, and TripDetailScreen's identical wiring for the same source.
+            val fuzzyRunTrips = trip.agency.component<FuzzyRunTrips>()
+            val routeId = (liveVehicleSource != null || fuzzyRunTrips != null)
+                .takeIf { it }
+                ?.let { repository.getRoutesForTrips(setOf(trip.tripId))[trip.tripId]?.route?.routeId }
+            val scopedFuzzyRunTrips = fuzzyRunTrips?.takeIf { source -> routeId != null && routeId in source.routeIds }
+            // A rider's own explicit Select Run pick (Trip Detail, while boarded) always wins over
+            // the automatic closest-match once it exists for this exact trip -- see BoardedFuzzyRun's
+            // own doc for why boarding specifically needs that higher-authority layer.
+            val pinnedRun = boardedFuzzyRun.value?.takeIf { it.tripId == trip.tripId }
+            val liveVehicleInfo = liveVehicleSource
+                ?.takeIf { routeId != null }
+                ?.let { source ->
+                    try {
+                        source.vehiclesByRoute(setOf(routeId!!), repository)[trip.tripId]
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e("HomeScreen", "Live vehicle fetch failed", e)
+                        null
+                    }
+                }
+            // Authoritative next stop, immune to GPS-proximity's looping-route ambiguity -- see
+            // StopPredictionSource.nextStopForVehicle's own doc. Tried first; falls through to the
+            // existing position-based chain when unsupported or this vehicle has no predictions right now.
+            val vehicleNextStop = stopPredictionSource?.let { source ->
+                liveVehicleInfo?.vehicleId?.let { vehicleId ->
+                    try {
+                        source.nextStopForVehicle(vehicleId, repository, trip.agency.zoneId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e("HomeScreen", "Vehicle-scoped prediction fetch failed", e)
+                        null
+                    }
+                }
+            }
+            val matchedStopFromVehicle = vehicleNextStop?.let { next -> stops.find { it.stopId == next.stopId } }
+
+            // Least certain of every source checked here (see FuzzyRunTrips's own doc), so it's only
+            // ever consulted once liveVehicleInfo/vehicle/tripUpdate have all come up empty below --
+            // same priority TripDetailScreen's own poll loop already gives it. A pinned run (see
+            // pinnedRun's own doc above) skips the ranked match entirely and just refreshes that one
+            // specific run's current live data instead.
+            val fuzzyTripUpdate = scopedFuzzyRunTrips?.let { source ->
+                try {
+                    if (pinnedRun != null) {
+                        source.tripUpdateForRun(pinnedRun.runId, trip.tripId, routeId!!, repository, trip.agency, trip.agency.zoneId)
+                    } else {
+                        source.matchedTripUpdates(setOf(routeId!!), repository, trip.agency, trip.agency.zoneId)[trip.tripId]
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("HomeScreen", "Fuzzy run match fetch failed", e)
+                    null
+                }
+            }
+            // The soonest remaining stop in the matched live run's own ordered stop list -- same
+            // "first entry is the next stop" precedent vehicleNextStop/matchedStopFromVehicle above
+            // already establishes for StopPredictionSource.
+            val matchedStopFromFuzzy = fuzzyTripUpdate?.stopTimeUpdate?.firstOrNull()?.stopId
+                ?.let { stopId -> stops.find { it.stopId == stopId } }
+            // Computed once, reused both in the fallback chain below and in isClosestMatch's own
+            // check, so the two can never drift out of sync with each other.
+            val tripUpdateInferredSequence = tripUpdate?.inferCurrentStopSequence()
+
             // VehiclePositions' own current_stop_sequence is preferred when present; falls back to
             // GPS-proximity matching, and only as a last resort to inferring it from TripUpdates' own
             // remaining stops -- same fallback chain as TripDetailScreen's poll loop, needed since RIPTA's
             // feed never populates current_stop_sequence (see matchCurrentStopByProximity). Without this,
             // RIPTA's progress bar never moves even though Trip Detail shows live movement for the same trip.
-            val currentSeq = vehicle?.currentStopSequence
+            val currentSeq = matchedStopFromVehicle?.stopSequence
+                ?: liveVehicleInfo?.currentStopSequence
+                ?: liveVehicleInfo?.let { info ->
+                    val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
+                    matchCurrentStopByProximity(
+                        stops, stopLocations, info.latitude, info.longitude, lastMatchedStopSequence,
+                    )
+                }?.stopSequence
+                ?: vehicle?.currentStopSequence
                 ?: vehicle?.position?.let { pos ->
                     val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
                     matchCurrentStopByProximity(
                         stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(), lastMatchedStopSequence,
                     )
                 }?.stopSequence
-                ?: tripUpdate?.inferCurrentStopSequence()
+                ?: tripUpdateInferredSequence
+                ?: matchedStopFromFuzzy?.stopSequence
             lastMatchedStopSequence = currentSeq ?: lastMatchedStopSequence
+            // True only when nothing above this point resolved a stop -- matchedStopFromFuzzy is
+            // exactly what filled currentSeq's last fallback slot, so this stays in sync with the
+            // priority chain above by construction. A rider's own pinned run is never "closest
+            // match" -- they confirmed it themselves.
+            val isClosestMatch = pinnedRun == null && matchedStopFromVehicle == null &&
+                liveVehicleInfo == null && vehicle == null && tripUpdateInferredSequence == null &&
+                matchedStopFromFuzzy != null
 
             val stopsRemaining = currentSeq?.let { seq -> stops.count { it.stopSequence in seq until stop.stopSequence } }
             // currentSeq is the stop the vehicle is APPROACHING, not one it's already reached -- true of
@@ -526,13 +649,33 @@ class HomeScreenViewModel(
             val today = todayForGtfs(trip.agency.zoneId)
             val rtStopUpdate = tripUpdate?.updateFor(stop.stopId, stop.stopSequence)
             val scheduledTime = stop.arrivalTime ?: stop.departureTime
-            val eta = scheduledTime?.let { computeArrivalEta(it, today, rtStopUpdate, trip.agency.zoneId) }
+            // This ETA is for the rider's designated ALIGHT stop specifically, not necessarily the
+            // vehicle's immediate next stop -- vehicleNextStop's own predicted time is reused directly
+            // only on the rare occasion it happens to be the same stop (about to arrive), otherwise a
+            // fresh stop-scoped lookup is needed, same "real predicted time beats trust-the-schedule"
+            // priority Upcoming Arrivals/Trip Detail already give StopPredictionSource.
+            val predictedAlightTime = vehicleNextStop?.takeIf { it.stopId == stop.stopId }?.predictedEpochSeconds
+                ?: stopPredictionSource?.let { source ->
+                    try {
+                        source.predictionsByStop(setOf(stop.stopId), repository, trip.agency.zoneId)[trip.tripId]
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e("HomeScreen", "Stop prediction fetch failed", e)
+                        null
+                    }
+                }
+            val effectiveRtUpdate = predictedAlightTime?.let {
+                GtfsRtStopTimeUpdate(departure = GtfsRtStopTimeEvent(time = it))
+            } ?: rtStopUpdate ?: fuzzyTripUpdate?.updateFor(stop.stopId, stop.stopSequence)
+            val eta = scheduledTime?.let { computeArrivalEta(it, today, effectiveRtUpdate, trip.agency.zoneId) }
 
             activeTripStatus.value = ActiveTripStatus(
                 routeLabel = trip.routeLabel,
                 alightStopName = stop.stopName,
                 etaEpochSeconds = eta?.etaEpochSeconds,
                 stopsRemaining = stopsRemaining,
+                isClosestMatch = isClosestMatch,
                 progressFraction = progressFraction,
                 zoneId = trip.agency.zoneId,
             )
@@ -541,6 +684,8 @@ class HomeScreenViewModel(
             // fires even if the rider's just sitting on HomeScreen rather than Trip Detail -- see
             // the shared checkReachedAlightStop's own doc comment.
             checkReachedAlightStop(trip, stops, currentSeq, boardedTripPreferences) { reachedAlightStop.value = trip.agency to it }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("HomeScreen", "Failed to refresh active trip status for ${trip.tripId}", e)
         } finally {
@@ -596,6 +741,8 @@ class HomeScreenViewModel(
                 agencyHasStations.value = stationRepo.getAllStations().isNotEmpty()
                 feedAttribution.value = listOfNotNull(stationRepo.getFeedAttribution()) +
                     agency.components.filterIsInstance<SecondaryGtfsFeed>().map { FeedAttribution(it.name, url = null) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("HomeScreen", "Station/attribution lookup failed for ${agency.displayName}", e)
             } finally {
@@ -620,6 +767,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
             lightContext.filesDir,
             AgencyPreferences(lightContext.dataStore),
             BoardedTripPreferences(lightContext.dataStore),
+            BoardedFuzzyRunPreferences(lightContext.dataStore),
             HomeScreenPreferences(lightContext.dataStore),
             lightContext.connectivity,
             NetworkPreferences(lightContext.dataStore),

@@ -13,7 +13,7 @@ import java.io.File
  * cached feed's metadata and forces one full re-ingest whenever it doesn't match, independent of
  * the feed's own ETag/Last-Modified.
  */
-internal const val GTFS_SCHEMA_VERSION = 1
+internal const val GTFS_SCHEMA_VERSION = 2
 
 /**
  * Mirrors the subset of the GTFS static spec this app ingests. trip_id, route_id, stop_id, and

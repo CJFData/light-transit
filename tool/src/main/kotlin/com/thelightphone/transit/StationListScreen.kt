@@ -49,6 +49,7 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
 import com.thelightphone.sdk.ui.lightClickable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,12 +84,20 @@ class StationListViewModel(
      * other one-shot Settings read in this app. */
     val tapHoldArrivalsEnabled = MutableStateFlow(true)
 
+    /** See TapHoldPreferences.stationTapArrivalsEnabledFlow -- on by default, swaps this screen's
+     * tap/tap-and-hold gestures so a plain tap opens arrivals directly. Read once at screen-open,
+     * same as [tapHoldArrivalsEnabled] above. */
+    val stationTapArrivalsEnabled = MutableStateFlow(true)
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             tapHoldArrivalsEnabled.value = tapHoldPreferences.tapHoldStationArrivalsEnabledFlow.first()
+            stationTapArrivalsEnabled.value = tapHoldPreferences.stationTapArrivalsEnabledFlow.first()
             _state.value = try {
                 StationListState.Loaded(repository.getAllStations())
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("StationListScreen", "Failed to load stations", e)
                 StationListState.Error("Unable to load stations.")
@@ -121,25 +130,41 @@ class StationListScreen(
         StationListViewModel(dbFile, TapHoldPreferences(lightContext.dataStore))
 
     @Composable
-    private fun StationRow(station: StopLocation, tapHoldArrivalsEnabled: Boolean) {
+    private fun StationRow(station: StopLocation, tapHoldArrivalsEnabled: Boolean, stationTapArrivalsEnabled: Boolean) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // A short tap opens the station's own platform map, same as always; tap-and-hold newly jumps
-                // straight to its actual (live) upcoming arrivals across every platform, skipping the map
-                // for a rider who just wants the next departure.
-                .pointerInput(station.stopId) {
+                // With stationTapArrivalsEnabled (on by default, this screen only -- see
+                // TapHoldPreferences.stationTapArrivalsEnabledFlow), a short tap jumps straight to the
+                // station's actual (live) upcoming arrivals across every platform, and tap-and-hold opens
+                // its platform map instead -- the map is still one tap away from there via Upcoming
+                // Arrivals' own "Selected stop" row. Off, gestures revert to the original assignment: a
+                // short tap opens the platform map, and tapHoldArrivalsEnabled gates whether tap-and-hold
+                // opens arrivals.
+                .pointerInput(station.stopId, stationTapArrivalsEnabled, tapHoldArrivalsEnabled) {
                     detectTapGestures(
                         onTap = {
-                            navigateTo(screenFactory = { activity ->
-                                MapStationScreen(activity, dbFile, agency, station.memberStopIds, station.displayLabel())
-                            })
+                            if (stationTapArrivalsEnabled) {
+                                navigateTo(screenFactory = { activity ->
+                                    UpcomingArrivalsScreen(activity, dbFile, agency, station.memberStopIds, station.displayLabel())
+                                })
+                            } else {
+                                navigateTo(screenFactory = { activity ->
+                                    MapStationScreen(activity, dbFile, agency, station.memberStopIds, station.displayLabel())
+                                })
+                            }
                         },
                         onLongPress = {
-                            if (!tapHoldArrivalsEnabled) return@detectTapGestures
-                            navigateTo(screenFactory = { activity ->
-                                UpcomingArrivalsScreen(activity, dbFile, agency, station.memberStopIds, station.displayLabel())
-                            })
+                            if (stationTapArrivalsEnabled) {
+                                navigateTo(screenFactory = { activity ->
+                                    MapStationScreen(activity, dbFile, agency, station.memberStopIds, station.displayLabel())
+                                })
+                            } else {
+                                if (!tapHoldArrivalsEnabled) return@detectTapGestures
+                                navigateTo(screenFactory = { activity ->
+                                    UpcomingArrivalsScreen(activity, dbFile, agency, station.memberStopIds, station.displayLabel())
+                                })
+                            }
                         },
                     )
                 }
@@ -182,6 +207,7 @@ class StationListScreen(
     private fun SearchContent(
         stations: List<StopLocation>,
         tapHoldArrivalsEnabled: Boolean,
+        stationTapArrivalsEnabled: Boolean,
         textFieldState: TextFieldState,
         onBack: () -> Unit,
     ) {
@@ -229,7 +255,7 @@ class StationListScreen(
                 )
             }
             LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 32.dp)) {
-                items(filtered, key = { it.stopId }) { station -> StationRow(station, tapHoldArrivalsEnabled) }
+                items(filtered, key = { it.stopId }) { station -> StationRow(station, tapHoldArrivalsEnabled, stationTapArrivalsEnabled) }
             }
             LightEmbeddedLp3Keyboard(viewModel = keyboardViewModel)
         }
@@ -239,6 +265,7 @@ class StationListScreen(
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val tapHoldArrivalsEnabled by viewModel.tapHoldArrivalsEnabled.collectAsState()
+        val stationTapArrivalsEnabled by viewModel.stationTapArrivalsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
         var searchActive by remember { mutableStateOf(false) }
         // See SearchContent's own doc -- hoisted here (not created inside SearchContent) so it
@@ -253,7 +280,7 @@ class StationListScreen(
                         .fillMaxSize()
                         .background(LightThemeTokens.colors.background)
                 ) {
-                    SearchContent(loadedStations, tapHoldArrivalsEnabled, searchTextFieldState, onBack = { searchActive = false })
+                    SearchContent(loadedStations, tapHoldArrivalsEnabled, stationTapArrivalsEnabled, searchTextFieldState, onBack = { searchActive = false })
                 }
                 return@LightTheme
             }
@@ -308,7 +335,7 @@ class StationListScreen(
                             }
                         }
                         LazyColumn(modifier = Modifier.weight(1f)) {
-                            items(s.stations, key = { it.stopId }) { station -> StationRow(station, tapHoldArrivalsEnabled) }
+                            items(s.stations, key = { it.stopId }) { station -> StationRow(station, tapHoldArrivalsEnabled, stationTapArrivalsEnabled) }
                         }
                     }
                 }

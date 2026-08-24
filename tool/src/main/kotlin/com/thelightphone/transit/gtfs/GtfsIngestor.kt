@@ -15,7 +15,9 @@ import java.io.File
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.zip.ZipException
 import java.util.zip.ZipFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -28,6 +30,26 @@ enum class GtfsIngestStatus {
 class GtfsIngestException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 private const val MAX_REDIRECTS = 5
+
+/** See [GtfsIngestor.loadEntryWithRetry]'s own doc. */
+private const val MAX_ENTRY_READ_ATTEMPTS = 3
+
+/**
+ * Shared across every [GtfsIngestor] instance in the process, not one per instance -- confirmed on
+ * real hardware that a per-instance `Mutex()` doesn't actually prevent two concurrent ingests of the
+ * same agency: if something upstream ends up constructing more than one [GtfsIngestor] (e.g. a
+ * ViewModel getting recreated while a previous instance's ingest is still in flight, or a rider
+ * re-tapping an agency faster than the app can settle), each instance's own private Mutex only
+ * serializes calls made through *that* instance, not against a sibling instance's calls to the same
+ * on-disk `gtfs.zip`/`transit.db.tmp` paths. That gap produced a real, reproduced failure: one
+ * ingest's `downloadZip` truncating and rewriting `gtfs.zip` while another ingest's `parseAndLoad`
+ * was still reading it, surfacing as `ZipException`s (`ZIP_Read: error reading zip file`, or even
+ * `error in opening zip file` on a brand-new [ZipFile] handle) that looked at first like a corrupt
+ * download or a stale OS-reclaimed handle, but reproduced instantly whenever two ingest attempts
+ * genuinely overlapped. A single process-wide mutex makes that impossible regardless of how many
+ * [GtfsIngestor] instances exist.
+ */
+private val ingestMutex = Mutex()
 
 /** Path to an agency's ingested SQLite database, shared by the ingestor and every query screen. */
 fun gtfsDbFile(filesDir: File, agency: GtfsAgency): File =
@@ -61,8 +83,6 @@ class GtfsIngestor(
     private val connectivity: LightConnectivity,
     private val networkPreferences: NetworkPreferences,
 ) {
-    private val ingestMutex = Mutex()
-
     /**
      * Re-downloads only when the feed has actually changed: a HEAD request's ETag/Last-Modified is
      * compared against what was cached from the last successful download. Unchanged means the
@@ -102,6 +122,8 @@ class GtfsIngestor(
         val cachedMeta = readFeedMeta(metaFile, feedUrls)
         val remoteMeta = try {
             feedUrls.map { checkForUpdate(it) }.takeIf { metas -> metas.all { it != null } }?.map { it!! }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("GtfsIngestor", "Feed update check failed for ${agency.displayName}, redownloading to be safe", e)
             null
@@ -126,9 +148,10 @@ class GtfsIngestor(
         val db = openGtfsDatabase(tempDbFile)
         try {
             clearGtfsTables(db)
+            val tripDirectionColumn = agency.component<TripDirectionColumn>()?.columnName
             zipFiles.forEachIndexed { index, zipFile ->
                 val secondaryFeedName = if (index == 0) null else secondaryFeeds[index - 1].name
-                parseAndLoad(zipFile, db, if (index == 0) "" else "feed$index:", secondaryFeedName)
+                parseAndLoad(zipFile, db, if (index == 0) "" else "feed$index:", secondaryFeedName, tripDirectionColumn)
             }
         } finally {
             db.close()
@@ -250,35 +273,79 @@ class GtfsIngestor(
      * STM Montreal's stop_times.txt crashed on real hardware). The real safety net is
      * [ingestInternal]'s temp-file-then-atomic-move: a failure partway through here just leaves the
      * temp database mid-load and never reaches the move, so the previous good database is untouched. */
-    private fun parseAndLoad(zipFile: File, db: SQLiteDatabase, idPrefix: String, secondaryFeedName: String?) {
+    private fun parseAndLoad(
+        zipFile: File, db: SQLiteDatabase, idPrefix: String, secondaryFeedName: String?, tripDirectionColumn: String?,
+    ) {
         ZipFile(zipFile).use { archive ->
             val entries = archive.entries()
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
                 val loader = TABLE_LOADERS[entry.name.substringAfterLast('/')]
                 if (loader != null) {
-                    archive.getInputStream(entry).reader(Charsets.UTF_8).buffered().use { reader ->
-                        loader(db, reader, idPrefix, secondaryFeedName)
+                    loadEntryWithRetry(zipFile, archive, entry.name, db, idPrefix, secondaryFeedName, tripDirectionColumn, loader)
+                }
+            }
+        }
+    }
+
+    /**
+     * A large entry (CTA's/MBTA's stop_times.txt, hundreds of thousands of rows) reading a
+     * `ZipException` partway through was originally suspected to be the OS reclaiming a long-lived
+     * background read's native handle -- turned out to actually be [ingestMutex]'s own gap (see that
+     * val's doc): a second, concurrent ingest truncating/rewriting the same `gtfs.zip` mid-read. That
+     * root cause is fixed at the source now, but this retry stays as cheap defense-in-depth against
+     * any other transient read failure on a large entry. Retries up to [MAX_ENTRY_READ_ATTEMPTS]
+     * times; the first attempt reuses [firstArchive] (the handle every other entry in this zip also
+     * reads from), every later attempt opens a fresh [ZipFile] on [zipFile] instead, since reusing a
+     * handle that just failed risks hitting the same bad state again. [readCsvEntry] commits in
+     * batches, so [entryName]'s table is cleared before each retry to avoid double-counting whatever a
+     * failed attempt already wrote.
+     */
+    private fun loadEntryWithRetry(
+        zipFile: File, firstArchive: ZipFile, entryName: String, db: SQLiteDatabase,
+        idPrefix: String, secondaryFeedName: String?, tripDirectionColumn: String?,
+        loader: (SQLiteDatabase, BufferedReader, String, String?, String?) -> Unit,
+    ) {
+        val tableName = entryName.substringAfterLast('/').removeSuffix(".txt")
+        for (attempt in 1..MAX_ENTRY_READ_ATTEMPTS) {
+            try {
+                if (attempt == 1) {
+                    val entry = firstArchive.getEntry(entryName) ?: return
+                    firstArchive.getInputStream(entry).reader(Charsets.UTF_8).buffered().use { reader ->
+                        loader(db, reader, idPrefix, secondaryFeedName, tripDirectionColumn)
+                    }
+                } else {
+                    ZipFile(zipFile).use { retryArchive ->
+                        val entry = retryArchive.getEntry(entryName) ?: return
+                        retryArchive.getInputStream(entry).reader(Charsets.UTF_8).buffered().use { reader ->
+                            loader(db, reader, idPrefix, secondaryFeedName, tripDirectionColumn)
+                        }
                     }
                 }
+                return
+            } catch (e: ZipException) {
+                if (attempt == MAX_ENTRY_READ_ATTEMPTS) throw e
+                Log.e("GtfsIngestor", "Zip read failed for $entryName on attempt $attempt, retrying with a fresh archive handle", e)
+                db.delete(tableName, null, null)
             }
         }
     }
 
     companion object {
         /** [secondaryFeedName] (see [SecondaryGtfsFeed.name]) is only consulted by [loadRoutes] and
-         * [loadStops]. Every other loader here ignores its fourth parameter entirely; it just
-         * needs to accept one so all nine can share one map's function type. */
-        private val TABLE_LOADERS: Map<String, (SQLiteDatabase, BufferedReader, String, String?) -> Unit> = mapOf(
-            "routes.txt" to ::loadRoutes,
-            "trips.txt" to { db, reader, idPrefix, _ -> loadTrips(db, reader, idPrefix) },
-            "stops.txt" to ::loadStops,
-            "stop_times.txt" to { db, reader, idPrefix, _ -> loadStopTimes(db, reader, idPrefix) },
-            "calendar.txt" to { db, reader, idPrefix, _ -> loadCalendar(db, reader, idPrefix) },
-            "calendar_dates.txt" to { db, reader, idPrefix, _ -> loadCalendarDates(db, reader, idPrefix) },
-            "feed_info.txt" to { db, reader, idPrefix, _ -> loadFeedInfo(db, reader, idPrefix) },
-            "agency.txt" to { db, reader, idPrefix, _ -> loadAgency(db, reader, idPrefix) },
-            "directions.txt" to { db, reader, idPrefix, _ -> loadDirections(db, reader, idPrefix) },
+         * [loadStops]; [tripDirectionColumn] (see [TripDirectionColumn]) only by [loadTrips]. Every
+         * other loader here ignores whichever of the two it doesn't need; each just needs to accept
+         * both so all nine can share one map's function type. */
+        private val TABLE_LOADERS: Map<String, (SQLiteDatabase, BufferedReader, String, String?, String?) -> Unit> = mapOf(
+            "routes.txt" to { db, reader, idPrefix, secondaryFeedName, _ -> loadRoutes(db, reader, idPrefix, secondaryFeedName) },
+            "trips.txt" to { db, reader, idPrefix, _, tripDirectionColumn -> loadTrips(db, reader, idPrefix, tripDirectionColumn) },
+            "stops.txt" to { db, reader, idPrefix, secondaryFeedName, _ -> loadStops(db, reader, idPrefix, secondaryFeedName) },
+            "stop_times.txt" to { db, reader, idPrefix, _, _ -> loadStopTimes(db, reader, idPrefix) },
+            "calendar.txt" to { db, reader, idPrefix, _, _ -> loadCalendar(db, reader, idPrefix) },
+            "calendar_dates.txt" to { db, reader, idPrefix, _, _ -> loadCalendarDates(db, reader, idPrefix) },
+            "feed_info.txt" to { db, reader, idPrefix, _, _ -> loadFeedInfo(db, reader, idPrefix) },
+            "agency.txt" to { db, reader, idPrefix, _, _ -> loadAgency(db, reader, idPrefix) },
+            "directions.txt" to { db, reader, idPrefix, _, _ -> loadDirections(db, reader, idPrefix) },
         )
     }
 }
@@ -345,7 +412,7 @@ private fun loadRoutes(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Str
     }
 }
 
-private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
+private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String, tripDirectionColumn: String?) {
     val stmt = db.compileStatement(
         """
         INSERT INTO trips
@@ -353,22 +420,45 @@ private fun loadTrips(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Stri
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
+    // See TripDirectionColumn's own doc -- synthesizes the same directions table a real
+    // directions.txt would have populated, from a non-standard column on trips.txt itself. INSERT
+    // OR IGNORE relies on (route_id, direction_id) already being that table's primary key, so only
+    // the first trip seen for a given pair actually writes a row; safe since the value is identical
+    // across every trip sharing that pair (verified against CTA's full feed, zero exceptions).
+    val directionStmt = tripDirectionColumn?.let {
+        db.compileStatement(
+            "INSERT OR IGNORE INTO directions (route_id, direction_id, direction, direction_destination) VALUES (?, ?, ?, NULL)"
+        )
+    }
     readCsvEntry(db, reader) { header, row ->
         val tripId = prefixedId(idPrefix, header.get(row, "trip_id")) ?: return@readCsvEntry
         val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry
         val serviceId = prefixedId(idPrefix, header.get(row, "service_id")) ?: return@readCsvEntry
+        val directionId = header.get(row, "direction_id")
         stmt.clearBindings()
         stmt.bindString(1, tripId)
         stmt.bindString(2, routeId)
         stmt.bindString(3, serviceId)
         stmt.bindStringOrNull(4, header.get(row, "trip_headsign"))
         stmt.bindStringOrNull(5, header.get(row, "trip_short_name"))
-        stmt.bindLongOrNull(6, header.get(row, "direction_id"))
+        stmt.bindLongOrNull(6, directionId)
         stmt.bindStringOrNull(7, header.get(row, "block_id"))
         stmt.bindStringOrNull(8, header.get(row, "shape_id"))
         stmt.bindLongOrNull(9, header.get(row, "wheelchair_accessible"))
         stmt.bindLongOrNull(10, header.get(row, "bikes_allowed"))
         stmt.executeInsert()
+
+        if (directionStmt != null) {
+            val directionValue = tripDirectionColumn.let { header.get(row, it) }
+            val directionIdLong = directionId?.toLongOrNull()
+            if (directionValue != null && directionIdLong != null) {
+                directionStmt.clearBindings()
+                directionStmt.bindString(1, routeId)
+                directionStmt.bindLong(2, directionIdLong)
+                directionStmt.bindString(3, directionValue)
+                directionStmt.executeInsert()
+            }
+        }
     }
 }
 

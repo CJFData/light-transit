@@ -9,6 +9,7 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlin.math.PI
@@ -233,6 +234,8 @@ class MapTileClient {
             if (!response.status.isSuccess()) return null
             val bytes: ByteArray = response.body()
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.also { TileCache.put(key, it) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("MapTileClient", "Tile fetch failed for $key", e)
             null

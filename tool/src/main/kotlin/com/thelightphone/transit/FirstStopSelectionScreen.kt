@@ -35,6 +35,7 @@ import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +61,11 @@ class FirstStopSelectionViewModel(
      * was ever chosen" apart from "the chosen variant's headsign happens to be blank" via
      * [directionId] rather than conflating both into this one field. */
     private val headsign: String?,
+    /** The chosen [com.thelightphone.transit.gtfs.DirectionOption]'s own lastStopId -- see that
+     * class's own doc. Plays headsign's exact same role for an agency with no real headsign at all,
+     * so it's threaded through to [GtfsRepository.getStopsForVariant] alongside it rather than
+     * conflated into [headsign] itself (which stays the real trip_headsign column, or null). */
+    private val lastStopId: String?,
     private val tapHoldPreferences: TapHoldPreferences,
 ) : LightViewModel<Unit>() {
 
@@ -107,9 +113,11 @@ class FirstStopSelectionViewModel(
             val zoneId = agency?.zoneId ?: java.time.ZoneId.systemDefault()
             val today = todayForGtfs(zoneId).let { if (_showTomorrow.value) it.plusDays(1) else it }
             val afterTime = if (_showTomorrow.value) "00:00:00" else currentGtfsTimeOfDay(zoneId)
-            val stops = directionId?.let { repository.getStopsForVariant(routeId, it, headsign, afterTime, today) }
+            val stops = directionId?.let { repository.getStopsForVariant(routeId, it, headsign, lastStopId, afterTime, today) }
                 ?: repository.getStops(routeId, null, afterTime, today)
             FirstStopSelectionState.Loaded(stops)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("FirstStopSelectionScreen", "Failed to load first stops for route $routeId", e)
             FirstStopSelectionState.Error("Unable to load stops.")
@@ -131,6 +139,8 @@ class FirstStopSelectionScreen(
     /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
      * [directionId] rather than folded into a single nullable signal. */
     private val headsign: String?,
+    /** See [FirstStopSelectionViewModel]'s own doc. */
+    private val lastStopId: String?,
     private val directionLabel: String,
 ) : LightScreen<Unit, FirstStopSelectionViewModel>(sealedActivity) {
 
@@ -138,7 +148,7 @@ class FirstStopSelectionScreen(
         get() = FirstStopSelectionViewModel::class.java
 
     override fun createViewModel(): FirstStopSelectionViewModel =
-        FirstStopSelectionViewModel(dbFile, routeId, directionId, headsign, TapHoldPreferences(lightContext.dataStore))
+        FirstStopSelectionViewModel(dbFile, routeId, directionId, headsign, lastStopId, TapHoldPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
@@ -222,6 +232,7 @@ class FirstStopSelectionScreen(
                                                             routeLabel,
                                                             directionId,
                                                             headsign,
+                                                            lastStopId,
                                                             directionLabel,
                                                             stop.stopId,
                                                             stop.displayLabel(),

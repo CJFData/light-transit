@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.map
 private val tapHoldScheduleArrivalsKey = booleanPreferencesKey("TAP_HOLD_SCHEDULE_ARRIVALS_ENABLED")
 private val tapHoldStationArrivalsKey = booleanPreferencesKey("TAP_HOLD_STATION_ARRIVALS_ENABLED")
 private val tapHoldVehicleKey = booleanPreferencesKey("TAP_HOLD_VEHICLE_ENABLED")
+private val stationTapArrivalsKey = booleanPreferencesKey("STATION_TAP_ARRIVALS_ENABLED")
 
 /**
  * Settings toggles for "tap and hold a stop to see its actual arrivals" outside the Map screen,
@@ -43,5 +44,19 @@ class TapHoldPreferences(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setTapHoldVehicleEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[tapHoldVehicleKey] = enabled }
+    }
+
+    /** On by default -- scoped to the Stations list screen only (StationListScreen), nowhere else.
+     * Swaps that screen's two gestures: a plain tap opens a station's live upcoming arrivals
+     * directly (its platform map is still one tap away from there, via Upcoming Arrivals' own
+     * "Selected stop" row), and tap-and-hold opens the platform map instead. Off, the gestures
+     * revert to their original assignment -- plain tap opens the platform map, and
+     * [tapHoldStationArrivalsEnabledFlow] above resumes controlling whether tap-and-hold opens
+     * arrivals. */
+    val stationTapArrivalsEnabledFlow: Flow<Boolean> =
+        dataStore.data.map { prefs -> prefs[stationTapArrivalsKey] ?: true }
+
+    suspend fun setStationTapArrivalsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[stationTapArrivalsKey] = enabled }
     }
 }

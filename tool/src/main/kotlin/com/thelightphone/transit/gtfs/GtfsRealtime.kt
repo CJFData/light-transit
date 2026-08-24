@@ -9,6 +9,7 @@ import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.protobuf.ProtoBuf
@@ -143,13 +144,22 @@ data class GtfsRtTripUpdate(
     fun inferCurrentStopSequence(): Int? = stopTimeUpdate.mapNotNull { it.stopSequence }.minOrNull()
 }
 
+/** GTFS-realtime's own `TripDescriptor.ScheduleRelationship` enum value meaning "this trip was added
+ * to the schedule, with no corresponding trip in the static GTFS data" -- e.g. MBTA Green Line's own
+ * live feed marks ~96% of its currently-running vehicles this way (see [FuzzyRunTrips]'s own doc for
+ * why that matters). The only value of this enum currently interpreted anywhere in this codebase;
+ * [GtfsRtTripDescriptor.scheduleRelationship] was previously decoded purely to avoid desyncing RTD's
+ * nested messages (see that field's own doc), never read. */
+const val GTFS_RT_SCHEDULE_RELATIONSHIP_ADDED = 1
+
 /**
  * RIPTA's feed also sends start_time/start_date/route_id here (verified by hand-decoding RIPTA's
  * real feed bytes) -- declared even though unused, since an undeclared field inside a *nested*
  * message desyncs this decoder's byte position for everything after it, corrupting the rest of the
  * enclosing VehiclePosition/TripUpdate rather than being harmlessly skipped. Fields 4
  * (schedule_relationship) and 6 (direction_id) are RTD-specific -- present on every one of its live
- * trip descriptors -- and declared for the same reason.
+ * trip descriptors -- and declared for the same reason. [scheduleRelationship] is also genuinely read
+ * now, not just decoded -- see [GTFS_RT_SCHEDULE_RELATIONSHIP_ADDED]'s own doc.
  */
 @Serializable
 data class GtfsRtTripDescriptor(
@@ -235,6 +245,8 @@ suspend fun GtfsAgency.fetchTripUpdate(tripId: String): GtfsRtTripUpdate? {
             val url = feed.realtimeTripUpdatesUrl ?: return null
             return try {
                 GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId.removePrefix(prefix)]
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName's secondary feed", e)
                 null
@@ -244,6 +256,8 @@ suspend fun GtfsAgency.fetchTripUpdate(tripId: String): GtfsRtTripUpdate? {
     val url = realtimeTripUpdatesUrl ?: return null
     return try {
         GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId]
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName", e)
         null
@@ -258,6 +272,8 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String): GtfsRtVehiclePositi
             val url = feed.realtimeVehiclePositionsUrl ?: return null
             return try {
                 GtfsRealtimeClient.fetchFeed(url).vehiclePositionsByTripId[tripId.removePrefix(prefix)]
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName's secondary feed", e)
                 null
@@ -267,6 +283,8 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String): GtfsRtVehiclePositi
     val url = realtimeVehiclePositionsUrl ?: return null
     return try {
         GtfsRealtimeClient.fetchFeed(url).vehiclePositionsByTripId[tripId]
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName", e)
         null
@@ -295,6 +313,8 @@ private suspend fun <T> GtfsAgency.fetchMerged(
     val primaryFeed = primaryUrl?.let { url ->
         try {
             GtfsRealtimeClient.fetchFeed(url)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(logTag, "Realtime fetch failed for $displayName", e)
             null
@@ -307,6 +327,8 @@ private suspend fun <T> GtfsAgency.fetchMerged(
             try {
                 val prefix = secondaryFeedPrefix(index)
                 byTripId(GtfsRealtimeClient.fetchFeed(url)).forEach { (tripId, value) -> put("$prefix$tripId", value) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(logTag, "Realtime fetch failed for $displayName's secondary feed", e)
             }
@@ -327,6 +349,15 @@ suspend fun GtfsAgency.fetchMergedVehiclePositions(logTag: String): MergedRealti
 
 /** Default +/- window (seconds) within which a live prediction still counts as "On time". */
 const val ARRIVAL_STATUS_TOLERANCE_SECONDS = 90L
+
+/** Beyond this +/- diff, a Late/Early status stops being a plausible real-world delay and starts
+ * meaning "this live prediction was diffed against the wrong scheduled trip" -- confirmed live
+ * 2026-08-24: MBTA's ordinal [FuzzyRunTrips] matching (rank-based, not nearest-time) paired a real
+ * live Green Line D vehicle against the nearest scheduled candidate by rank, which during an
+ * overnight service gap (no Green-D trip scheduled between ~1 AM and 5:21 AM) was hours away,
+ * producing a technically-accurate but nonsensical "Early by 291m". See [computeArrivalEta]'s own
+ * doc for why the ETA itself stays correct regardless -- only the status label is capped. */
+const val ARRIVAL_STATUS_IMPLAUSIBLE_THRESHOLD_SECONDS = 90 * 60L
 
 /** How stale (seconds) a feed's header timestamp can be before it's flagged to the user. */
 const val REALTIME_STALE_THRESHOLD_SECONDS = 90L
@@ -364,6 +395,11 @@ fun gtfsTimeToEpochSeconds(rawTime: String, serviceDate: LocalDate, zoneId: Zone
  * and status. With no realtime match, returns a non-live ETA with a null status -- callers should
  * render that as "just the scheduled time, no badge" per spec. [zoneId] should always be the
  * specific trip's own agency's [GtfsAgency.zoneId] -- see [gtfsTimeToEpochSeconds]'s own doc.
+ *
+ * [etaEpochSeconds] is always the real live [predicted] time whenever [realtimeUpdate] is present,
+ * regardless of how large the diff against [scheduledTime] turns out to be -- a rider should never
+ * lose a genuine live prediction just because the status label built from it would look wrong (see
+ * [implausibleThresholdSeconds]'s own doc). Only [status] gets capped.
  */
 fun computeArrivalEta(
     scheduledTime: String,
@@ -371,6 +407,7 @@ fun computeArrivalEta(
     realtimeUpdate: GtfsRtStopTimeUpdate?,
     zoneId: ZoneId,
     toleranceSeconds: Long = ARRIVAL_STATUS_TOLERANCE_SECONDS,
+    implausibleThresholdSeconds: Long = ARRIVAL_STATUS_IMPLAUSIBLE_THRESHOLD_SECONDS,
 ): ArrivalEta? {
     val scheduledEpoch = gtfsTimeToEpochSeconds(scheduledTime, serviceDate, zoneId) ?: return null
     val event = realtimeUpdate?.departure ?: realtimeUpdate?.arrival
@@ -379,6 +416,11 @@ fun computeArrivalEta(
     val predicted = event.time ?: (scheduledEpoch + (event.delay ?: 0))
     val diff = predicted - scheduledEpoch
     val status = when {
+        // See ARRIVAL_STATUS_IMPLAUSIBLE_THRESHOLD_SECONDS's own doc -- this diff is too large to be
+        // a real delay, meaning realtimeUpdate almost certainly wasn't genuinely diffed against its
+        // own trip (e.g. a FuzzyRunTrips ordinal mismatch). The ETA above stays the real live time
+        // regardless; only the misleading status label is dropped.
+        diff > implausibleThresholdSeconds || diff < -implausibleThresholdSeconds -> null
         diff > toleranceSeconds -> ArrivalStatus.Late(diff)
         diff < -toleranceSeconds -> ArrivalStatus.Early(-diff)
         else -> ArrivalStatus.OnTime

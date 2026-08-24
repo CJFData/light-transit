@@ -22,6 +22,7 @@ import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.clearAllCachedSchedules
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.NetworkPreferences
+import com.thelightphone.transit.gtfs.RunSelectionPreferences
 import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -53,6 +54,7 @@ class SettingsViewModel(
     private val tapHoldPreferences: TapHoldPreferences,
     private val departurePreferences: DeparturePreferences,
     private val networkPreferences: NetworkPreferences,
+    private val runSelectionPreferences: RunSelectionPreferences,
     private val filesDir: File,
 ) : LightViewModel<Unit>() {
 
@@ -79,6 +81,10 @@ class SettingsViewModel(
     val tapHoldVehicleEnabled: StateFlow<Boolean>
         get() = _tapHoldVehicleEnabled
     private val _tapHoldVehicleEnabled = MutableStateFlow(true)
+
+    val stationTapArrivalsEnabled: StateFlow<Boolean>
+        get() = _stationTapArrivalsEnabled
+    private val _stationTapArrivalsEnabled = MutableStateFlow(true)
 
     val doubleTapStationEnabled: StateFlow<Boolean>
         get() = _doubleTapStationEnabled
@@ -132,6 +138,14 @@ class SettingsViewModel(
         get() = _wifiOnlyDownloadsEnabled
     private val _wifiOnlyDownloadsEnabled = MutableStateFlow(true)
 
+    val runSelectionEnabled: StateFlow<Boolean>
+        get() = _runSelectionEnabled
+    private val _runSelectionEnabled = MutableStateFlow(true)
+
+    val runStepperEnabled: StateFlow<Boolean>
+        get() = _runStepperEnabled
+    private val _runStepperEnabled = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
             agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
@@ -150,6 +164,9 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             tapHoldPreferences.tapHoldVehicleEnabledFlow.collect { _tapHoldVehicleEnabled.value = it }
+        }
+        viewModelScope.launch {
+            tapHoldPreferences.stationTapArrivalsEnabledFlow.collect { _stationTapArrivalsEnabled.value = it }
         }
         viewModelScope.launch {
             mapPreferences.doubleTapStationEnabledFlow.collect { _doubleTapStationEnabled.value = it }
@@ -190,6 +207,12 @@ class SettingsViewModel(
         viewModelScope.launch {
             networkPreferences.wifiOnlyDownloadsEnabledFlow.collect { _wifiOnlyDownloadsEnabled.value = it }
         }
+        viewModelScope.launch {
+            runSelectionPreferences.runSelectionEnabledFlow.collect { _runSelectionEnabled.value = it }
+        }
+        viewModelScope.launch {
+            runSelectionPreferences.runStepperEnabledFlow.collect { _runStepperEnabled.value = it }
+        }
     }
 
     /** Called from the AgencyPickerModal opened by the "Transit Agency" row below -- persisting the
@@ -220,6 +243,10 @@ class SettingsViewModel(
 
     fun setTapHoldVehicleEnabled(enabled: Boolean) {
         viewModelScope.launch { tapHoldPreferences.setTapHoldVehicleEnabled(enabled) }
+    }
+
+    fun setStationTapArrivalsEnabled(enabled: Boolean) {
+        viewModelScope.launch { tapHoldPreferences.setStationTapArrivalsEnabled(enabled) }
     }
 
     fun setDoubleTapStationEnabled(enabled: Boolean) {
@@ -274,6 +301,14 @@ class SettingsViewModel(
         viewModelScope.launch { networkPreferences.setWifiOnlyDownloadsEnabled(enabled) }
     }
 
+    fun setRunStepperEnabled(enabled: Boolean) {
+        viewModelScope.launch { runSelectionPreferences.setRunStepperEnabled(enabled) }
+    }
+
+    fun setRunSelectionEnabled(enabled: Boolean) {
+        viewModelScope.launch { runSelectionPreferences.setRunSelectionEnabled(enabled) }
+    }
+
     /** Deletes every agency's downloaded schedule to free up space, then re-downloads whichever
      * agency is currently selected -- see [clearAllCachedSchedules]'s own doc for how the running
      * home screen picks this up. File I/O, so off the main thread even though it's usually quick. */
@@ -297,6 +332,7 @@ class SettingsScreen(
         TapHoldPreferences(lightContext.dataStore),
         DeparturePreferences(lightContext.dataStore),
         NetworkPreferences(lightContext.dataStore),
+        RunSelectionPreferences(lightContext.dataStore),
         lightContext.filesDir,
     )
 
@@ -330,6 +366,7 @@ class SettingsScreen(
         val tapHoldScheduleArrivalsEnabled by viewModel.tapHoldScheduleArrivalsEnabled.collectAsState()
         val tapHoldStationArrivalsEnabled by viewModel.tapHoldStationArrivalsEnabled.collectAsState()
         val tapHoldVehicleEnabled by viewModel.tapHoldVehicleEnabled.collectAsState()
+        val stationTapArrivalsEnabled by viewModel.stationTapArrivalsEnabled.collectAsState()
         val doubleTapStationEnabled by viewModel.doubleTapStationEnabled.collectAsState()
         val trackTappedStopsEnabled by viewModel.trackTappedStopsEnabled.collectAsState()
         val seeEverythingEnabled by viewModel.seeEverythingEnabled.collectAsState()
@@ -343,6 +380,8 @@ class SettingsScreen(
         val mergeFeedStationsEnabled by viewModel.mergeFeedStationsEnabled.collectAsState()
         val includeLongerTripsEnabled by viewModel.includeLongerTripsEnabled.collectAsState()
         val wifiOnlyDownloadsEnabled by viewModel.wifiOnlyDownloadsEnabled.collectAsState()
+        val runSelectionEnabled by viewModel.runSelectionEnabled.collectAsState()
+        val runStepperEnabled by viewModel.runStepperEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -516,8 +555,8 @@ class SettingsScreen(
                         "stop marker, or a station's own name while already viewing its platform map), " +
                         "Schedules (a stop while choosing where to board, after picking a route and " +
                         "direction -- a plain tap there still shows that route's scheduled times either " +
-                        "way), and Stations (a row in the Stations list -- a plain tap there still opens " +
-                        "its platform map either way).",
+                        "way), and Stations (a row in the Stations list -- see the toggle just below for " +
+                        "why a plain tap there might already open arrivals instead).",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -525,6 +564,17 @@ class SettingsScreen(
                 ToggleRow("Map", tapHoldArrivalsEnabled, viewModel::setTapHoldArrivalsEnabled)
                 ToggleRow("Schedules", tapHoldScheduleArrivalsEnabled, viewModel::setTapHoldScheduleArrivalsEnabled)
                 ToggleRow("Stations", tapHoldStationArrivalsEnabled, viewModel::setTapHoldStationArrivalsEnabled)
+
+                LightText(
+                    text = "On by default -- in the Stations list only, a plain tap opens a station's live " +
+                        "upcoming arrivals directly (its platform map is still one tap away from there), " +
+                        "and the \"Stations\" toggle above switches instead to gating tap-and-hold. Off, " +
+                        "a plain tap there goes back to opening the platform map.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                ToggleRow("Stations list opens arrivals on tap", stationTapArrivalsEnabled, viewModel::setStationTapArrivalsEnabled)
 
                 LightText(
                     text = "Include longer trips in departures",
@@ -563,16 +613,51 @@ class SettingsScreen(
                 ToggleRow("Tap and hold -- Vehicles", tapHoldVehicleEnabled, viewModel::setTapHoldVehicleEnabled)
 
                 LightText(
-                    text = "Double-tap to open a station",
+                    text = "Run selection",
                     variant = LightTextVariant.Copy,
                     lighten = true,
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, double-tap a multi-platform station on the Map screen to open a " +
-                        "zoomed-in view of just its platforms -- and, symmetrically, double-tap a " +
-                        "station's own name while viewing its Station map to zoom back out to the " +
-                        "main map, centered on that station.",
+                    text = "On a boarded CTA 'L' or MBTA Green Line trip, the app matches your trip to " +
+                        "the closest live train automatically, but that match is only ever an " +
+                        "approximation -- this lets you correct it yourself. When on (the default), a " +
+                        "\"Select Run\" row appears under a boarded trip's own header that opens a full " +
+                        "list of every live run in your direction -- each shown on the trip's own stop " +
+                        "list with its current stop and status -- to pick from directly.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Run selection", runSelectionEnabled, viewModel::setRunSelectionEnabled)
+
+                // Only shown at all once run selection itself is on -- a stepper with nothing to
+                // step through (the row above wouldn't even render) makes no sense as a standalone
+                // setting, so it's nested here rather than always visible.
+                if (runSelectionEnabled) {
+                    LightText(
+                        text = "When on, fast-forward/rewind icons also flank the \"Select Run\" label " +
+                            "itself, for a one-tap nudge through the same live runs without opening the " +
+                            "full list. Off by default -- the label alone (tap to open the list) is the " +
+                            "default experience.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+                    )
+                    ToggleRow("Next/Previous run steppers", runStepperEnabled, viewModel::setRunStepperEnabled)
+                }
+
+                LightText(
+                    text = "Double-tap to zoom station maps, tap and hold for arrivals",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "On the Map screen: double-tap a multi-platform station to zoom into its own " +
+                        "platforms, then double-tap its name to zoom back out (toggle below). Tap and " +
+                        "hold a stop or station name instead for its live upcoming arrivals (\"Map\" " +
+                        "toggle above).",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
