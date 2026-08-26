@@ -166,20 +166,23 @@ private object TileCache {
 }
 
 /**
- * Fetches individual raster tiles from one of CARTO's free basemaps (built on OpenStreetMap data),
+ * Fetches individual raster tiles from one of CARTO's basemaps (built on OpenStreetMap data),
  * caching decoded bitmaps in [TileCache]. Voyager is the default -- chosen for street-name
  * legibility, since its labels and road contours stay readable at the small sizes this screen
  * renders at, unlike the darker "Dark Matter" style -- but Dark Matter remains available as an
- * opt-in (see MapPreferences). A real, descriptive User-Agent is sent on every request, and
- * on-screen "© OpenStreetMap contributors © CARTO" attribution is required wherever these tiles
- * are displayed -- see MapScreen's Content().
+ * opt-in (see MapPreferences). Routed through pico-transit-proxy rather than CARTO directly, same
+ * as every other live/static feed this app uses -- CARTO requires a `key` query param per tile
+ * request, so the worker injects it server-side (env.CARTO_API_KEY) rather than shipping it in the
+ * app itself. A real, descriptive User-Agent is sent on every request, and on-screen "©
+ * OpenStreetMap contributors © CARTO" attribution is required wherever these tiles are displayed --
+ * see MapScreen's Content().
  */
 class MapTileClient {
     private val client = HttpClient(OkHttp)
 
     companion object {
-        private const val VOYAGER_BASE_URL = "https://a.basemaps.cartocdn.com/rastertiles/voyager"
-        private const val DARK_BASE_URL = "https://a.basemaps.cartocdn.com/dark_all"
+        private const val VOYAGER_BASE_URL = "https://pico-transit-proxy.data-32b.workers.dev/carto/voyager"
+        private const val DARK_BASE_URL = "https://pico-transit-proxy.data-32b.workers.dev/carto/dark"
         private const val USER_AGENT = "LightTransitTool/1.0 (+https://github.com/lightphone)"
         // Fetched area is this much larger than the target radius, so the real device canvas (whose
         // exact size isn't known yet when tiles are requested) ends up comfortably inside the
