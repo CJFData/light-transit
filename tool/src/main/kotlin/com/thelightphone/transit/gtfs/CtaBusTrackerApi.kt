@@ -22,28 +22,24 @@ private val ctaBusJson = Json { ignoreUnknownKeys = true }
 /**
  * A **run-associated trip** is a live vehicle that corresponds to a real, exact trip already in the
  * static schedule -- the live source just doesn't hand back that trip_id directly, so a
- * [LiveVehicleSource] implementation bridges to it definitively via some other agency-specific key.
- * The match is never a guess: either it resolves to the one real static trip it belongs to, or it's
- * dropped for that poll, same as every other live source's "never force a link" contract.
+ * [LiveVehicleSource] implementation bridges to it via some other agency-specific key. The match is
+ * never a guess: either it resolves to the one real static trip it belongs to, or it's dropped for
+ * that poll, same as every other live source's "never force a link" contract.
  *
  * Contrast with a **fuzzy-run trip** (see [FuzzyRunTrips]) -- a live vehicle/run with no real static
  * trip to resolve to at all (e.g. MBTA Green Line's ADDED trips), where any pairing against the
  * schedule is necessarily an approximation, not a genuine match.
  *
  * CTA Bus Tracker (ctabustracker.com/bustime/api/v3) is this app's first run-associated source --
- * proprietary REST/JSON, not GTFS-RT, but every one of its buses IS a real scheduled trip, just not
- * identified by trip_id in the live payload. Its own bridge: getvehicles hands back `stsd`/`stst` --
- * the trip's own scheduled start date and start time in seconds-past-midnight -- the same (route,
- * start_date, start_time) triple GTFS-RT itself uses to identify a trip when its trip_id isn't
- * directly known. [GtfsRepository.tripIdForScheduledStart] looks up the one static trip whose first
- * stop_time matches that triple; ambiguous or unmatched vehicles are simply dropped for that poll.
+ * proprietary REST/JSON, not GTFS-RT, but every bus IS a real scheduled trip, just not identified by
+ * trip_id in the live payload. Its bridge: getvehicles hands back `stsd`/`stst` -- scheduled start
+ * date/time -- the same (route, start_date, start_time) triple GTFS-RT itself uses when trip_id
+ * isn't directly known; [GtfsRepository.tripIdForScheduledStart] resolves it, dropping ambiguous or
+ * unmatched vehicles for that poll.
  *
  * getvehicles has no next-stop/current-sequence field at all, so
- * [LiveVehicleInfo.currentStatus]/[currentStopSequence] are always null -- a caller already
- * treats a null sequence as "fall back to schedule-time" for every other source with the same gap.
- *
- * `rt` accepts at most 10 comma-delimited route designators per the API's own limit; a caller
- * asking for more only gets the first 10.
+ * [LiveVehicleInfo.currentStatus]/[currentStopSequence] are always null. `rt` accepts at most 10
+ * comma-delimited route designators per the API's own limit.
  */
 object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     override val coveredLineTypes: Set<LineType> = setOf(LineType.BUS)

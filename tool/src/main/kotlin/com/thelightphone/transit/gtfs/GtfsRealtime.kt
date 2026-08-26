@@ -398,8 +398,8 @@ fun gtfsTimeToEpochSeconds(rawTime: String, serviceDate: LocalDate, zoneId: Zone
  *
  * [etaEpochSeconds] is always the real live [predicted] time whenever [realtimeUpdate] is present,
  * regardless of how large the diff against [scheduledTime] turns out to be -- a rider should never
- * lose a genuine live prediction just because the status label built from it would look wrong (see
- * [implausibleThresholdSeconds]'s own doc). Only [status] gets capped.
+ * lose a genuine live prediction just because the status label built from it would look wrong. Only
+ * [status] gets capped -- see [implausibleThresholdSeconds]'s own doc.
  */
 fun computeArrivalEta(
     scheduledTime: String,

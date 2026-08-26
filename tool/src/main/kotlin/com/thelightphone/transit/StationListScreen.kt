@@ -136,11 +136,11 @@ class StationListScreen(
                 .fillMaxWidth()
                 // With stationTapArrivalsEnabled (on by default, this screen only -- see
                 // TapHoldPreferences.stationTapArrivalsEnabledFlow), a short tap jumps straight to the
-                // station's actual (live) upcoming arrivals across every platform, and tap-and-hold opens
-                // its platform map instead -- the map is still one tap away from there via Upcoming
-                // Arrivals' own "Selected stop" row. Off, gestures revert to the original assignment: a
-                // short tap opens the platform map, and tapHoldArrivalsEnabled gates whether tap-and-hold
-                // opens arrivals.
+                // station's live upcoming arrivals across every platform, and tap-and-hold opens the
+                // platform map instead (still one tap away from there via Upcoming Arrivals' own
+                // "Selected stop" row). Off, gestures revert to the original assignment: a short tap
+                // opens the platform map, and tapHoldArrivalsEnabled gates whether tap-and-hold opens
+                // arrivals.
                 .pointerInput(station.stopId, stationTapArrivalsEnabled, tapHoldArrivalsEnabled) {
                     detectTapGestures(
                         onTap = {

@@ -219,24 +219,19 @@ class GtfsRepository(dbFile: File) {
      * every real headsign variant stays individually selectable. A route with branch or short-turn
      * trips can have several distinct headsigns within one direction_id -- e.g. LTC's Route 01
      * splits into "1A Pond Mills"/"1B King Edward" nearly 50/50, and RIPTA's Route 20 has three
-     * genuinely different termini under one direction_id. Collapsing those to a single "most
-     * common" entry would hide real destinations riders need to tell apart.
+     * genuinely different termini. Collapsing those to a single "most common" entry would hide real
+     * destinations riders need to tell apart.
      *
      * Each entry also carries the feed's optional directions.txt data (direction, destination) when
-     * published (MBTA does; most agencies don't) -- see [DirectionOption]'s own doc.
-     * [DirectionSelectionScreen] uses that to group same-direction_id entries under a real
-     * "Inbound"/"Outbound" header when available, without ever hiding a variant. Agencies without
-     * directions.txt render as they always have: a flat list of every headsign.
+     * published (MBTA does; most agencies don't) -- [DirectionSelectionScreen] uses that to group
+     * same-direction_id entries under a real "Inbound"/"Outbound" header when available, without
+     * ever hiding a variant.
      *
-     * For a trip with no headsign at all (trip_headsign null -- e.g. every CTA trip), grouping
-     * degrades to (direction_id, null) alone since there's no headsign to split branches by, which
-     * would otherwise flatten real branch/short-turn distinctions the same way a "most common
-     * headsign" collapse would. [lastStopId]/[lastStopName] (see [DirectionOption]'s own doc) fill
-     * that gap: each trip's own real last stop stands in for headsign, both for grouping (confirmed
-     * live on CTA Route 124: its two directions each terminate at one real, consistent stop --
-     * "Clinton & Quincy" westbound, "Navy Pier Terminal" eastbound) and, via [rowLabel], for display.
-     * Only ever populated when trip_headsign is null -- a headsign-having agency already groups and
-     * matches by the real column, so this never needs to kick in for it.
+     * A trip with no headsign at all (e.g. every CTA trip) has nothing to split branches by, which
+     * would flatten real branch/short-turn distinctions the same way a headsign collapse would.
+     * [lastStopId]/[lastStopName] fill that gap instead -- e.g. CTA Route 124's two directions each
+     * terminate at a real, consistent stop ("Clinton & Quincy" westbound, "Navy Pier Terminal"
+     * eastbound) -- and are only populated when trip_headsign is null.
      */
     fun getDirections(routeId: String): List<DirectionOption> =
         // LEFT JOINed on directions.txt's own documented key (route_id, direction_id) -- every
@@ -244,9 +239,9 @@ class GtfsRepository(dbFile: File) {
         // destination, since that join key doesn't depend on headsign at all.
         //
         // last_stop is scoped to this route's own trips (via its own trips join, not a bare
-        // stop_times/stops join) so the correlated MAX(stop_sequence) subquery only ever runs over
-        // one route's trips rather than the whole feed's stop_times table -- matters a lot on an
-        // agency the size of CTA's (~6M stop_times rows total).
+        // stop_times/stops join), so the correlated MAX(stop_sequence) subquery only runs over one
+        // route's trips rather than the whole feed's stop_times table -- matters on an agency the
+        // size of CTA's (~6M stop_times rows).
         db.rawQuery(
             """
             SELECT DISTINCT t.direction_id, t.trip_headsign, d.direction, d.direction_destination,
@@ -1365,19 +1360,18 @@ data class StopProximityMatch(
  * first poll of a trip.
  *
  * Forward-only once an anchor exists: starting from the last matched stop, only ever advances to
- * the IMMEDIATE next stop in sequence, and only once the vehicle has come within
+ * the immediate next stop in sequence, and only once the vehicle has come within
  * [PROXIMITY_ARRIVAL_RADIUS_METERS] of that specific stop's own coordinates -- never by comparing
  * against any stop farther ahead. Repeatedly advances (not just by one) so a poll interval that
  * missed several closely-spaced stops in a row still catches up in one call, but each step of that
  * catch-up still only checks its own immediate next stop.
  *
- * This is deliberately NOT a relative "is the next stop closer than the current one" comparison
- * (an earlier version of this function worked that way) -- confirmed live on a real RIPTA trip: a
- * route that loops or backtracks near downtown can put a stop several positions AHEAD in sequence
+ * Deliberately NOT a relative "is the next stop closer than the current one" comparison -- a route
+ * that loops or backtracks near itself could put a stop several positions ahead in sequence
  * geometrically closer than the true current one, before the vehicle has actually traveled the
- * real path to reach it, causing an incorrect multi-stop forward jump. Only ever evaluating the
- * immediate next stop's own absolute distance makes a geometrically-close-but-sequentially-distant
- * stop simply never a candidate at all.
+ * real path to reach it, causing an incorrect multi-stop forward jump (confirmed live on a real
+ * RIPTA trip). Checking only the immediate next stop's own absolute distance makes a
+ * geometrically-close-but-sequentially-distant stop simply never a candidate.
  *
  * A null [lastMatchedStopSequence] (first poll) is a special case: a forward-only walk starting at
  * [stops]' own first entry assumes distance to the vehicle roughly decreases monotonically from

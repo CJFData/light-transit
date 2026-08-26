@@ -16,19 +16,17 @@ internal data class ScheduledTripCandidate(
 )
 
 /**
- * Ordinal rank-matching shared by every [FuzzyRunTrips] implementation -- see that interface's own
- * doc for why this exists instead of a synthetic trip. Sorts both lists by their own soonest time and
- * pairs them up by position: 1st live run with 1st scheduled trip, 2nd with 2nd, and so on. This is
- * deliberately rank-based, not a nearest-time-delta match -- a live run and a scheduled trip a few
- * minutes apart in absolute time can still be the same real run if everything ahead and behind them
- * lines up the same way, while a naive nearest-delta match could let two live runs both claim the
- * same closest scheduled trip and leave another scheduled trip unmatched despite a live run existing
- * for it.
+ * Ordinal rank-matching used by [MbtaGreenLineFuzzyRunSource] -- see [FuzzyRunTrips]'s own doc for
+ * why this exists instead of a synthetic trip. Sorts both lists by their own soonest time and pairs
+ * them up by position: 1st live run with 1st scheduled trip, 2nd with 2nd, and so on. Deliberately
+ * rank-based, not a nearest-time-delta match -- a live run and a scheduled trip a few minutes apart
+ * in absolute time can still be the same real run if everything ahead and behind them lines up the
+ * same way, while a naive nearest-delta match could let two live runs both claim the same closest
+ * scheduled trip and leave another unmatched despite a live run existing for it.
  *
  * [liveRuns] and [scheduledTrips] must already be scoped to one (route_id, direction_id) group --
- * this function does no grouping itself, since each [FuzzyRunTrips] implementation's own API shape
- * naturally produces data already split by route (CTA's `ttpositions.aspx?rt=` is per-route; MBTA's
- * GTFS-RT entities are filtered to Green Line route_ids before reaching here).
+ * this function does no grouping itself, since MBTA's GTFS-RT entities are already filtered to
+ * Green Line route_ids before reaching here.
  *
  * A caller with more live runs than scheduled trips (or vice versa) just gets fewer pairs -- the
  * extras are silently dropped rather than force-matched, the same "never force a link" rule every

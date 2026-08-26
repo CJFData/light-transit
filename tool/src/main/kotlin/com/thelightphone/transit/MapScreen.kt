@@ -986,15 +986,14 @@ class MapScreen(
             ) {
 
 // A real LightTopBar in normal layout flow, the same pattern LightQrCodeScanner uses for a
-                // back button over full-bleed content, rather than absolutely overlaying one on
-                // top of the Canvas. That overlay approach only avoided collisions by luck,
-                // depending on the Canvas's own title text staying clear of wherever the icon
-                // happened to sit. This way there's nothing else placed in the icon's row for it to
-                // collide with, by construction. Center text is a gesture reminder, shown only for
-                // whichever of the two gestures its own Settings toggle actually has on right now
-                // (see MapState.Loaded.tapHoldArrivalsEnabled/doubleTapStationEnabled) -- never
-                // mentions a gesture the rider has turned off. Neither on means no title at all,
-                // same as before this reminder existed.
+                // back button over full-bleed content, rather than absolutely overlaying one on top of
+                // the Canvas -- this way there's nothing else placed in the icon's row for it to
+                // collide with, by construction (an overlay only avoided collisions by luck before).
+                // Center text is a gesture reminder, shown only for whichever of the two gestures its
+                // own Settings toggle actually has on right now (see
+                // MapState.Loaded.tapHoldArrivalsEnabled/doubleTapStationEnabled) -- never mentions a
+                // gesture the rider has turned off. Neither on means no title at all, same as before
+                // this reminder existed.
                 val loadedState = state as? MapState.Loaded
                 val doubleTapHint = "Double-tap zooms stations".takeIf { loadedState?.doubleTapStationEnabled == true }
                 val tapHoldHint = "Tap & hold shows arrivals".takeIf { loadedState?.tapHoldArrivalsEnabled == true }
