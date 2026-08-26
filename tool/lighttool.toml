@@ -1,8 +1,8 @@
 [tool]
 id = "com.thelightphone.transit"
 label = "Pico Transit"
-versionCode = 4
-versionName = "0.2.5"
+versionCode = 5
+versionName = "0.2.6"
 permissions = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE"]
 capabilities = []
 orientation = "portrait"
