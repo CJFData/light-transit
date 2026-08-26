@@ -26,6 +26,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 - 🚏 **More agencies coming soon** — thanks to community support, Pico Transit's agency list keeps growing beyond where it started.
 - 🚇 **NYC Subway realtime** — still blocked on an architecture decision: the feed is split across 8 separate live sources with non-overlapping trip_id ranges, which doesn't fit the one-URL-per-agency model every other realtime source uses today. Needs either a new merge mechanism or accepting the extra polling cost before it can be wired in.
 - ⚠️ **Service alerts** — surfacing GTFS-RT's Alerts feed (detours, delays, service changes) isn't wired in yet; today Pico Transit only reads TripUpdates and VehiclePositions. Planned so riders get a heads-up on disruptions, not just a vehicle that's simply running late.
+- 🗺️ **Map tiles currently ride on CARTO's free basemap CDN, no key required** — CARTO has since said their tiles need an API key, but hasn't actually issued one yet, so nothing's changed here for now. In the meantime, looking into backup rendering approaches that don't depend on a third party's key/pricing terms Pico Transit can't freely maintain itself.
 
 ## 🗺️ What can it do?
 

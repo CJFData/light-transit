@@ -5,6 +5,7 @@ versionCode = 4
 versionName = "0.2.5"
 permissions = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE"]
 capabilities = []
+orientation = "portrait"
 serverPackage = "com.lightos"
 # for emulator builds instead:
 # serverPackage = "com.thelightphone.sdk.emulator"
