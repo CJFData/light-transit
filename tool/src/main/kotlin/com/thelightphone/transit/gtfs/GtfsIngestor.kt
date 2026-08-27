@@ -97,8 +97,12 @@ class GtfsIngestor(
     private suspend fun ingestInternal(agency: GtfsAgency, onStatus: (GtfsIngestStatus) -> Unit) {
         val agencyDir = File(filesDir, "gtfs/${agency.id}")
         agencyDir.mkdirs()
-        val secondaryFeeds = agency.components.filterIsInstance<SecondaryGtfsFeed>()
-        val feedUrls = listOf(agency.feedUrl) + secondaryFeeds.map { it.feedUrl }
+        // Only MultiGtfsFeed components with their own static feed (feedUrl != null) get ingested here
+        // -- one with no feedUrl (e.g. NYC Subway's extra line-group realtime feeds) has no separate
+        // static schedule to fetch/parse at all, just an extra realtime source layered onto this
+        // agency's own already-ingested schedule (see GtfsRealtime.kt's own handling of that case).
+        val secondaryFeeds = agency.components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }
+        val feedUrls = listOf(agency.feedUrl) + secondaryFeeds.map { it.feedUrl!! }
         val zipFiles = feedUrls.mapIndexed { index, _ ->
             File(agencyDir, if (index == 0) "gtfs.zip" else "gtfs-$index.zip")
         }
@@ -332,7 +336,7 @@ class GtfsIngestor(
     }
 
     companion object {
-        /** [secondaryFeedName] (see [SecondaryGtfsFeed.name]) is only consulted by [loadRoutes] and
+        /** [secondaryFeedName] (see [MultiGtfsFeed.name]) is only consulted by [loadRoutes] and
          * [loadStops]; [tripDirectionColumn] (see [TripDirectionColumn]) only by [loadTrips]. Every
          * other loader here ignores whichever of the two it doesn't need; each just needs to accept
          * both so all nine can share one map's function type. */

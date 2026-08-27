@@ -45,11 +45,19 @@ data class GtfsRtFeedHeader(
     @ProtoNumber(3) val timestamp: Long = 0L,
 )
 
+/** Fields 2 (is_deleted) and 5 (alert) are standard GTFS-RT FeedEntity fields no prior agency's
+ * live feed has ever actually sent, so they were never declared -- NYC Subway's does (hand-verified
+ * live), and this hand-rolled decoder faults on any undeclared field rather than skipping it.
+ * [alert] is a large nested message this app has no use for; declared as a raw pass-through
+ * [String] rather than fully modeled, the same "unused length-delimited field" pattern used
+ * throughout this file (e.g. [GtfsRtTripUpdate]'s vendor-bundle fields). */
 @Serializable
 data class GtfsRtFeedEntity(
     @ProtoNumber(1) val id: String = "",
+    @ProtoNumber(2) val isDeletedUnused: Boolean? = null,
     @ProtoNumber(3) val tripUpdate: GtfsRtTripUpdate? = null,
     @ProtoNumber(4) val vehicle: GtfsRtVehiclePosition? = null,
+    @ProtoNumber(5) val alertUnused: String? = null,
 )
 
 /** VehiclePosition.current_status values, per the GTFS-realtime spec. */
@@ -70,7 +78,8 @@ object GtfsRtVehicleStatus {
  * vehicle-number string and a [GtfsRtVehicleDescriptor]) are unused by this app but still declared,
  * since this hand-rolled decoder faults on any undeclared field rather than skipping it. Field 9
  * (occupancy_status) is RTD-specific -- present on ~90% of its live vehicles but absent from both
- * MBTA's and RIPTA's feeds -- and unused by this app but declared for the same reason.
+ * MBTA's and RIPTA's feeds -- and unused by this app but declared for the same reason. Field 6
+ * (congestion_level) is NYC Subway-specific -- declared unused for the same reason.
  */
 @Serializable
 data class GtfsRtVehiclePosition(
@@ -79,6 +88,7 @@ data class GtfsRtVehiclePosition(
     @ProtoNumber(3) val currentStopSequence: Int? = null,
     @ProtoNumber(4) val currentStatus: Int? = null,
     @ProtoNumber(5) val timestamp: Long? = null,
+    @ProtoNumber(6) val congestionLevelUnused: Int? = null,
     @ProtoNumber(7) val vehicleNumber: String? = null,
     @ProtoNumber(8) val vehicle: GtfsRtVehicleDescriptor? = null,
     @ProtoNumber(9) val occupancyStatus: Int? = null,
@@ -159,7 +169,10 @@ const val GTFS_RT_SCHEDULE_RELATIONSHIP_ADDED = 1
  * enclosing VehiclePosition/TripUpdate rather than being harmlessly skipped. Fields 4
  * (schedule_relationship) and 6 (direction_id) are RTD-specific -- present on every one of its live
  * trip descriptors -- and declared for the same reason. [scheduleRelationship] is also genuinely read
- * now, not just decoded -- see [GTFS_RT_SCHEDULE_RELATIONSHIP_ADDED]'s own doc.
+ * now, not just decoded -- see [GTFS_RT_SCHEDULE_RELATIONSHIP_ADDED]'s own doc. Field 1001 is NYC
+ * Subway's own nyct_trip_descriptor extension (train_id/is_assigned/direction) -- declared unused
+ * for the same reason, same raw-passthrough-String treatment as [GtfsRtStopTimeUpdate]'s own
+ * NYCT extension field.
  */
 @Serializable
 data class GtfsRtTripDescriptor(
@@ -169,6 +182,7 @@ data class GtfsRtTripDescriptor(
     @ProtoNumber(4) val scheduleRelationship: Int? = null,
     @ProtoNumber(5) val routeId: String? = null,
     @ProtoNumber(6) val directionId: Int? = null,
+    @ProtoNumber(1001) val nyctTripDescriptorUnused: String? = null,
 )
 
 /** Field 5 (schedule_relationship) is RTD-specific -- present on every one of its live stop time
@@ -177,7 +191,11 @@ data class GtfsRtTripDescriptor(
  * North) own nyct_stop_time_update extension (scheduled_track/actual_track) -- hand-verified live
  * against LIRR's real feed: a short nested message whose sub-fields decode as valid UTF-8 track
  * labels (e.g. "203", "4", "2A"), so String is a safe unused-field type here, same reasoning as
- * [GtfsRtTripUpdate]'s own vendor-bundle fields. */
+ * [GtfsRtTripUpdate]'s own vendor-bundle fields. Field 7 (stop_time_properties, a newer standard
+ * GTFS-RT addition) and field 1001 (NYC Subway's own nyct_stop_time_update extension -- a
+ * different field number than LIRR/Metro-North's 1005 above, since NYCT subway and NYCT
+ * commuter-rail systems each picked their own extension numbers) are both NYC Subway-specific,
+ * declared unused for the same reason. */
 @Serializable
 data class GtfsRtStopTimeUpdate(
     @ProtoNumber(1) val stopSequence: Int? = null,
@@ -185,6 +203,8 @@ data class GtfsRtStopTimeUpdate(
     @ProtoNumber(2) val arrival: GtfsRtStopTimeEvent? = null,
     @ProtoNumber(3) val departure: GtfsRtStopTimeEvent? = null,
     @ProtoNumber(5) val scheduleRelationship: Int? = null,
+    @ProtoNumber(7) val stopTimePropertiesUnused: String? = null,
+    @ProtoNumber(1001) val nyctStopTimeUpdateUnused: String? = null,
     @ProtoNumber(1005) val nyctTrackUnused: String? = null,
 )
 
@@ -223,23 +243,27 @@ object GtfsRealtimeClient {
     }
 }
 
-/** The trip_id prefix [GtfsIngestor] applies to the [index]-th [SecondaryGtfsFeed] component's
- * *static* data when loading it into the shared database (see that file's own `idPrefix`
- * handling) -- every function below relies on this exact same convention to know which live feed
- * a given trip_id's realtime data actually lives in. */
+/** The trip_id prefix [GtfsIngestor] applies to the [index]-th prefixed (feedUrl != null)
+ * [MultiGtfsFeed] component's *static* data when loading it into the shared database (see that
+ * file's own `idPrefix` handling) -- every function below relies on this exact same convention to
+ * know which live feed a given trip_id's realtime data actually lives in. Only meaningful for a
+ * [MultiGtfsFeed] with a real [MultiGtfsFeed.feedUrl] -- a feedUrl-less one (e.g. NYC Subway's
+ * extra line-group feeds) is never prefixed, see the unprefixed loops below instead. */
 private fun secondaryFeedPrefix(index: Int) = "feed${index + 1}:"
 
 /**
  * Looks up a single trip's live TripUpdate from whichever of this agency's realtime feeds owns
- * [tripId] -- its own primary feed for an unprefixed id, or the matching [SecondaryGtfsFeed]'s
- * feed for a "feed{n}:"-prefixed one (see [secondaryFeedPrefix]) -- fetching only that one feed
- * rather than every feed the agency has, since a caller here always already knows exactly which
- * trip it wants (typically a boarded trip's own id, polled in a loop). Null for a trip_id whose
- * owning feed has no realtime URL, or whose fetch fails or has no matching entry -- identical to
- * every other "not currently live" case this app already treats uniformly.
+ * [tripId] -- its own primary feed for an unprefixed id, the matching prefixed [MultiGtfsFeed]'s
+ * feed for a "feed{n}:"-prefixed one (see [secondaryFeedPrefix]), or, failing both, a probe across
+ * any feedUrl-less [MultiGtfsFeed]s (unprefixed, so there's no cheap way to know which one owns
+ * [tripId] without trying each) -- fetching only as many feeds as actually needed rather than
+ * every feed the agency has, since a caller here always already knows exactly which trip it wants
+ * (typically a boarded trip's own id, polled in a loop). Null for a trip_id whose owning feed has
+ * no realtime URL, or whose fetch fails or has no matching entry -- identical to every other "not
+ * currently live" case this app already treats uniformly.
  */
 suspend fun GtfsAgency.fetchTripUpdate(tripId: String): GtfsRtTripUpdate? {
-    components.filterIsInstance<SecondaryGtfsFeed>().forEachIndexed { index, feed ->
+    components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }.forEachIndexed { index, feed ->
         val prefix = secondaryFeedPrefix(index)
         if (tripId.startsWith(prefix)) {
             val url = feed.realtimeTripUpdatesUrl ?: return null
@@ -253,20 +277,40 @@ suspend fun GtfsAgency.fetchTripUpdate(tripId: String): GtfsRtTripUpdate? {
             }
         }
     }
-    val url = realtimeTripUpdatesUrl ?: return null
-    return try {
-        GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId]
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName", e)
-        null
+    val url = realtimeTripUpdatesUrl
+    val primaryMatch = url?.let {
+        try {
+            GtfsRealtimeClient.fetchFeed(it).tripUpdatesByTripId[tripId]
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName", e)
+            null
+        }
     }
+    if (primaryMatch != null) return primaryMatch
+    // Unprefixed multi-feed agencies (NYC Subway): tripId alone doesn't say which feed owns it,
+    // unlike a prefixed MultiGtfsFeed above -- probe each in list order, first match wins. A no-op
+    // loop for every agency with none of these. Each hit is served from the proxy worker's own
+    // ~10s edge cache, not a fresh MTA round trip every time.
+    for (feed in components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl == null }) {
+        val additionalUrl = feed.realtimeTripUpdatesUrl ?: continue
+        val match = try {
+            GtfsRealtimeClient.fetchFeed(additionalUrl).tripUpdatesByTripId[tripId]
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName's additional feed", e)
+            null
+        }
+        if (match != null) return match
+    }
+    return null
 }
 
 /** Same lookup as [fetchTripUpdate], for VehiclePositions instead of TripUpdates. */
 suspend fun GtfsAgency.fetchVehiclePosition(tripId: String): GtfsRtVehiclePosition? {
-    components.filterIsInstance<SecondaryGtfsFeed>().forEachIndexed { index, feed ->
+    components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }.forEachIndexed { index, feed ->
         val prefix = secondaryFeedPrefix(index)
         if (tripId.startsWith(prefix)) {
             val url = feed.realtimeVehiclePositionsUrl ?: return null
@@ -280,33 +324,52 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String): GtfsRtVehiclePositi
             }
         }
     }
-    val url = realtimeVehiclePositionsUrl ?: return null
-    return try {
-        GtfsRealtimeClient.fetchFeed(url).vehiclePositionsByTripId[tripId]
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName", e)
-        null
+    val url = realtimeVehiclePositionsUrl
+    val primaryMatch = url?.let {
+        try {
+            GtfsRealtimeClient.fetchFeed(it).vehiclePositionsByTripId[tripId]
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName", e)
+            null
+        }
     }
+    if (primaryMatch != null) return primaryMatch
+    // See fetchTripUpdate's identical loop for why this exists.
+    for (feed in components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl == null }) {
+        val additionalUrl = feed.realtimeVehiclePositionsUrl ?: continue
+        val match = try {
+            GtfsRealtimeClient.fetchFeed(additionalUrl).vehiclePositionsByTripId[tripId]
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName's additional feed", e)
+            null
+        }
+        if (match != null) return match
+    }
+    return null
 }
 
 /**
- * Result of polling an agency's own realtime feed together with every [SecondaryGtfsFeed]
+ * Result of polling an agency's own realtime feed together with every [MultiGtfsFeed]
  * component's -- [primary] is the agency's own fetched [GtfsRtFeedMessage] (null if it has no
  * realtime URL, or its fetch failed), kept around so a caller's existing status/staleness handling
  * (offline banners, [GtfsRtFeedHeader.isStale]) stays keyed off the primary feed exactly as before
  * secondary feeds existed -- a secondary feed's own freshness isn't surfaced separately today.
- * [byTripId] additionally folds in every reachable secondary feed's own trip_id -> value map,
- * prefixed to match the shared database's trip_ids (see [secondaryFeedPrefix]), so a caller
- * iterating scheduled trips finds a merged secondary-feed trip's live data (e.g. a Bustang trip
- * under RTD Denver) the same way it finds the primary agency's own.
+ * [byTripId] additionally folds in every reachable extra feed's own trip_id -> value map: a
+ * prefixed one (real [MultiGtfsFeed.feedUrl], see [secondaryFeedPrefix]) so a caller iterating
+ * scheduled trips finds a merged secondary-feed trip's live data (e.g. a Bustang trip under RTD
+ * Denver) the same way it finds the primary agency's own; an unprefixed one (no feedUrl, e.g. NYC
+ * Subway's extra line-group feeds) put in directly, since its trip_ids already match the shared
+ * static database with nothing to disambiguate.
  */
 class MergedRealtimeFeed<T>(val primary: GtfsRtFeedMessage?, val byTripId: Map<String, T>)
 
 private suspend fun <T> GtfsAgency.fetchMerged(
     primaryUrl: String?,
-    secondaryUrl: (SecondaryGtfsFeed) -> String?,
+    secondaryUrl: (MultiGtfsFeed) -> String?,
     byTripId: (GtfsRtFeedMessage) -> Map<String, T>,
     logTag: String,
 ): MergedRealtimeFeed<T> {
@@ -322,7 +385,7 @@ private suspend fun <T> GtfsAgency.fetchMerged(
     }
     val merged = buildMap {
         primaryFeed?.let { putAll(byTripId(it)) }
-        components.filterIsInstance<SecondaryGtfsFeed>().forEachIndexed { index, feed ->
+        components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }.forEachIndexed { index, feed ->
             val url = secondaryUrl(feed) ?: return@forEachIndexed
             try {
                 val prefix = secondaryFeedPrefix(index)
@@ -331,6 +394,18 @@ private suspend fun <T> GtfsAgency.fetchMerged(
                 throw e
             } catch (e: Exception) {
                 Log.e(logTag, "Realtime fetch failed for $displayName's secondary feed", e)
+            }
+        }
+        // Unprefixed (NYC Subway-style): trip_ids already match the shared static database
+        // directly, no prefix. A no-op for every agency with none of these.
+        components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl == null }.forEach { feed ->
+            val url = secondaryUrl(feed) ?: return@forEach
+            try {
+                putAll(byTripId(GtfsRealtimeClient.fetchFeed(url)))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(logTag, "Realtime fetch failed for $displayName's additional feed", e)
             }
         }
     }

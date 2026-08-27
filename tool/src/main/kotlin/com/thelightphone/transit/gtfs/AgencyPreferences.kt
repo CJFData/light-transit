@@ -35,7 +35,7 @@ class AgencyPreferences(private val dataStore: DataStore<Preferences>) {
     }
 
     /** Settings toggle, on by default, for a not-yet-implemented feature: merging a
-     * [SecondaryGtfsFeed]'s stops into the same station group as co-located parent-agency stops
+     * [MultiGtfsFeed]'s stops into the same station group as co-located parent-agency stops
      * (e.g. Bustang's gates at RTD Denver's Union Station), the way MBTA's South Station already
      * groups its own platforms. Reading this flag has no effect anywhere yet; it exists so the
      * setting can be discussed and tested ahead of the actual merge logic. */

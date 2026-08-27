@@ -3,6 +3,20 @@ package com.thelightphone.transit.gtfs
 import java.io.File
 import java.time.ZoneId
 
+/** The 7 NYC Subway line-group realtime feeds beyond ACE (the primary, see [GtfsAgency.NYC_SUBWAY]
+ * below) -- name -> the matching pico-transit-proxy path segment, same codes as `worker.js`'s own
+ * `NYC_SUBWAY_LINE_GROUPS` list. Looped into `NYC_SUBWAY`'s `components` below rather than 7
+ * hand-written [MultiGtfsFeed] entries. */
+private val NYC_SUBWAY_LINE_GROUPS = mapOf(
+    "BDFM" to "bdfm",
+    "G" to "g",
+    "JZ" to "jz",
+    "NQRW" to "nqrw",
+    "L" to "l",
+    "Numbered" to "numbered",
+    "SIR" to "si",
+)
+
 /**
  * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] are null when an agency has no realtime
  * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
@@ -41,9 +55,11 @@ enum class GtfsAgency(
      * Mountain-zone agency) was the first to expose this having been wrong. */
     val timeZoneId: String,
     /** Optional extra data sources beyond the feed URLs above -- see [AgencyComponent]. Empty for
-     * any agency that doesn't have one. A [SecondaryGtfsFeed] entry here is how an agency merges
-     * in another feed's static (and, if it ever publishes one, realtime) data -- see
-     * [GtfsAgency.RTD]'s Bustang entry. */
+     * any agency that doesn't have one. A [MultiGtfsFeed] entry here is how an agency merges in
+     * another feed's static (and, if it ever publishes one, realtime) data -- see
+     * [GtfsAgency.RTD]'s Bustang entry -- or, with no static feed of its own, just an extra
+     * realtime feed layered onto this agency's own already-ingested schedule -- see
+     * [GtfsAgency.NYC_SUBWAY]. */
     val components: List<AgencyComponent> = emptyList(),
 ) {
     MBTA(
@@ -661,21 +677,34 @@ enum class GtfsAgency(
         null,
         timeZoneId = "America/Chicago",
     ),
-    /** Realtime isn't wired in yet -- same as a few other agencies here for now. It'll take more
-     * work than most once it happens: split across 8 separate live feeds with non-overlapping
-     * trip_id ranges (one per line group -- verified live), needs a real User-Agent header (a HEAD
-     * request without one gets a 403, likely a WAF rule), and every entity carries several
-     * NYCT-specific protobuf fields (TripDescriptor field 1001, FeedEntity fields 2/5,
-     * VehiclePosition field 6, StopTimeUpdate fields 7 and 1001) that GtfsRealtime.kt would need to
-     * declare first, since this hand-rolled decoder faults on any undeclared field rather than
-     * skipping it. */
+    /** Realtime: no key needed, HTTPS (pico-transit-proxy's own default User-Agent satisfies MTA's
+     * WAF, which 403s a request with no real UA at all). Unlike LIRR/Metro-North's single combined
+     * feed, MTA splits NYC Subway's realtime across 8 line-group feeds (ACE, BDFM, G, JZ, NQRW, L,
+     * numbered lines/1234567S, SIR -- verified live, non-overlapping trip_id ranges), each still a
+     * single URL combining TripUpdates+VehiclePositions the same way LIRR/Metro-North's is. ACE
+     * occupies the primary URL fields below so the `realtimeVehiclePositionsUrl == null` "has
+     * realtime at all" check elsewhere (see MapScreen's NOT_SUPPORTED/UNAVAILABLE gating) keeps
+     * working unchanged; the other 7 (see [NYC_SUBWAY_LINE_GROUPS]) are unprefixed [MultiGtfsFeed]
+     * components (feedUrl left null) rather than a real second static feed -- every one of these
+     * feeds' trip_ids already matches trips loaded from this agency's single static feed directly.
+     * All 8 proxied through pico-transit-proxy's own /nyc_subway/&lt;group&gt; routes. Every entity also
+     * carries several NYCT-specific protobuf fields (TripDescriptor field 1001, FeedEntity fields
+     * 2/5, VehiclePosition field 6, StopTimeUpdate fields 7 and 1001) declared in GtfsRealtime.kt --
+     * this hand-rolled decoder faults on any undeclared field rather than skipping it. */
     NYC_SUBWAY(
         "nyc_subway",
-        "NYC Subway (No Live)",
+        "NYC Subway",
         "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip",
-        null,
-        null,
+        "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/ace",
+        "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/ace",
         timeZoneId = "America/New_York",
+        components = NYC_SUBWAY_LINE_GROUPS.map { (name, path) ->
+            MultiGtfsFeed(
+                name,
+                realtimeTripUpdatesUrl = "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/$path",
+                realtimeVehiclePositionsUrl = "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/$path",
+            )
+        },
     ),
     /** Realtime: no key needed, HTTPS, one combined TripUpdates+VehiclePositions feed -- wired in
      * below. Shares [GtfsRtStopTimeUpdate]'s field 1005 (see that field's own doc for verification

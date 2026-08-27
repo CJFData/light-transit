@@ -44,7 +44,7 @@ import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
 import com.thelightphone.transit.gtfs.FuzzyRunTrips
 import com.thelightphone.transit.gtfs.LiveVehicleSource
 import com.thelightphone.transit.gtfs.NetworkPreferences
-import com.thelightphone.transit.gtfs.SecondaryGtfsFeed
+import com.thelightphone.transit.gtfs.MultiGtfsFeed
 import com.thelightphone.transit.gtfs.StopPredictionSource
 import com.thelightphone.transit.gtfs.fetchTripUpdate
 import com.thelightphone.transit.gtfs.fetchVehiclePosition
@@ -351,7 +351,7 @@ class HomeScreenViewModel(
     val agencyHasStations = MutableStateFlow(false)
 
     /** The currently-selected agency's own GTFS-feed attribution, plus one entry for every
-     * [SecondaryGtfsFeed] component it has -- e.g. RTD Denver's attribution followed by "Bustang",
+     * [MultiGtfsFeed] component it has -- e.g. RTD Denver's attribution followed by "Bustang",
      * so a merged feed's data source gets credited too. See GtfsRepository.getFeedAttribution's own
      * doc for the primary entry's fallback chain. Reset to empty the moment a new agency is
      * selected, same reasoning as [agencyHasStations]. */
@@ -740,7 +740,11 @@ class HomeScreenViewModel(
             try {
                 agencyHasStations.value = stationRepo.getAllStations().isNotEmpty()
                 feedAttribution.value = listOfNotNull(stationRepo.getFeedAttribution()) +
-                    agency.components.filterIsInstance<SecondaryGtfsFeed>().map { FeedAttribution(it.name, url = null) }
+                    // Only feeds with their own static schedule (feedUrl != null) warrant a separate
+                    // attribution credit -- a feedUrl-less MultiGtfsFeed (e.g. NYC Subway's extra line-group
+                    // realtime feeds) is still the same underlying static feed/agency already credited above.
+                    agency.components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }
+                        .map { FeedAttribution(it.name, url = null) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -978,8 +982,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                 // rather than a previous ad-hoc alignment approach.
                 Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                     // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's own doc for
-                    // exactly which GTFS file this comes from, plus one name per SecondaryGtfsFeed component (e.g.
-                    // "Bustang" alongside RTD Denver's own). Tied to whichever agency is currently selected, not
+                    // exactly which GTFS file this comes from, plus one name per MultiGtfsFeed component with its own
+                    // static feed (e.g. "Bustang" alongside RTD Denver's own). Tied to whichever agency is currently selected, not
                     // just "ready", so it reads correctly even mid-sync.
                     if (feedAttribution.isNotEmpty()) {
                         LightText(

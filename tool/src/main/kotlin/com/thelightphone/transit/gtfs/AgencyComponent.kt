@@ -71,29 +71,38 @@ interface LiveVehicleSource : AgencyComponent {
 }
 
 /**
- * An extra GTFS feed merged into an agency's own database alongside its primary feed, under its
- * own id-prefixed namespace (see [GtfsIngestor]'s `idPrefix` handling) -- e.g. Bustang, CDOT's
- * intercity coach service, whose static schedule RTD Denver re-hosts and this app merges into
- * RTD's own on-device database so a single "RTD Denver" lookup covers both (see [GtfsAgency.RTD]).
- * An [AgencyComponent] like [LiveVehicleSource], so a future second merged feed is just another
- * entry in that agency's own `components` list, not a change to [GtfsAgency]'s shape.
+ * An extra GTFS-RT source for an agency, in one of two shapes:
  *
- * [name] is this feed's short, rider-facing label (e.g. "Bustang") -- used two places: (1)
- * appended to one of this feed's own routes/stops whose name doesn't already mention it (see
- * [GtfsIngestor]'s `disambiguatedName`), so a merged route/stop reads as e.g. "West Line -
- * Bustang"; (2) folded into the parent agency's own feed attribution line, so both sources get
- * credited.
+ * - **A real second feed** ([feedUrl] non-null): its own static schedule is merged into the
+ *   agency's on-device database under its own id-prefixed namespace (see [GtfsIngestor]'s
+ *   `idPrefix` handling) -- e.g. Bustang, CDOT's intercity coach service, whose static schedule
+ *   RTD Denver re-hosts and this app merges into RTD's own database (see [GtfsAgency.RTD]). Its
+ *   realtime data, if any, is prefixed the same way its static data is, so it never collides with
+ *   the primary feed's trip_ids.
+ * - **Just another realtime feed** ([feedUrl] null): no separate static schedule -- this agency
+ *   already has one static feed on-device whose trip_ids already match this extra realtime feed
+ *   directly. E.g. NYC Subway, whose realtime is split across 8 line-group MTA feeds rather than
+ *   one combined feed the way LIRR/Metro-North's is (see [GtfsAgency.NYC_SUBWAY]) -- each of the
+ *   other 7 feeds (beyond the one occupying the agency's own primary URL fields) is a
+ *   [MultiGtfsFeed] with [feedUrl] left null, unioned into the merged realtime view with no id
+ *   prefix, since there's no collision to guard against.
  *
- * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] carry this feed's own live vehicle data,
- * distinct from the parent agency's -- null when this feed has no realtime data of its own. A
- * caller polling an agency's live data should treat a [SecondaryGtfsFeed] with non-null realtime
- * URLs as a second feed to fetch and merge in, keyed by trip_id the same way the primary feed
- * already is -- this feed's trip_ids are prefixed the same way its static data's are, so the two
- * never collide.
+ * An [AgencyComponent] like [LiveVehicleSource], so more merged/extra feeds are just more entries
+ * in that agency's own `components` list, never a change to [GtfsAgency]'s own shape.
+ *
+ * [name] is this feed's short, rider-facing label (e.g. "Bustang") -- only meaningful when
+ * [feedUrl] is non-null, where it's used two places: (1) appended to one of this feed's own
+ * routes/stops whose name doesn't already mention it (see [GtfsIngestor]'s `disambiguatedName`),
+ * so a merged route/stop reads as e.g. "West Line - Bustang"; (2) folded into the parent agency's
+ * own feed attribution line. Ignored entirely when [feedUrl] is null -- there's no separate
+ * static data to disambiguate or credit.
+ *
+ * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] carry this feed's own live data, distinct
+ * from the parent agency's -- null when this specific feed has no realtime data of that kind.
  */
-class SecondaryGtfsFeed(
+class MultiGtfsFeed(
     val name: String,
-    val feedUrl: String,
+    val feedUrl: String? = null,
     val realtimeTripUpdatesUrl: String? = null,
     val realtimeVehiclePositionsUrl: String? = null,
 ) : AgencyComponent
@@ -122,7 +131,7 @@ class SecondaryGtfsFeed(
  * Purely documentary from this app's side -- no code here reads [regionalOperatorCode] or
  * [regionName], since the proxy already did the filtering server-side. It exists so the
  * relationship (and the shared upstream quota it implies) is visible next to the agency itself,
- * the same way [SecondaryGtfsFeed] and [LiveVehicleSource] document their own agencies' special-
+ * the same way [MultiGtfsFeed] and [LiveVehicleSource] document their own agencies' special-
  * cased data sources. See pico-transit-proxy's own REGIONAL_FEEDS/serveRegionalAgencyRoute for the
  * actual filtering; onboarding a second regional aggregator is a new entry there, not a change to
  * this class.

@@ -585,7 +585,7 @@ class MapViewModel(
             return
         }
 
-        // Merged with any SecondaryGtfsFeed component's own realtime feed (e.g. Bustang under RTD
+        // Merged with any MultiGtfsFeed component's own realtime feed (e.g. Bustang under RTD
         // Denver) -- see MergedRealtimeFeed's own doc. Status below is still keyed off the primary
         // feed only, unchanged from before secondary feeds existed. Safe to call even when
         // realtimeVehiclePositionsUrl is null -- fetchMerged's own primaryUrl?.let guard just yields

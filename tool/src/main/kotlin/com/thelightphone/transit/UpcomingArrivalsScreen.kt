@@ -226,7 +226,7 @@ class UpcomingArrivalsViewModel(
         scheduled: List<ScheduledArrival>,
         today: LocalDate,
     ): UpcomingArrivalsState = try {
-                // Merged with any SecondaryGtfsFeed component's own realtime feed (e.g. Bustang under RTD
+                // Merged with any MultiGtfsFeed component's own realtime feed (e.g. Bustang under RTD
                 // Denver) -- see MergedRealtimeFeed's own doc. [feed.primary] (used below for
                 // staleness/offline) stays keyed off the agency's own primary feed only.
                 val feed = agency.fetchMergedTripUpdates("UpcomingArrivalsScreen")
