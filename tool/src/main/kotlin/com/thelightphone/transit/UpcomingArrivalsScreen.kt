@@ -229,7 +229,7 @@ class UpcomingArrivalsViewModel(
                 // Merged with any MultiGtfsFeed component's own realtime feed (e.g. Bustang under RTD
                 // Denver) -- see MergedRealtimeFeed's own doc. [feed.primary] (used below for
                 // staleness/offline) stays keyed off the agency's own primary feed only.
-                val feed = agency.fetchMergedTripUpdates("UpcomingArrivalsScreen")
+                val feed = agency.fetchMergedTripUpdates(repository, "UpcomingArrivalsScreen")
 
                 // An agency with no standard GTFS-RT feed at all (e.g. CTA -- both realtimeTripUpdatesUrl
                 // and realtimeVehiclePositionsUrl null) leaves [feed] permanently empty; its live data

@@ -29,7 +29,7 @@ object MbtaGreenLineFuzzyRunSource : FuzzyRunTrips {
         // FuzzyRunTrips.matchedTripUpdates's own doc for why this redundant-but-cached call is an
         // acceptable tradeoff for keeping the interface uniform across agencies.
         val feed = try {
-            agency.fetchMergedTripUpdates("MbtaGreenLineFuzzyRunSource")
+            agency.fetchMergedTripUpdates(repository, "MbtaGreenLineFuzzyRunSource")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -72,11 +72,12 @@ object MbtaGreenLineFuzzyRunSource : FuzzyRunTrips {
     override suspend fun liveRunOptions(
         routeId: String,
         agency: GtfsAgency,
+        repository: GtfsRepository,
         zoneId: ZoneId,
     ): List<FuzzyRunOption> {
         if (routeId !in routeIds) return emptyList()
         val feed = try {
-            agency.fetchMergedTripUpdates("MbtaGreenLineFuzzyRunSource")
+            agency.fetchMergedTripUpdates(repository, "MbtaGreenLineFuzzyRunSource")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -115,7 +116,7 @@ object MbtaGreenLineFuzzyRunSource : FuzzyRunTrips {
     ): GtfsRtTripUpdate? {
         if (routeId !in routeIds) return null
         val feed = try {
-            agency.fetchMergedTripUpdates("MbtaGreenLineFuzzyRunSource")
+            agency.fetchMergedTripUpdates(repository, "MbtaGreenLineFuzzyRunSource")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

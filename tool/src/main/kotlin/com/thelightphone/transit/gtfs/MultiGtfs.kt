@@ -34,3 +34,34 @@ val LaMetroRailSecondaryFeed = MultiGtfsFeed(
     name = "Rail",
     feedUrl = "https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip",
 )
+
+/** name -> the matching pico-transit-proxy path segment, same codes as `worker.js`'s own
+ * `NYC_SUBWAY_LINE_GROUPS` list (see that file's own doc for how it uses these). */
+private val NYC_SUBWAY_LINE_GROUPS = mapOf(
+    "BDFM" to "bdfm",
+    "G" to "g",
+    "JZ" to "jz",
+    "NQRW" to "nqrw",
+    "L" to "l",
+    "Numbered" to "numbered",
+    "SIR" to "si",
+)
+
+/**
+ * The 7 NYC Subway line-group realtime feeds beyond ACE (the primary, see
+ * [GtfsAgency.NYC_SUBWAY]) -- unlike LIRR/Metro-North's single combined feed, MTA splits subway
+ * realtime across 8 line-group feeds (ACE, BDFM, G, JZ, NQRW, L, numbered lines/1234567S, SIR --
+ * verified live, non-overlapping trip_id ranges), each still a single URL combining
+ * TripUpdates+VehiclePositions the same way LIRR/Metro-North's is. No real second network here,
+ * unlike every other secondary feed in this file -- these 7 have no `feedUrl` of their own (see
+ * [MultiGtfsFeed]'s own doc for what that means): every one of their trip_ids already matches
+ * trips loaded from NYC Subway's single static feed directly, so they're just 7 more realtime
+ * sources layered onto that same already-ingested schedule.
+ */
+val NycSubwaySecondaryFeeds: List<MultiGtfsFeed> = NYC_SUBWAY_LINE_GROUPS.map { (name, path) ->
+    MultiGtfsFeed(
+        name,
+        realtimeTripUpdatesUrl = "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/$path",
+        realtimeVehiclePositionsUrl = "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/$path",
+    )
+}

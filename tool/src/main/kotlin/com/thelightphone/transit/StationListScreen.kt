@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3KeyboardViewModel
+import com.thelightphone.transit.gtfs.AgencyPreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.StopLocation
@@ -72,6 +73,7 @@ sealed class StationListState {
 class StationListViewModel(
     dbFile: File,
     private val tapHoldPreferences: TapHoldPreferences,
+    private val agencyPreferences: AgencyPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -94,8 +96,9 @@ class StationListViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             tapHoldArrivalsEnabled.value = tapHoldPreferences.tapHoldStationArrivalsEnabledFlow.first()
             stationTapArrivalsEnabled.value = tapHoldPreferences.stationTapArrivalsEnabledFlow.first()
+            val mergeFeedStationsEnabled = agencyPreferences.mergeFeedStationsEnabledFlow.first()
             _state.value = try {
-                StationListState.Loaded(repository.getAllStations())
+                StationListState.Loaded(repository.getAllStations(mergeFeedStationsEnabled))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -127,7 +130,7 @@ class StationListScreen(
         get() = StationListViewModel::class.java
 
     override fun createViewModel(): StationListViewModel =
-        StationListViewModel(dbFile, TapHoldPreferences(lightContext.dataStore))
+        StationListViewModel(dbFile, TapHoldPreferences(lightContext.dataStore), AgencyPreferences(lightContext.dataStore))
 
     @Composable
     private fun StationRow(station: StopLocation, tapHoldArrivalsEnabled: Boolean, stationTapArrivalsEnabled: Boolean) {

@@ -3,20 +3,6 @@ package com.thelightphone.transit.gtfs
 import java.io.File
 import java.time.ZoneId
 
-/** The 7 NYC Subway line-group realtime feeds beyond ACE (the primary, see [GtfsAgency.NYC_SUBWAY]
- * below) -- name -> the matching pico-transit-proxy path segment, same codes as `worker.js`'s own
- * `NYC_SUBWAY_LINE_GROUPS` list. Looped into `NYC_SUBWAY`'s `components` below rather than 7
- * hand-written [MultiGtfsFeed] entries. */
-private val NYC_SUBWAY_LINE_GROUPS = mapOf(
-    "BDFM" to "bdfm",
-    "G" to "g",
-    "JZ" to "jz",
-    "NQRW" to "nqrw",
-    "L" to "l",
-    "Numbered" to "numbered",
-    "SIR" to "si",
-)
-
 /**
  * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] are null when an agency has no realtime
  * feed reachable at all. Screens treat "null or fetch failed" identically, so adding/removing a
@@ -91,6 +77,396 @@ enum class GtfsAgency(
         timeZoneId = "America/Denver",
         components = listOf(BustangSecondaryFeed),
     ),
+    /** Bustang (CDOT's intercity coach service) already merges into RTD Denver via
+     * [BustangSecondaryFeed] above, but a rider looking it up directly (not through RTD) wants
+     * their own selectable entry too -- same static feed and same already-verified realtime URLs
+     * as that component (its own feedUrl redirects through RTD's nodejs-prod API host, confirmed
+     * live again this session). */
+    BUSTANG(
+        "bustang",
+        "Bustang",
+        "https://www.rtd-denver.com/files/gtfs/bustang-co-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/bustang/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/bustang/vehiclepositions",
+        timeZoneId = "America/Denver",
+    ),
+    /**
+     * The rest of Colorado's ~40 agencies listed at colorado-gtfs.trilliumtransit.com (see the
+     * "Colorado rollout" plan) -- static schedule data only, per this project's established
+     * per-agency verification discipline: no GTFS-RT feed is published for any agency on that
+     * aggregator page (confirmed again this session), so every entry below gets a "(No Live)"
+     * displayName suffix, same convention as LA Metro/Metra/Pace elsewhere in this file. Each
+     * feed's own agency.txt was hand-checked live this session for its real `agency_timezone`
+     * rather than assumed from the city name -- every one declares `America/Denver` except where
+     * individually noted below. Two small clusters here share byte-identical zip content across
+     * multiple rider-facing names (Boulder County/Via Mobility, and San Miguel Authority/Town of
+     * Mountain Village/Town of Telluride) -- kept as separate selectable entries anyway, same
+     * reasoning as Bustang above: a rider searching by the name they actually know shouldn't need
+     * to already know it's the same underlying feed as some other entry. Two other agencies from
+     * the same source list (COLT, Cripple Creek Transportation) are left out entirely -- both
+     * URLs 403'd with an HTML page instead of a real feed link, and need a corrected source before
+     * they can be added.
+     */
+    ALL_POINTS_TRANSIT(
+        "all_points_transit",
+        "All Points Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/allpointstransit-co-us/allpointstransit-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    AVON_TRANSIT(
+        "avon_transit",
+        "Avon Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/avon-co-us/avon-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** GTFS-Flex (demand-response) feed -- real but sparse fixed-route data (426B stop_times.txt),
+     * confirmed live rather than broken; the app already tolerates a route with little/no
+     * scheduled service (see FuzzyRunTrips' NoTrips handling). */
+    BACA_AREA_TRANSPORTATION(
+        "baca_area_transportation",
+        "Baca Area Transportation (No Live)",
+        "https://data.trilliumtransit.com/gtfs/bacacounty-co-us/bacacounty-co-us--flex-v2.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    BENT_COUNTY_TRANSPORTATION(
+        "bent_county_transportation",
+        "Bent County Transportation (No Live)",
+        "https://data.trilliumtransit.com/gtfs/bentcounty-co-us/bentcounty-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    BLACKHAWK_CENTRAL_CITY_TRAMWAY(
+        "blackhawk_central_city_tramway",
+        "Blackhawk and Central City Tramway (No Live)",
+        "https://data.trilliumtransit.com/gtfs/blackhawktramway-co-us/blackhawktramway-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** See this cluster's shared doc note above -- byte-identical feed to VIA_MOBILITY below (the
+     * zip's own agency.txt lists "Boulder County"/"City of Boulder", not "Via Mobility", as its
+     * two agency_name rows). */
+    BOULDER_COUNTY(
+        "boulder_county",
+        "Boulder County (No Live)",
+        "https://data.trilliumtransit.com/gtfs/viamobilityservices-co-us/viamobilityservices-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    BRECKENRIDGE_FREE_RIDE(
+        "breckenridge_free_ride",
+        "Breckenridge Free Ride (No Live)",
+        "https://data.trilliumtransit.com/gtfs/breckenridgefreeride-co-us/breckenridgefreeride-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    BUSTANG_OUTRIDER(
+        "bustang_outrider",
+        "Bustang Outrider (No Live)",
+        "https://data.trilliumtransit.com/gtfs/outrider-co-us/outrider-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    CITY_OF_FOUNTAIN_TRANSIT(
+        "city_of_fountain_transit",
+        "City of Fountain Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/cityoffountaintransit-co-us/cityoffountaintransit-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    CLEAR_CREEK_COUNTY_TRANSIT(
+        "clear_creek_county_transit",
+        "Clear Creek County Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/clearcreek-co-us/clearcreek-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** Confirmed live this session -- redirects cross-domain to evta.org (the real operator's own
+     * domain), not a coretransit.org-hosted file directly. */
+    CORE_TRANSIT(
+        "core_transit",
+        "Core Transit (No Live)",
+        "https://gtfs.coretransit.org/",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** GTFS-Flex feed, sparse (292B stop_times.txt). Its own agency.txt declares `US/Mountain`,
+     * not `America/Denver` like every other Colorado feed here -- a legacy IANA alias for the same
+     * zone (same UTC offset, same DST rules), used verbatim rather than normalized, since
+     * java.time.ZoneId resolves it correctly as-is. */
+    DOLORES_COUNTY(
+        "dolores_county",
+        "Dolores County (No Live)",
+        "https://data.trilliumtransit.com/gtfs/dolorescounty-co-us/dolorescounty-co-us--flex-v2.zip",
+        null,
+        null,
+        timeZoneId = "US/Mountain",
+    ),
+    /** URL is a document-viewer page, not a bare .zip -- still resolves to a real zip body
+     * (`application/octet-stream` content-type, valid PK bytes), confirmed live this session. */
+    DURANGO_TRANSIT(
+        "durango_transit",
+        "Durango Transit (No Live)",
+        "https://durangogov.org/DocumentCenter/View/17688/Durango-Transit-GTFS-Data",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** GTFS-Flex feed, sparse (356B stop_times.txt) -- confirmed live, not broken. */
+    EASY_RIDE_TRANSPORTATION(
+        "easy_ride_transportation",
+        "Easy Ride Transportation (No Live)",
+        "https://data.trilliumtransit.com/gtfs/broomfield-co-us/broomfield-co-us--flex-v2.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** GTFS-Flex feed, sparse (416B stop_times.txt) -- confirmed live, not broken. */
+    EL_PASO_FOUNTAIN_VALLEY_SENIORS(
+        "el_paso_fountain_valley_seniors",
+        "El Paso Fountain Valley Senior Citizens Program Inc. (No Live)",
+        "https://data.trilliumtransit.com/gtfs/elpaso-co-us/elpaso-co-us--flex-v2.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    ENVIDA(
+        "envida",
+        "Envida (No Live)",
+        "https://data.trilliumtransit.com/gtfs/dsi-co-us/dsi-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    EPIC_MOUNTAIN_EXPRESS(
+        "epic_mountain_express",
+        "Epic Mountain Express (No Live)",
+        "https://data.trilliumtransit.com/gtfs/cme-co-us/cme-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    ESTES_TRANSIT(
+        "estes_transit",
+        "Estes Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/estestransit-co-us/estestransit-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    GARDEN_OF_THE_GODS(
+        "garden_of_the_gods",
+        "Garden of the Gods (No Live)",
+        "https://data.trilliumtransit.com/gtfs/gardenofthegods-co-us/gardenofthegods-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    GREELEY_EVANS_TRANSIT(
+        "greeley_evans_transit",
+        "Greeley-Evans Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/greeleyevans-co-us/greeleyevans-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    GUNNISON_VALLEY_RTA(
+        "gunnison_valley_rta",
+        "Gunnison Valley RTA (No Live)",
+        "https://mjcaction.com/MJC_GTFS_Public/gunnisonrta_google_transit.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    HOME_JAMES_TRANSPORTATION(
+        "home_james_transportation",
+        "Home James Transportation (No Live)",
+        "https://data.trilliumtransit.com/gtfs/homejames-co-us/homejames-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    MOUNTAIN_METROPOLITAN_TRANSIT(
+        "mountain_metropolitan_transit",
+        "Mountain Metropolitan Transit (No Live)",
+        "https://coloradosprings.gov/document/googletransit.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    PARACHUTE_AREA_TRANSIT_SYSTEM(
+        "parachute_area_transit_system",
+        "Parachute Area Transit System (No Live)",
+        "https://data.trilliumtransit.com/gtfs/pats-co-us/pats-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    PRAIRIE_EXPRESS_TRANSIT(
+        "prairie_express_transit",
+        "Prairie Express Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/prairieexpress-co-us/prairieexpress-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** URL says flex-v2 but this is substantial fixed-route data too (50,150B stop_times.txt), not
+     * a sparse demand-response-only feed like the other flex entries above. */
+    PUEBLO_TRANSIT(
+        "pueblo_transit",
+        "Pueblo Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/pueblo-co-us/pueblo-co-us--flex-v2.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** Large feed (~1.4MB stop_times.txt) -- no size concern given STM Montreal's own feed is
+     * already handled at multi-hundred-MB scale (see GtfsIngestor's streaming-download doc). */
+    RFTA(
+        "rfta",
+        "RFTA (No Live)",
+        "https://data.trilliumtransit.com/gtfs/rfta-co-us/rfta-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    ROAD_RUNNER_TRANSIT(
+        "road_runner_transit",
+        "Road Runner Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/roadrunnertransit-co-us/roadrunnertransit-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    ROCKY_MOUNTAIN_NP_SHUTTLES(
+        "rocky_mountain_np_shuttles",
+        "Rocky Mountain National Park Shuttles (No Live)",
+        "https://data.trilliumtransit.com/gtfs/rockymountainnationalpark-co-us/rockymountainnationalpark-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** See this cluster's shared doc note above -- byte-identical feed to TOWN_OF_MOUNTAIN_VILLAGE
+     * and TOWN_OF_TELLURIDE below (the zip's own agency.txt lists "SMART" -- the actual regional
+     * operator's real name -- plus both towns' own agency_name rows). */
+    SAN_MIGUEL_REGIONAL_TRANSPORTATION(
+        "san_miguel_regional_transportation",
+        "San Miguel Authority for Regional Transportation (No Live)",
+        "https://data.trilliumtransit.com/gtfs/sanmiguelcounty-co-us/sanmiguelcounty-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    SNOWMASS_VILLAGE_TRANSPORTATION(
+        "snowmass_village_transportation",
+        "Snowmass Village Transportation (No Live)",
+        "https://data.trilliumtransit.com/gtfs/snowmassvillagetransportation-co-us/snowmassvillagetransportation-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    STEAMBOAT_SPRINGS_TRANSIT(
+        "steamboat_springs_transit",
+        "Steamboat Springs Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/steamboatsprings-co-us/steamboatsprings-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    SUMMIT_STAGE(
+        "summit_stage",
+        "Summit Stage (No Live)",
+        "https://data.trilliumtransit.com/gtfs/summitstage-co-us/summitstage-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** See SAN_MIGUEL_REGIONAL_TRANSPORTATION's own doc -- same byte-identical feed. */
+    TOWN_OF_MOUNTAIN_VILLAGE(
+        "town_of_mountain_village",
+        "Town of Mountain Village (No Live)",
+        "https://data.trilliumtransit.com/gtfs/sanmiguelcounty-co-us/sanmiguelcounty-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** See SAN_MIGUEL_REGIONAL_TRANSPORTATION's own doc -- same byte-identical feed. */
+    TOWN_OF_TELLURIDE(
+        "town_of_telluride",
+        "Town of Telluride (No Live)",
+        "https://data.trilliumtransit.com/gtfs/sanmiguelcounty-co-us/sanmiguelcounty-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** Large feed (~586K stop_times.txt). */
+    TRANSFORT(
+        "transfort",
+        "Transfort (No Live)",
+        "https://ridetransfort.com/wp-content/uploads/transfort_gtfs.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    TSC_TRANSIT(
+        "tsc_transit",
+        "TSC Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/tsctransit-co-us/tsctransit-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    UNIVERSITY_OF_COLORADO_BOULDER(
+        "university_of_colorado_boulder",
+        "University of Colorado Boulder (No Live)",
+        "https://data.trilliumtransit.com/gtfs/universitycoloradoboulder-co-us/universitycoloradoboulder-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    VAIL_TRANSIT(
+        "vail_transit",
+        "Vail Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/vailtransit-co-us/vailtransit-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** See BOULDER_COUNTY's own doc -- same byte-identical feed. */
+    VIA_MOBILITY(
+        "via_mobility",
+        "Via Mobility (No Live)",
+        "https://data.trilliumtransit.com/gtfs/viamobilityservices-co-us/viamobilityservices-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
+    /** Its own agency.txt declares `America/Chicago`, but Winter Park, CO is unambiguously
+     * Mountain time -- taken at face value this would shift every schedule time by 1 hour against
+     * reality, so `America/Denver` is used instead as a deliberate, verified override of an
+     * implausible vendor data-entry error, not a guess from the city name (per CJFData's explicit
+     * call, 2026-08-26). Worth re-checking if the upstream feed ever corrects this. */
+    WINTER_PARK_TRANSIT(
+        "winter_park_transit",
+        "Winter Park Transit (No Live)",
+        "https://data.trilliumtransit.com/gtfs/winterpark-co-us/winterpark-co-us.zip",
+        null,
+        null,
+        timeZoneId = "America/Denver",
+    ),
     LTC(
         "ltc",
         "LTC Ontario",
@@ -118,14 +494,21 @@ enum class GtfsAgency(
     // one-time regional-feed sample -- a single snapshot, not proof an agency has no live data.
     // BART's VehiclePositions is the one confirmed exception (see that entry).
     //
-    // Static feeds stay independent, and prefer a direct download from the agency's own domain (or
-    // an aggregator it actually links to, e.g. Caltrain's Trillium URL) over 511's datafeed API. An
-    // entry only routes its static feed through 511 when no independent download exists, or the
-    // one that does is no longer current -- see that entry's own comment. Agencies whose static
-    // feed goes through 511 generally use the region's America/Los_Angeles timezone default rather
-    // than a per-feed agency.txt lookup, since they can't be downloaded without the proxy's own
-    // server-side key -- AC Transit is the one exception, its `US/Pacific` value confirmed
-    // directly from the feed before it moved to 511.
+    // Every entry's static feed also routes through 511's datafeed API now, regardless of whether
+    // an independent agency-domain download exists -- 511's own regional TripUpdates/
+    // VehiclePositions feed above is built against 511's own unified regional stop_id catalog, not
+    // each operator's native GTFS, so a static feed downloaded straight from the agency's own domain
+    // has stop_ids that never match that agency's own realtime feed at all (confirmed on BART: live
+    // trip_ids matched its own bart.gov-sourced trips.txt 71/71, but live stop_ids matched its own
+    // stops.txt 0/1018 -- UpcomingArrivalsScreen's per-row match needs both, so this silently
+    // produced zero live rows, i.e. permanently "Offline", for every agency sourced this way).
+    // Routing both feeds through 511 guarantees one shared stop_id namespace by construction. Each
+    // entry below still names whatever independent source was found/considered, for provenance, but
+    // the feedUrl itself is always the 511 route. Agencies whose static feed goes through 511
+    // generally use the region's America/Los_Angeles timezone default rather than a per-feed
+    // agency.txt lookup, since they can't be downloaded without the proxy's own server-side key --
+    // AC Transit is the one exception, its `US/Pacific` value confirmed directly from the feed
+    // before it moved to 511.
 
     /** VehiclePositions always comes back empty here -- a real, freshly-timestamped 0-entity
      * FeedMessage, not a caching/rate-limit artifact (confirmed by cache-busting, by comparing
@@ -135,23 +518,27 @@ enum class GtfsAgency(
      * anywhere -- structurally absent, not a sampling-window gap. Costs only the
      * moving-vehicle-dot-on-map visualization; ETAs come from TripUpdates alone, and
      * TripDetailScreen's live current-stop indicator still works via inferCurrentStopSequence()
-     * (the same fallback RIPTA's feed relies on). TripUpdates trip_ids have matched cleanly
-     * against this agency's own static trips.txt in sampling so far. */
+     * (the same fallback RIPTA's feed relies on). TripUpdates trip_ids matched cleanly against
+     * bart.gov's own trips.txt (71/71), but its stop_ids didn't (0/1018) -- the agency this
+     * group's own top-of-block comment cites as the confirming case for switching every static
+     * feed here to 511. */
     BART(
         "bart",
         "BART",
-        "https://www.bart.gov/dev/schedules/google_transit.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFBA/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFBA/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFBA/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "BA")),
     ),
     /** A large feed (~1.9M stop_times rows) -- already covered by the streaming-download/batched-
-     * commit fixes shipped for STM Montreal's similarly large feed, no size concern. */
+     * commit fixes shipped for STM Montreal's similarly large feed, no size concern. Direct source
+     * was muni-gtfs.apps.sfmta.com; switched to 511 for stop_id parity with this agency's own
+     * realtime feed (see this group's own top-of-block comment). */
     SFMTA_MUNI(
         "sfmta_muni",
         "SFMTA Muni",
-        "https://muni-gtfs.apps.sfmta.com/data/muni_gtfs-current.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFSF/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSF/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSF/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -169,35 +556,37 @@ enum class GtfsAgency(
         timeZoneId = "US/Pacific",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AC")),
     ),
-    /** Static feed is Trillium-hosted, not Caltrain's own domain -- it's the exact URL Caltrain's
-     * own developer-resources page links to as its GTFS source. Tiny (5.5K stop_times rows), no
-     * size concern. */
+    /** Direct source was Trillium's caltrain-ca-us feed -- the exact URL Caltrain's own
+     * developer-resources page links to. Switched to 511 for stop_id parity with this agency's own
+     * realtime feed (see this group's own top-of-block comment). */
     CALTRAIN(
         "caltrain",
         "Caltrain",
-        "https://data.trilliumtransit.com/gtfs/caltrain-ca-us/caltrain-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFCT/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCT/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCT/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CT")),
     ),
     /** Transitland's own operator record already listed the 511 regional feed as VTA's only live
-     * source, which is exactly what this group now uses. */
+     * source. Static now routes through 511 too, for stop_id parity (see this group's own
+     * top-of-block comment) -- direct source was gtfs.vta.org. */
     VTA(
         "vta",
         "VTA",
-        "https://gtfs.vta.org/gtfs_vta.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFSC/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSC/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SC")),
     ),
 
-    /** County Connection's own domain, confirmed live. */
+    /** Direct source was countyconnection.com, confirmed live. Switched to 511 for stop_id parity
+     * with this agency's own realtime feed (see this group's own top-of-block comment). */
     COUNTY_CONNECTION(
         "county_connection",
         "County Connection",
-        "https://countyconnection.com/GTFS/google_transit.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFCC/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCC/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -215,89 +604,100 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CE")),
     ),
-    /** Santa Cruz METRO's own developer portal, confirmed live (recently moved off their old
-     * scmtd.com domain to developer.scmetro.org). */
+    /** Direct source was developer.scmetro.org (recently moved off scmtd.com), confirmed live.
+     * Switched to 511 for stop_id parity with this agency's own realtime feed (see this group's
+     * own top-of-block comment). */
     SANTA_CRUZ_METRO(
         "santa_cruz_metro",
         "Santa Cruz METRO",
-        "https://developer.scmetro.org/gtfs.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFCR/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCR/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCR/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CR")),
     ),
-    /** Capitol Corridor's own domain, confirmed live. Intercity rail -- double-checked timezone
-     * against agency.txt rather than assuming. */
+    /** Direct source was capitolcorridor.org, confirmed live. Intercity rail -- double-checked
+     * timezone against agency.txt rather than assuming. Switched to 511 for stop_id parity with
+     * this agency's own realtime feed (see this group's own top-of-block comment). */
     CAPITOL_CORRIDOR(
         "capitol_corridor",
         "Capitol Corridor",
-        "https://www.capitolcorridor.org/googletransit/GTFS.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFAM/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFAM/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFAM/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AM")),
     ),
-    /** Emery Go-Round's own domain, confirmed live -- but only with a real browser User-Agent (a
-     * bare request gets 406), same pattern already seen with CTA's feed above. */
+    /** Direct source was emerygoround.com, confirmed live -- but only with a real browser
+     * User-Agent (a bare request gets 406), same pattern already seen with CTA's feed above.
+     * Switched to 511 for stop_id parity with this agency's own realtime feed (see this group's
+     * own top-of-block comment) -- sidesteps the User-Agent requirement too. */
     EMERY_GO_ROUND(
         "emery_go_round",
         "Emery Go-Round",
-        "https://emerygoround.com/data/emerygoround-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFEM/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFEM/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFEM/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "EM")),
     ),
-    /** Golden Gate Transit's own domain, confirmed live. This is the bus network specifically --
-     * Golden Gate Ferry is a separate operator/feed ([GOLDEN_GATE_FERRY], 511 code GF). */
+    /** Direct source was realtime.goldengate.org, confirmed live. This is the bus network
+     * specifically -- Golden Gate Ferry is a separate operator/feed ([GOLDEN_GATE_FERRY], 511 code
+     * GF). Switched to 511 for stop_id parity with this agency's own realtime feed (see this
+     * group's own top-of-block comment). */
     GOLDEN_GATE_TRANSIT(
         "golden_gate_transit",
         "Golden Gate Transit",
-        "https://realtime.goldengate.org/gtfsstatic/GTFSTransitData.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFGG/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFGG/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFGG/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "GG")),
     ),
-    /** Marin Transit's own domain, confirmed live. */
+    /** Direct source was marintransit.gov, confirmed live. Switched to 511 for stop_id parity
+     * with this agency's own realtime feed (see this group's own top-of-block comment). */
     MARIN_TRANSIT(
         "marin_transit",
         "Marin Transit",
-        "https://marintransit.gov/data/google_transit.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFMA/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMA/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMA/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MA")),
     ),
-    /** Trillium-hosted, confirmed live -- no independent Mission Bay TMA domain found, but
-     * Trillium is this agency's own registered source per the Mobility Database. */
+    /** Direct source was Trillium's missionbaytma-ca-us feed, confirmed live -- no independent
+     * Mission Bay TMA domain found, but Trillium is this agency's own registered source per the
+     * Mobility Database. Switched to 511 for stop_id parity with this agency's own realtime feed
+     * (see this group's own top-of-block comment). */
     MISSION_BAY_TMA(
         "mission_bay_tma",
         "Mission Bay TMA",
-        "https://data.trilliumtransit.com/gtfs/missionbaytma-ca-us/missionbaytma-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFMB/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMB/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMB/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MB")),
     ),
-    /** Mountain View Community Shuttle's own subdomain, confirmed live. This TMA also runs its
-     * own GTFS-RT via TripShot (mtma.tripshot.com) -- not wired here, the shared 511 regional
-     * feed is used instead. */
+    /** Direct source was gtfs.mvcommunityshuttle.com, confirmed live. This TMA also runs its own
+     * GTFS-RT via TripShot (mtma.tripshot.com) -- not wired here, the shared 511 regional feed is
+     * used instead. Switched to 511 for stop_id parity with that realtime feed (see this group's
+     * own top-of-block comment). */
     MOUNTAIN_VIEW_COMMUNITY_SHUTTLE(
         "mountain_view_community_shuttle",
         "Mountain View Community Shuttle",
-        "https://gtfs.mvcommunityshuttle.com/gtfs.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFMC/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMC/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MC")),
     ),
-    /** MVgo's own subdomain, confirmed live -- same Mountain View TMA / TripShot situation as
-     * [MOUNTAIN_VIEW_COMMUNITY_SHUTTLE] above. */
+    /** Direct source was gtfs.mvgo.org, confirmed live -- same Mountain View TMA / TripShot
+     * situation as [MOUNTAIN_VIEW_COMMUNITY_SHUTTLE] above. Switched to 511 for stop_id parity
+     * with this agency's own realtime feed (see this group's own top-of-block comment). */
     MVGO(
         "mvgo",
         "MVgo",
-        "https://gtfs.mvgo.org/gtfs.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFMV/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMV/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFMV/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -315,11 +715,13 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "PE")),
     ),
-    /** Trillium-hosted, confirmed live. Tiny feed. */
+    /** Direct source was Trillium's riovista-ca-us feed, confirmed live. Tiny feed. Switched to
+     * 511 for stop_id parity with this agency's own realtime feed (see this group's own
+     * top-of-block comment). */
     RIO_VISTA_DELTA_BREEZE(
         "rio_vista_delta_breeze",
         "Rio Vista Delta Breeze",
-        "https://data.trilliumtransit.com/gtfs/riovista-ca-us/riovista-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFRV/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFRV/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFRV/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -337,23 +739,26 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SA")),
     ),
-    /** San Francisco Bay Ferry's own domain (not Trillium), confirmed live. */
+    /** Direct source was gtfs.sanfranciscobayferry.com (its own domain, not Trillium), confirmed
+     * live. Switched to 511 for stop_id parity with this agency's own realtime feed (see this
+     * group's own top-of-block comment). */
     SF_BAY_FERRY(
         "sf_bay_ferry",
         "SF Bay Ferry",
-        "https://gtfs.sanfranciscobayferry.com/gtfs.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFSB/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSB/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSB/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SB")),
     ),
-    /** Trillium-hosted, confirmed live. Tiny feed. Flagged inactive elsewhere, but the URL
-     * itself still returns a real, current-looking GTFS zip -- worth a periodic re-check rather
-     * than trusting that flag alone. */
+    /** Direct source was Trillium's sanleandro-ca-us feed, confirmed live. Flagged inactive
+     * elsewhere, but the URL itself still returned a real, current-looking GTFS zip -- worth a
+     * periodic re-check rather than trusting that flag alone. Switched to 511 for stop_id parity
+     * with this agency's own realtime feed (see this group's own top-of-block comment). */
     SAN_LEANDRO_LINKS(
         "san_leandro_links",
         "San Leandro LINKS",
-        "https://data.trilliumtransit.com/gtfs/sanleandro-ca-us/sanleandro-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFSL/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSL/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSL/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -372,59 +777,70 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SM")),
     ),
-    /** Trillium-hosted, confirmed live -- sctransit.com's own developer-data page didn't resolve
-     * when checked, but this URL is cited across multiple third-party catalogs and resolves fine
-     * on its own. */
+    /** Direct source was Trillium's sonomacounty-ca-us feed, confirmed live -- sctransit.com's own
+     * developer-data page didn't resolve when checked, but this URL is cited across multiple
+     * third-party catalogs and resolved fine on its own. Switched to 511 for stop_id parity with
+     * this agency's own realtime feed (see this group's own top-of-block comment). */
     SONOMA_COUNTY_TRANSIT(
         "sonoma_county_transit",
         "Sonoma County Transit",
-        "https://data.trilliumtransit.com/gtfs/sonomacounty-ca-us/sonomacounty-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFSO/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSO/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSO/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SO")),
     ),
-    /** Santa Rosa CityBus' own Syncromatics vendor subdomain, confirmed live -- serves a real zip
-     * (PK magic bytes, valid agency.txt/stops.txt entries) despite a misleading `text/plain`
-     * response content-type, verified by inspecting the raw bytes directly rather than trusting
-     * the header. An independently-discovered source, same situation as ACE's own CDN above. */
+    /** Direct source was Santa Rosa CityBus' own Syncromatics vendor subdomain, confirmed live --
+     * served a real zip (PK magic bytes, valid agency.txt/stops.txt entries) despite a misleading
+     * `text/plain` response content-type, verified by inspecting the raw bytes directly rather than
+     * trusting the header. An independently-discovered source, same situation as ACE's own CDN
+     * above. Switched to 511 for stop_id parity with this agency's own realtime feed (see this
+     * group's own top-of-block comment). */
     SANTA_ROSA_CITYBUS(
         "santa_rosa_citybus",
         "Santa Rosa CityBus",
-        "https://santarosa.syncromatics.com/gtfs",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFSR/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSR/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSR/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SR")),
     ),
-    /** SolTrans' own Connexionz vendor subdomain, confirmed live. */
+    /** Direct source was SolTrans' own Connexionz vendor subdomain, confirmed live. Switched to
+     * 511 for stop_id parity with this agency's own realtime feed (see this group's own
+     * top-of-block comment). */
     SOLTRANS(
         "soltrans",
         "SolTrans",
-        "https://soltrans.connexionz.net/rtt/public/resource/gtfs.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFST/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFST/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFST/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "ST")),
     ),
-    /** Trillium-hosted, confirmed live -- explicitly linked from WestCat's own "Data Request"
-     * page as their most recent GTFS schedule data, not just a third-party guess. */
+    /** Direct source was Trillium's westcat-ca-us feed, confirmed live -- explicitly linked from
+     * WestCat's own "Data Request" page as their most recent GTFS schedule data, not just a
+     * third-party guess. Switched to 511 for stop_id parity with this agency's own realtime feed
+     * (see this group's own top-of-block comment) -- the directions.txt duplicate-row quirk and
+     * the non-timepoint blank-time stops noted elsewhere in this codebase were both confirmed in
+     * this same underlying feed, so still apply after the switch. */
     WESTCAT(
         "westcat",
         "WestCat",
-        "https://data.trilliumtransit.com/gtfs/westcat-ca-us/westcat-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFWC/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFWC/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFWC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "WC")),
     ),
-    /** Trillium-hosted, confirmed live -- LAVTA's own webwatch.lavta.org host (cited by
-     * Transitland as the authoritative source) 404s on every path tried; this Trillium URL is
-     * the one that actually resolves. */
+    /** Direct source was Trillium's lavta-ca-us feed, confirmed live -- LAVTA's own
+     * webwatch.lavta.org host (cited by Transitland as the authoritative source) 404s on every
+     * path tried; this Trillium URL was the one that actually resolved. Switched to 511 for
+     * stop_id parity with this agency's own realtime feed (see this group's own top-of-block
+     * comment). */
     LAVTA_WHEELS(
         "lavta_wheels",
         "LAVTA Wheels",
-        "https://data.trilliumtransit.com/gtfs/lavta-ca-us/lavta-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFWH/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFWH/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFWH/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -467,11 +883,12 @@ enum class GtfsAgency(
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AF")),
     ),
     /** The URL surfaced by search (commute.org/files/gtfs/Masterzip.zip) is dead -- a separate,
-     * Trillium-hosted URL resolves live instead. */
+     * Trillium-hosted URL was the direct source found; switched to 511 for stop_id parity with
+     * this agency's own realtime feed (see this group's own top-of-block comment). */
     COMMUTE_ORG_SHUTTLES(
         "commute_org_shuttles",
         "Commute.org Shuttles",
-        "https://data.trilliumtransit.com/gtfs/commute-ca-us/commute-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFCM/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCM/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFCM/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -503,12 +920,13 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "EE")),
     ),
-    /** fasttransit.org itself has no GTFS link -- a separate, Trillium-hosted URL resolves live
-     * instead. */
+    /** fasttransit.org itself has no GTFS link -- a separate, Trillium-hosted URL was the direct
+     * source found; switched to 511 for stop_id parity with this agency's own realtime feed (see
+     * this group's own top-of-block comment). */
     FAST_TRANSIT(
         "fast_transit",
         "FAST",
-        "https://data.trilliumtransit.com/gtfs/fairfield-ca-us/fairfield-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFFS/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFFS/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFFS/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -573,12 +991,13 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "TF")),
     ),
-    /** Transitland's own authoritative-source field points at 511's datafeed API, but a separate
-     * Trillium-hosted URL also resolves live. */
+    /** Transitland's own authoritative-source field already points at 511's datafeed API; a
+     * separate Trillium-hosted URL also resolves live, but 511 is used directly for stop_id
+     * parity with this agency's own realtime feed (see this group's own top-of-block comment). */
     UNION_CITY_TRANSIT(
         "union_city_transit",
         "Union City Transit",
-        "https://data.trilliumtransit.com/gtfs/unioncity-ca-us/unioncity-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFUC/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFUC/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFUC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -595,13 +1014,14 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "VC")),
     ),
-    /** vinetransit.com itself has no GTFS/developer link -- a separate, Trillium-hosted URL
-     * resolves live instead. Confirmed live in this project's own regional-feed sample too
-     * (VehiclePositions). */
+    /** vinetransit.com itself has no GTFS/developer link -- a separate, Trillium-hosted URL was
+     * the direct source found; switched to 511 for stop_id parity with this agency's own
+     * realtime feed (see this group's own top-of-block comment). Confirmed live in this project's
+     * own regional-feed sample too (VehiclePositions). */
     VINE_TRANSIT(
         "vine_transit",
         "VINE Transit",
-        "https://data.trilliumtransit.com/gtfs/vinetransit-ca-us/vinetransit-ca-us.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/511SFVN/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFVN/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFVN/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
@@ -684,13 +1104,17 @@ enum class GtfsAgency(
      * single URL combining TripUpdates+VehiclePositions the same way LIRR/Metro-North's is. ACE
      * occupies the primary URL fields below so the `realtimeVehiclePositionsUrl == null` "has
      * realtime at all" check elsewhere (see MapScreen's NOT_SUPPORTED/UNAVAILABLE gating) keeps
-     * working unchanged; the other 7 (see [NYC_SUBWAY_LINE_GROUPS]) are unprefixed [MultiGtfsFeed]
+     * working unchanged; the other 7 (see [NycSubwaySecondaryFeeds]) are unprefixed [MultiGtfsFeed]
      * components (feedUrl left null) rather than a real second static feed -- every one of these
-     * feeds' trip_ids already matches trips loaded from this agency's single static feed directly.
-     * All 8 proxied through pico-transit-proxy's own /nyc_subway/&lt;group&gt; routes. Every entity also
-     * carries several NYCT-specific protobuf fields (TripDescriptor field 1001, FeedEntity fields
-     * 2/5, VehiclePosition field 6, StopTimeUpdate fields 7 and 1001) declared in GtfsRealtime.kt --
-     * this hand-rolled decoder faults on any undeclared field rather than skipping it. */
+     * feeds' trip_ids already matches trips loaded from this agency's single static feed directly --
+     * except the feeds' own trip_id isn't the real static trip_id verbatim, it packs a scheduled
+     * start time in NYCT's own encoding (e.g. "119000_L..S"), which [NycSubwayTripIdBridge] bridges
+     * back to the real trip_id (see [RealtimeTripIdBridge]'s own doc for why, and the verified
+     * decode). All 8 proxied through pico-transit-proxy's own /nyc_subway/&lt;group&gt; routes. Every
+     * entity also carries several NYCT-specific protobuf fields (TripDescriptor field 1001,
+     * FeedEntity fields 2/5, VehiclePosition field 6, StopTimeUpdate fields 7 and 1001) declared in
+     * GtfsRealtime.kt -- this hand-rolled decoder faults on any undeclared field rather than
+     * skipping it. */
     NYC_SUBWAY(
         "nyc_subway",
         "NYC Subway",
@@ -698,13 +1122,7 @@ enum class GtfsAgency(
         "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/ace",
         "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/ace",
         timeZoneId = "America/New_York",
-        components = NYC_SUBWAY_LINE_GROUPS.map { (name, path) ->
-            MultiGtfsFeed(
-                name,
-                realtimeTripUpdatesUrl = "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/$path",
-                realtimeVehiclePositionsUrl = "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/$path",
-            )
-        },
+        components = NycSubwaySecondaryFeeds + NycSubwayTripIdBridge,
     ),
     /** Realtime: no key needed, HTTPS, one combined TripUpdates+VehiclePositions feed -- wired in
      * below. Shares [GtfsRtStopTimeUpdate]'s field 1005 (see that field's own doc for verification
@@ -732,7 +1150,86 @@ enum class GtfsAgency(
         "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/mnr%2Fgtfs-mnr",
         timeZoneId = "America/New_York",
     ),
+    /**
+     * MTA doesn't publish NYC bus as one static feed -- confirmed live by downloading and
+     * inspecting all 6 real files: 5 "division" zips (this entry plus the other 4 below) that
+     * together form ONE citywide NYCT bus network (each division's own trips.txt/stop_times.txt
+     * holds only its own real service, zero trip_id/service_id overlap across any of the 10
+     * pairs, routes.txt is a byte-identical full 306-route catalog copied into all 5 purely so
+     * foreign keys resolve), plus MTA Bus Company -- a real separate legal operator (own
+     * agency_id "MTABC", its own distinct 92-route catalog, zero route/trip overlap with NYCT).
+     *
+     * Originally merged into one combined agency (4 divisions flat-merged, Bus Company
+     * id-prefixed) -- reverted after a real device test: the combined database reached
+     * 600MB+ and was still growing after 10+ minutes of ingest, an unacceptable cost for a
+     * rider who may only ever care about their own borough. Each division (and Bus Company) is
+     * instead its own plain single-feed agency here, same shape as MBTA/RIPTA -- no merging, no
+     * `components` needed at all. All 6 share the exact same realtime URLs below: MTA publishes
+     * one combined GTFS-RT feed for the whole system (NYCT + Bus Company vehicles together), so
+     * a rider on any one of these 6 selections still sees real live buses -- the plain
+     * unprefixed trip_id lookup every single-feed agency already does simply finds no match for
+     * a live vehicle outside that division's own static schedule, same as "not currently live"
+     * anywhere else in this app. All 6 static URLs confirmed live this session: HTTPS throughout
+     * (each 301s through web.mta.info to an S3-hosted zip, still HTTPS), real zips,
+     * agency_timezone = America/New_York on every one.
+     */
+    NYC_BUS_BRONX(
+        "nyc_bus_bronx",
+        "NYC Bus - Bronx",
+        "https://web.mta.info/developers/data/nyct/bus/google_transit_bronx.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/vehiclepositions",
+        timeZoneId = "America/New_York",
+    ),
+    NYC_BUS_BROOKLYN(
+        "nyc_bus_brooklyn",
+        "NYC Bus - Brooklyn",
+        "https://web.mta.info/developers/data/nyct/bus/google_transit_brooklyn.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/vehiclepositions",
+        timeZoneId = "America/New_York",
+    ),
+    NYC_BUS_MANHATTAN(
+        "nyc_bus_manhattan",
+        "NYC Bus - Manhattan",
+        "https://web.mta.info/developers/data/nyct/bus/google_transit_manhattan.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/vehiclepositions",
+        timeZoneId = "America/New_York",
+    ),
+    NYC_BUS_QUEENS(
+        "nyc_bus_queens",
+        "NYC Bus - Queens",
+        "https://web.mta.info/developers/data/nyct/bus/google_transit_queens.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/vehiclepositions",
+        timeZoneId = "America/New_York",
+    ),
+    NYC_BUS_STATEN_ISLAND(
+        "nyc_bus_staten_island",
+        "NYC Bus - Staten Island",
+        "https://web.mta.info/developers/data/nyct/bus/google_transit_staten_island.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/vehiclepositions",
+        timeZoneId = "America/New_York",
+    ),
+    NYC_BUS_COMPANY(
+        "nyc_bus_company",
+        "NYC Bus - MTA Bus Company",
+        "https://web.mta.info/developers/data/busco/google_transit.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/mta_bus/vehiclepositions",
+        timeZoneId = "America/New_York",
+    ),
 
+    WEGO_TRANSIT(
+        "wego_nashville",
+        "Nashville - WeGo Public Transit",
+        "https://www.wegotransit.com/GoogleExport/google_transit.zip",
+        "https://pico-transit-proxy.data-32b.workers.dev/wego_nashville/tripupdates",
+        "https://pico-transit-proxy.data-32b.workers.dev/wego_nashville/vehiclepositions",
+        timeZoneId = "America/Chicago",
+    ),
     ;
 
     /** Cached lookup -- [ZoneId.of] parses/interns the zone's rules, no need to redo that on every

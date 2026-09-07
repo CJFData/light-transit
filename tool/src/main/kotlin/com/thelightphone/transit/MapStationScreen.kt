@@ -247,12 +247,12 @@ class MapStationViewModel(
             _state.value = stationLoaded(context, emptyList())
             return
         }
-        val vehiclePositions = agency.fetchMergedVehiclePositions("MapStationScreen")
+        val vehiclePositions = agency.fetchMergedVehiclePositions(repository, "MapStationScreen")
         if (vehiclePositions.primary == null) {
             _state.value = stationLoaded(context, emptyList())
             return
         }
-        val tripUpdatesByTripId = agency.fetchMergedTripUpdates("MapStationScreen").byTripId
+        val tripUpdatesByTripId = agency.fetchMergedTripUpdates(repository, "MapStationScreen").byTripId
         val buses = buildSeeEverythingBuses(
             repository, context.centerLat, context.centerLon, context.zoom,
             vehiclePositions.byTripId, tripUpdatesByTripId, todayForGtfs(agency.zoneId), agency.zoneId, System.currentTimeMillis() / 1000,

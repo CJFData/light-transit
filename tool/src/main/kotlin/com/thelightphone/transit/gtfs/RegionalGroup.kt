@@ -1,0 +1,98 @@
+package com.thelightphone.transit.gtfs
+
+/**
+ * Groups agencies that belong to the same real-world region -- not merely a display label:
+ * [forAgency] already gates a real feature (HomeScreen's Schedule button decides whether to show
+ * `ScheduleAgencyPickerScreen` or go straight to one agency's own schedule based on membership
+ * here, and Settings' Additional Schedules list is scoped to region-mates the same way -- see
+ * [AgencyPreferences.additionalDownloadsFlow]'s own doc), and is meant to grow into the join key
+ * for further region-scoped features still to come (a combined view of every region agency's live
+ * vehicles, stops grouped across agencies within a region). Each region's own realtime/static
+ * data-sharing mechanics stay wherever they already live per-agency (511's server-side regional
+ * aggregator for SF Bay Area, [MultiGtfsFeed]'s merge for RTD/Bustang, NYC's various agencies
+ * already sharing single realtime URLs where applicable) -- this enum doesn't own or duplicate any
+ * of that itself, it's the membership list those region-scoped behaviors, present and future, key
+ * off of.
+ *
+ * An agency not listed under any group here (MBTA, RIPTA, every Colorado agency, etc.) has no
+ * [RegionalGroup] at all -- [forAgency] returns null, and the picker just lists it individually.
+ */
+enum class RegionalGroup(val id: String, val displayName: String, val members: List<GtfsAgency>) {
+    NYC(
+        "nyc",
+        "New York City",
+        listOf(
+            GtfsAgency.NYC_SUBWAY,
+            GtfsAgency.LIRR,
+            GtfsAgency.METRO_NORTH,
+            GtfsAgency.NYC_BUS_BRONX,
+            GtfsAgency.NYC_BUS_BROOKLYN,
+            GtfsAgency.NYC_BUS_MANHATTAN,
+            GtfsAgency.NYC_BUS_QUEENS,
+            GtfsAgency.NYC_BUS_STATEN_ISLAND,
+            GtfsAgency.NYC_BUS_COMPANY,
+        ),
+    ),
+    /** Every 511-integrated agency already in [GtfsAgency] (each carries its own
+     * `RegionalGtfsFeed("511.org SF Bay Area", ...)` component) -- membership here doesn't
+     * introduce a separate realtime path of its own, since 511 already covers every one of these
+     * agencies individually; it's still the real membership list [forAgency]'s callers key off
+     * of. */
+    SF_BAY_AREA(
+        "sf_bay_area",
+        "SF Bay Area",
+        listOf(
+            GtfsAgency.BART,
+            GtfsAgency.SFMTA_MUNI,
+            GtfsAgency.AC_TRANSIT,
+            GtfsAgency.CALTRAIN,
+            GtfsAgency.VTA,
+            GtfsAgency.COUNTY_CONNECTION,
+            GtfsAgency.ACE,
+            GtfsAgency.SANTA_CRUZ_METRO,
+            GtfsAgency.CAPITOL_CORRIDOR,
+            GtfsAgency.EMERY_GO_ROUND,
+            GtfsAgency.GOLDEN_GATE_TRANSIT,
+            GtfsAgency.MARIN_TRANSIT,
+            GtfsAgency.MISSION_BAY_TMA,
+            GtfsAgency.MOUNTAIN_VIEW_COMMUNITY_SHUTTLE,
+            GtfsAgency.MVGO,
+            GtfsAgency.PETALUMA_TRANSIT,
+            GtfsAgency.RIO_VISTA_DELTA_BREEZE,
+            GtfsAgency.SMART,
+            GtfsAgency.SF_BAY_FERRY,
+            GtfsAgency.SAN_LEANDRO_LINKS,
+            GtfsAgency.SAMTRANS,
+            GtfsAgency.SONOMA_COUNTY_TRANSIT,
+            GtfsAgency.SANTA_ROSA_CITYBUS,
+            GtfsAgency.SOLTRANS,
+            GtfsAgency.WESTCAT,
+            GtfsAgency.LAVTA_WHEELS,
+            GtfsAgency.TRI_DELTA,
+            GtfsAgency.ANGEL_ISLAND_TIBURON_FERRY,
+            GtfsAgency.COMMUTE_ORG_SHUTTLES,
+            GtfsAgency.DUMBARTON_EXPRESS,
+            GtfsAgency.EMERY_EXPRESS,
+            GtfsAgency.FAST_TRANSIT,
+            GtfsAgency.GOLDEN_GATE_FERRY,
+            GtfsAgency.PRESIDIO_GO,
+            GtfsAgency.SFO_AIRPORT,
+            GtfsAgency.SOUTH_SAN_FRANCISCO,
+            GtfsAgency.TREASURE_ISLAND_FERRY,
+            GtfsAgency.UNION_CITY_TRANSIT,
+            GtfsAgency.VACAVILLE_CITY_COACH,
+            GtfsAgency.VINE_TRANSIT,
+        ),
+    ),
+    /** Bustang already merges into RTD's own database via [BustangSecondaryFeed] (so RTD alone
+     * already carries Bustang's schedule) -- [GtfsAgency.BUSTANG] is listed as its own member too
+     * since a rider who wants Bustang specifically without the rest of RTD's own network should
+     * still be able to pick it individually, same reasoning as it getting its own top-level
+     * agency entry in the first place. */
+    DENVER("denver", "Denver", listOf(GtfsAgency.RTD, GtfsAgency.BUSTANG)),
+    ;
+
+    companion object {
+        fun forAgency(agency: GtfsAgency): RegionalGroup? = entries.find { agency in it.members }
+    }
+}

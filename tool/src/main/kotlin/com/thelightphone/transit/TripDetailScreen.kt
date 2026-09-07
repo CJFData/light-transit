@@ -19,9 +19,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.transit.gtfs.AgencyPreferences
 import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
@@ -41,6 +43,7 @@ import com.thelightphone.transit.gtfs.FuzzyRunOption
 import com.thelightphone.transit.gtfs.liveRunOptionsForTrip
 import com.thelightphone.transit.gtfs.RunSelectionPreferences
 import com.thelightphone.transit.gtfs.StopPredictionSource
+import com.thelightphone.transit.gtfs.TripDetailPreferences
 import com.thelightphone.transit.gtfs.TripStopRow
 import com.thelightphone.transit.gtfs.computeArrivalEta
 import com.thelightphone.transit.gtfs.formatGtfsTime
@@ -68,6 +71,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -125,6 +129,8 @@ class TripDetailViewModel(
     private val boardedTripPreferences: BoardedTripPreferences,
     private val boardedFuzzyRunPreferences: BoardedFuzzyRunPreferences,
     private val runSelectionPreferences: RunSelectionPreferences,
+    private val agencyPreferences: AgencyPreferences,
+    private val tripDetailPreferences: TripDetailPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -195,7 +201,20 @@ class TripDetailViewModel(
         pollJob?.cancel()
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val stops = repository.getTripStops(tripId, fromStopSequence)
+                // See TripDetailPreferences's own doc -- widens the fetched range back to the
+                // trip's very first stop so a vehicle still approaching from before the boarding
+                // stop has a row to actually match against (see TripDetailState.Loaded's own doc
+                // on liveAtStopSequence: it stays non-null even when no row in `stops` matches it,
+                // which is exactly the gap this toggle closes). A direct one-shot .first() read,
+                // not a collected StateFlow -- Settings isn't shown at the same time as this
+                // screen, so no need to react live, same reasoning as every other one-shot Settings
+                // read in this app (see DepartureListScreen's own includeLongerTripsEnabledFlow
+                // usage). Confirmed live this session: reading a MutableStateFlow instead, updated
+                // by an init{}-launched collector, raced this coroutine's own startup -- the poll
+                // loop could read the flow's initial `false` before that collector's first emission
+                // landed, silently skipping the widened range on some trips but not others.
+                val showEarlierStops = tripDetailPreferences.showStopsBeforeBoardingEnabledFlow.first()
+                val stops = repository.getTripStops(tripId, if (showEarlierStops) 0 else fromStopSequence)
                 val tripLineType = repository.getRouteTypeForTrip(tripId)?.let { LineType.forGtfsRouteType(it) }
                 lineType.value = tripLineType
                 val stationStopIds = repository.getMultiPlatformStationStopIds()
@@ -240,7 +259,11 @@ class TripDetailViewModel(
                 fuzzyRouteId.value = scopedFuzzyRunTrips?.let { routeId }
                 // Fetched once (not per-poll) since a trip's own stop locations never change --
                 // feeds the GPS-proximity fallback below (see matchCurrentStopByProximity's own doc).
-                val stopLocations = repository.getTripStopLocations(tripId, fromStopSequence)
+                // Same showEarlierStops-widened range as `stops` above -- otherwise a vehicle still
+                // approaching from before the boarding stop would have a row to match in `stops`
+                // but no coordinates here for GPS-proximity matching (e.g. RIPTA, which never
+                // populates current_stop_sequence) to ever find it.
+                val stopLocations = repository.getTripStopLocations(tripId, if (showEarlierStops) 0 else fromStopSequence)
                 var lastMatchedStopSequence: Int? = null
 
                 while (isActive) {
@@ -251,10 +274,10 @@ class TripDetailViewModel(
                     // rider keeps this screen open, unlike a one-shot load, so the service day
                     // itself has to be treated as something that can change mid-session.
                     val today = todayForGtfs(agency.zoneId)
-                    val vehiclePosition = agency.fetchVehiclePosition(tripId)
+                    val vehiclePosition = agency.fetchVehiclePosition(tripId, repository)
                     // Fetched unconditionally now (not just once a matched stop is already in hand)
                     // since it also feeds the current-stop fallback below, not just the ETA lookup.
-                    val tripUpdate = agency.fetchTripUpdate(tripId)
+                    val tripUpdate = agency.fetchTripUpdate(tripId, repository)
                     // liveVehicleSource is route-scoped (see its own doc), so this trip's routeId must
                     // resolve for it to be usable at all -- a trip missing its route (shouldn't happen in
                     // practice) just falls through to the standard vehiclePosition chain below.
@@ -457,10 +480,16 @@ class TripDetailViewModel(
         pollJob = null
     }
 
+    /** Boarding a trip from a schedule that isn't already primary promotes it -- a rider actively
+     * riding it is a stronger signal than whatever was primary before, and the home screen's own
+     * clock/attribution/Schedule button should reflect the trip actually being ridden. Shares the
+     * same swap [AgencyPreferences.promoteToPrimary] as Additional Schedules' own tap+hold; a no-op
+     * there when [currentAgency] is already primary. */
     fun board() {
         val currentAgency = agency ?: return
         viewModelScope.launch {
             boardedTripPreferences.board(tripId, currentAgency, fromStopSequence, routeLabel, directionLabel, lineType.value)
+            agencyPreferences.promoteToPrimary(currentAgency)
         }
     }
 
@@ -521,7 +550,8 @@ class TripDetailScreen(
     override fun createViewModel(): TripDetailViewModel = TripDetailViewModel(
         dbFile, tripId, fromStopSequence, routeLabel, directionLabel,
         BoardedTripPreferences(lightContext.dataStore), BoardedFuzzyRunPreferences(lightContext.dataStore),
-        RunSelectionPreferences(lightContext.dataStore),
+        RunSelectionPreferences(lightContext.dataStore), AgencyPreferences(lightContext.dataStore),
+        TripDetailPreferences(lightContext.dataStore),
     )
 
     @Composable
@@ -700,6 +730,10 @@ class TripDetailScreen(
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.stops) { stop ->
                                 val isLive = s.liveAtStopSequence != null && stop.stopSequence == s.liveAtStopSequence
+                                // Only ever true when Settings' "Show earlier stops" widened the
+                                // fetched range back past fromStopSequence -- see SelectRunScreen's
+                                // identical isPriorToTripStart for the same greyed-out convention.
+                                val isPriorToBoarding = stop.stopSequence < fromStopSequence
 
                                 fun openConnections() {
                                     val afterTime = stop.arrivalTime ?: stop.departureTime
@@ -727,8 +761,13 @@ class TripDetailScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .alpha(if (isPriorToBoarding) 0.5f else 1f)
                                         .let { base ->
-                                            if (isBoardedHere) {
+                                            // A stop before the boarding point can never be the alight stop, so it
+                                            // always falls into the not-boarded gesture split below, regardless of
+                                            // isBoardedHere -- otherwise a short tap here would designate/clear an
+                                            // alight stop earlier in the trip than where the rider actually got on.
+                                            if (isBoardedHere && !isPriorToBoarding) {
                                                 // While boarded, a short tap designates/clears this stop as the alight stop
                                                 // instead -- tap-and-hold still reaches its connections, same as the
                                                 // not-boarded case below. Uses detectTapGestures specifically, not a
@@ -781,6 +820,7 @@ class TripDetailScreen(
                                             LightText(
                                                 text = stop.stopName ?: "Unknown stop",
                                                 variant = LightTextVariant.Copy,
+                                                lighten = isPriorToBoarding,
                                                 underline = stop.stopId == alightStopId,
                                             )
                                             if (stop.stopId in s.stationStopIds) {

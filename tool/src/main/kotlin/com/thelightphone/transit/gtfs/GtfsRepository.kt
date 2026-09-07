@@ -191,13 +191,25 @@ class GtfsRepository(dbFile: File) {
             LineType.entries.filter { it.gtfsRouteTypes.any { type -> type in presentTypes } }
         }
 
+    /**
+     * `AND EXISTS (... trips ...)` -- routes.txt itself isn't trustworthy alone for which routes
+     * are actually real here: confirmed live for every `NYC_BUS_*` agency, MTA republishes the
+     * exact same citywide 306-route routes.txt catalog in all 5 NYCT division zips purely so
+     * foreign keys resolve, so e.g. Staten Island's own routes table also lists Brooklyn's B1/B11/
+     * etc. even though it has zero real trips for them. Without this filter, a rider could pick one
+     * of those from "Choose Route" and land on a real dead end at the direction step
+     * ([DirectionSelectionState.NoTrips], since [routeHasTrips] would also be false for it) --
+     * confirmed this session as the actual cause of a "no directions" report that turned out to be
+     * specific to MTA bus routes. A no-op for every other agency, whose own routes.txt already only
+     * lists routes it actually operates.
+     */
     fun getRoutes(lineType: LineType): List<RouteOption> {
         val placeholders = lineType.gtfsRouteTypes.joinToString(",") { "?" }
         return db.rawQuery(
             """
             SELECT DISTINCT route_id, route_short_name, route_long_name, route_type
             FROM routes
-            WHERE route_type IN ($placeholders)
+            WHERE route_type IN ($placeholders) AND EXISTS (SELECT 1 FROM trips t WHERE t.route_id = routes.route_id)
             ORDER BY route_id
             """,
             lineType.gtfsRouteTypes.map { it.toString() }.toTypedArray(),
@@ -451,49 +463,38 @@ class GtfsRepository(dbFile: File) {
 
     /**
      * Same as [getDepartures], but for [stopId] on the direction variant a rider actually picked,
-     * and deliberately not narrowed to trips with that exact [headsign]. A candidate trip qualifies
-     * if it covers at least one complete real trip pattern among the chosen variant's own trips
-     * that itself reaches [stopId], so it's included whenever it's known to run at least as far as
-     * some real "H"-labeled run gets from here, whether or not it continues further.
+     * and deliberately not narrowed to an exact headsign match. A trip qualifies if it's either an
+     * exact match for the picked variant, or if it covers every stop some exact-match trip visits
+     * across that trip's own entire route, not just from [stopId] onward.
      *
-     * Deliberately not the simpler "union of every stop any H-labeled trip visits": a single
-     * headsign string doesn't always correspond to one consistent physical path. RIPTA's Route 20
-     * outbound "Kennedy Plaza via Elmwood Ave" covers three distinct real patterns (30, 46, and 50
-     * stops) that happen to share a headsign. Their union is a 51-stop path no single real trip,
-     * not even another "Kennedy Plaza" trip, actually runs, so requiring full coverage of that
-     * union matched nothing at all and silently emptied the departures list. Anchoring the
-     * comparison to one real reference trip that itself reaches the stop being viewed avoids that
-     * trap: every "H"-labeled trip trivially covers itself, so the chosen variant's own departures
-     * always qualify at any stop it actually serves, regardless of how many different real patterns
-     * share its headsign.
+     * Deliberately not the simpler "union of every stop any exact-match trip visits," since a
+     * single headsign string doesn't always correspond to one consistent physical path. For
+     * example, a variant with the same headsign can have a different number of stops it covers,
+     * and combining every stop across all of them into one list can produce a path no single real
+     * trip actually drives. Requiring full coverage of that combined list can then match nothing
+     * at all and silently empty the departures list. Comparing against one real exact-match trip
+     * instead avoids that trap, since an exact-match trip always covers itself completely. The
+     * picked variant's own departures always qualify at any stop it actually serves, regardless of
+     * how many different real patterns share its headsign.
      *
-     * This is deliberately asymmetric, matching how these variants actually relate to each other.
-     * MBTA's Franklin/Foxboro "Readville" trips are a strict subset of "South Station" trips, same
-     * corridor, shorter run, so a rider who picked "Toward Readville" also sees "South Station"
-     * departures at a shared stop like Franklin, since either one gets them to Readville and hiding
-     * the extra option would be needlessly conservative. But a rider who picked "Toward South
-     * Station" never sees a "Readville" departure sneak in, since a Readville trip doesn't cover
-     * South Station's full stop set, and boarding one under a false assumption would strand them
-     * early. Same real relationship on RIPTA's Route 20: "TF Green Airport" trips are a subset of
-     * "New England Tech" trips (confirmed against real stop data), so TF-Green riders also see NEIT
-     * departures, but NEIT riders never see a TF-Green-only trip that stops short of NEIT. "Job Lot"
-     * trips aren't a subset or superset of either, a genuinely different branch rather than a
-     * shorter or longer version of the same run, so it stays fully isolated from both with no
-     * agency-specific logic needed to keep it that way; the containment check alone does it.
+     * When one variant is a shorter version of another on the same corridor, picking the shorter
+     * one also shows the longer variant's departures, since it still gets a rider where they're
+     * going. Picking the longer variant, though, never shows the shorter one's departures, since
+     * boarding one under that assumption would strand a rider early. A variant that's a genuinely
+     * different branch, neither a shorter nor longer version of any other, stays fully isolated
+     * from both directions of that relationship. No route-specific logic is required for that
+     * isolation; the coverage check alone keeps it that way.
      *
-     * Gated behind [DeparturePreferences.includeLongerTripsEnabledFlow] (on by default). When a
-     * rider turns it off, callers use [getDeparturesForExactVariant] instead, which drops back to
-     * an exact-headsign match with none of the above.
+     * Whether the longer variant's trips are included this way is controlled by a toggle on the
+     * Settings screen ([DeparturePreferences.includeLongerTripsEnabledFlow]), on by default. When
+     * a rider turns it off, callers use [getDeparturesForExactVariant] instead, which drops back
+     * to an exact headsign match only, with none of the above.
      *
-     * The expensive relational-containment check only ever runs over trips carrying a different
-     * headsign than [headsign], since a same-headsign trip trivially covers itself and is included
-     * directly via the cheap `t.trip_headsign IS ?` branch below, without ever entering the
-     * containment check at all. This matters a lot in practice: on a high-frequency subway line
-     * where one headsign covers virtually the whole direction (confirmed on MBTA's Blue Line, 714
-     * of 722 trips this direction), excluding those 714 self-matching trips from the candidate pool
-     * cut real measured query time from about 3.7s to about 0.04s for an identical result set,
-     * since the earlier version cross-joined every one of them against every reference trip
-     * needlessly.
+     * The coverage check only ever runs on trips that aren't an exact match, since an exact match
+     * already qualifies for free through a cheap direct comparison. This matters most on
+     * high-frequency routes where one headsign covers nearly the whole direction. Without this
+     * shortcut, every one of those already-qualifying trips would still get compared against the
+     * reference trips for no reason, adding real, avoidable query cost at scale.
      */
     fun getDeparturesForVariant(routeId: String, directionId: Int, headsign: String?, lastStopId: String?, stopId: String, today: LocalDate): List<Departure> {
         val todayGtfs = today.toGtfsDateString()
@@ -660,6 +661,39 @@ class GtfsRepository(dbFile: File) {
         return tripIds.singleOrNull()
     }
 
+    /**
+     * Every (route_id, first-stop scheduled departure_time) pair active on [serviceDate], mapped to
+     * the one real trip_id that matches -- null when 2+ trips share the same pair, same ambiguous-
+     * match fail-safe [tripIdForScheduledStart] itself already applies. Exists purely as a batched
+     * version of that same lookup: a [RealtimeTripIdBridge]-backed agency (NYC Subway) needs to
+     * resolve every entity in an entire live feed this way, not just one vehicle at a time the way
+     * CTA Bus Tracker does, and calling [tripIdForScheduledStart] once per entity re-ran its own
+     * expensive stop_times-wide subquery once per entity -- confirmed live this session that doing
+     * so made NYC Subway's live feeds take unacceptably long to load. This runs that same subquery
+     * once per poll instead, with the per-pair ambiguity check done in memory afterward.
+     */
+    fun scheduledStartTimesByRoute(serviceDate: LocalDate): Map<Pair<String, String>, String?> {
+        val serviceDateGtfs = serviceDate.toGtfsDateString()
+        val dayColumn = serviceDate.dayOfWeek.toGtfsColumnName()
+        val rows = db.rawQuery(
+            """
+            SELECT t.route_id, first.departure_time, t.trip_id
+            FROM trips t
+            JOIN (
+                SELECT trip_id, departure_time, MIN(stop_sequence) AS first_seq
+                FROM stop_times
+                GROUP BY trip_id
+            ) first ON first.trip_id = t.trip_id
+            WHERE ${activeTodayClause(dayColumn)}
+            """.trimIndent(),
+            arrayOf(serviceDateGtfs, serviceDateGtfs, serviceDateGtfs),
+        ).use { cursor ->
+            cursor.mapRows { Triple(getString(0), getString(1), getString(2)) }
+        }
+        return rows.groupBy { (routeId, startTime, _) -> routeId to startTime }
+            .mapValues { (_, group) -> group.singleOrNull()?.third }
+    }
+
     /** A trip's route_type, for picking its live-vehicle emoji (see [LineType]) on the Trip Detail
      * screen -- a trip belongs to exactly one route, so this is a single-value lookup, not a list. */
     fun getRouteTypeForTrip(tripId: String): Int? =
@@ -668,6 +702,31 @@ class GtfsRepository(dbFile: File) {
             arrayOf(tripId),
         ).use { cursor ->
             cursor.mapRows { getInt(0) }.firstOrNull()
+        }
+
+    /** [tripId]'s own route_id, still carrying whatever "feedN:" prefix (see [MultiGtfsFeed]) this
+     * trip was ingested under -- a collision safeguard for a prefixed feed's realtime match (see
+     * [fetchTripUpdate]/[fetchVehiclePosition]'s own doc): stripping the prefix and looking a raw
+     * trip_id up directly in that feed's own upstream response doesn't by itself prove the matched
+     * live entity is really that feed's own trip, rather than a different real operator's trip that
+     * happens to share the same literal raw trip_id on the wire (e.g. MTA Bus Company and NYCT
+     * sharing one combined GTFS-RT feed, see [GtfsAgency.MTA_BUS]) -- comparing this against the
+     * matched entity's own (unprefixed) route_id catches that. */
+    fun getRouteIdForTrip(tripId: String): String? =
+        db.rawQuery("SELECT route_id FROM trips WHERE trip_id = ?", arrayOf(tripId)).use { cursor ->
+            cursor.mapRows { getString(0) }.firstOrNull()
+        }
+
+    /** Every trip_id -> route_id pair loaded under [prefix] (a [MultiGtfsFeed]'s own "feedN:"),
+     * both stripped back to their real, unprefixed form -- the same collision safeguard as
+     * [getRouteIdForTrip], batched for [fetchMerged]'s bulk case (matching an entire live feed's
+     * worth of entities at once) instead of one query per entity. [prefix] is always this app's own
+     * internal "feedN:" literal (see [secondaryFeedPrefix]), never external input, so the plain
+     * `LIKE` pattern below needs no escaping. Computed once per poll, not once per entity -- same
+     * reasoning as [scheduledStartTimesByRoute]'s own doc. */
+    fun tripRouteIdsForPrefix(prefix: String): Map<String, String> =
+        db.rawQuery("SELECT trip_id, route_id FROM trips WHERE trip_id LIKE ?", arrayOf("$prefix%")).use { cursor ->
+            cursor.mapRows { getString(0).removePrefix(prefix) to getString(1).removePrefix(prefix) }.toMap()
         }
 
     fun getTripStops(tripId: String, fromStopSequence: Int): List<TripStopRow> =
@@ -709,6 +768,24 @@ class GtfsRepository(dbFile: File) {
             arrayOf(tripId, fromStopSequence.toString()),
         ).use { cursor ->
             cursor.mapRows { getString(0) to (getDouble(1) to getDouble(2)) }.toMap()
+        }
+
+    /**
+     * The real static lat/lon of [tripId]'s own stop at [stopSequence] -- a coarse map-marker
+     * fallback for an agency whose live VehiclePosition never carries real GPS coordinates at all,
+     * only [GtfsRtVehiclePosition.currentStopSequence]/[GtfsRtVehiclePosition.currentStatus] --
+     * confirmed live for NYC Subway: 93 of 93 sampled VehiclePosition entities had neither field 2
+     * (position) present, since NYCT tracks trains via underground track circuits, not GPS. Not a
+     * guess -- it's the agency's own real coordinate for the exact stop the vehicle's own
+     * current_stop_sequence already points to, just coarser than a real GPS fix would be between
+     * stops. Null if this trip has no stop at that exact sequence.
+     */
+    fun getStopLocationForTripSequence(tripId: String, stopSequence: Int): Pair<Double, Double>? =
+        db.rawQuery(
+            "SELECT s.stop_lat, s.stop_lon FROM stop_times st JOIN stops s ON s.stop_id = st.stop_id WHERE st.trip_id = ? AND st.stop_sequence = ?",
+            arrayOf(tripId, stopSequence.toString()),
+        ).use { cursor ->
+            cursor.mapRows { getDouble(0) to getDouble(1) }.firstOrNull()
         }
 
     /**
@@ -784,9 +861,12 @@ class GtfsRepository(dbFile: File) {
      * Every stop with valid coordinates, for nearest-stop distance ranking -- deduplicated per GTFS
      * station grouping (see [groupStationsByParent]), shared by [rankStopsByDistance] (stop search)
      * and [getStopsWithinRadius] (Map markers) so a station with several platform stop_ids appears
-     * once, not once per platform.
+     * once, not once per platform. [mergeFeedStationsEnabled] additionally folds a MultiGtfsFeed
+     * secondary's own physically-co-located stops into their parent agency's station (see
+     * [mergeFeedStations]) -- on by default, matching [AgencyPreferences.mergeFeedStationsEnabledFlow]'s
+     * own default; a cheap no-op for every agency without a secondary feed at all.
      */
-    fun getStopsWithLocation(): List<StopLocation> =
+    fun getStopsWithLocation(mergeFeedStationsEnabled: Boolean = true): List<StopLocation> =
         db.rawQuery(
             "SELECT stop_id, stop_name, stop_lat, stop_lon, parent_station, location_type FROM stops " +
                 "WHERE stop_lat IS NOT NULL AND stop_lon IS NOT NULL",
@@ -802,7 +882,8 @@ class GtfsRepository(dbFile: File) {
                     locationType = getIntOrNull(5),
                 )
             }
-            groupStationsByParent(rows)
+            val grouped = groupStationsByParent(rows)
+            if (mergeFeedStationsEnabled) mergeFeedStations(grouped) else grouped
         }
 
     /** A single stop's coordinates, used for bearing and distance math. Looked up directly by id and
@@ -831,8 +912,8 @@ class GtfsRepository(dbFile: File) {
      * double-tap-to-open-Station gesture so it behaves identically for the centered stop or a
      * nearby one. Null if [stopId] isn't part of any qualifying station.
      */
-    fun getStationContaining(stopId: String): StopLocation? =
-        getStopsWithLocation().firstOrNull { it.isStation && (it.stopId == stopId || stopId in it.memberStopIds) }
+    fun getStationContaining(stopId: String, mergeFeedStationsEnabled: Boolean = true): StopLocation? =
+        getStopsWithLocation(mergeFeedStationsEnabled).firstOrNull { it.isStation && (it.stopId == stopId || stopId in it.memberStopIds) }
 
     /**
      * Every stop_id that's part of a real, qualifying multi-platform station: the station's own
@@ -846,8 +927,8 @@ class GtfsRepository(dbFile: File) {
     /** Every real, qualifying multi-platform station this agency has (see [StopLocation.isStation]),
      * alphabetically by name -- powers the HomeScreen's direct "Station" browse list, which lists
      * every station up front rather than asking the rider to search a location first. */
-    fun getAllStations(): List<StopLocation> =
-        getStopsWithLocation().filter { it.isStation }.sortedBy { it.stopName ?: it.stopId }
+    fun getAllStations(mergeFeedStationsEnabled: Boolean = true): List<StopLocation> =
+        getStopsWithLocation(mergeFeedStationsEnabled).filter { it.isStation }.sortedBy { it.stopName ?: it.stopId }
 
     /**
      * Attribution for wherever this agency's GTFS feed says it actually came from -- prefers
@@ -947,24 +1028,26 @@ class GtfsRepository(dbFile: File) {
     }
 
     /**
-     * Real scheduled trips still upcoming for one (route_id, direction_id), each trip's own earliest
-     * remaining departure time -- the candidate pool a [FuzzyRunTrips] implementation ordinally pairs
-     * live runs against (see [matchFuzzyRunsOrdinally]). Returned as raw GTFS "HH:MM:SS" strings, not
-     * epoch seconds -- same zone-agnostic convention every other query in this class follows; the
-     * caller (which already has the agency's own zoneId) converts via [gtfsTimeToEpochSeconds].
+     * Real scheduled trips still upcoming for one (route_id, direction_id), each paired with its
+     * own soonest remaining stop time, the candidate pool a [FuzzyRunTrips] implementation pairs
+     * live runs against (see [matchFuzzyRunsOrdinally]). Times are returned as raw GTFS
+     * "HH:MM:SS" strings, not a calculated instant, since GTFS times are only meaningful relative
+     * to the agency's own timezone. The [FuzzyRunTrips] implementation calling this already has
+     * that timezone, so it converts via [gtfsTimeToEpochSeconds] itself.
      *
-     * `MIN(st.departure_time)` per trip, not the trip's own first stop -- a trip already in progress
-     * relative to [afterTime] should rank by where it currently stands in its own remaining schedule,
-     * the same "how far along is this trip" signal a live run's own soonest predicted time already
-     * represents, not by a stale origin time. A trip within [MIN_REMAINING_STOPS_FOR_CANDIDATE] stops
-     * of its own end is excluded entirely rather than ranked normally -- confirmed live 2026-08-23: on
-     * a subway line with tight headways, a trip only 2 stops from its own terminal can still have a
-     * "soonest remaining stop" time just as close as a genuinely fresh candidate, but almost
-     * certainly already passed whatever stop the rider is actually viewing (a real CTA Blue Line trip
-     * ranked as "soonest" this way had already departed Belmont 17 minutes earlier), silently
-     * poisoning every match at that stop; the same root cause produced MBTA Green Line's own
-     * confirmed early-skewed status. This can't be fixed by ranking alone -- excluding it is what
-     * keeps a route-wide, stop-agnostic candidate pool usable for any specific stop along it.
+     * A trip's soonest remaining stop time is measured from wherever it currently stands in its
+     * own schedule, not from its very first stop. A trip already underway should rank by how far
+     * along it actually is right now, the same signal a live run's own soonest predicted time
+     * represents, rather than by a stale origin time from earlier in its run.
+     *
+     * A trip within [MIN_REMAINING_STOPS_FOR_CANDIDATE] (3) stops of its own end is excluded
+     * entirely from this pool, rather than just ranked lower. Since matching pairs live runs and
+     * scheduled trips purely by rank position, a trip that close to finishing occupying a rank
+     * meant for one still actually coming shifts every pairing after it out of alignment. This
+     * only affects the automatic, unpinned match recomputed each poll (see
+     * [FuzzyRunTrips.matchedTripUpdates]), not a rider's own explicit Select Run pick (see
+     * [FuzzyRunTrips.tripUpdateForRun]), which looks up that vehicle directly and is unaffected,
+     * so a rider affected by this can always pick a different run themselves.
      */
     fun getScheduledTripCandidates(routeId: String, directionId: Int, afterTime: String, today: LocalDate): List<Pair<String, String>> {
         val todayGtfs = today.toGtfsDateString()
@@ -1196,8 +1279,9 @@ class GtfsRepository(dbFile: File) {
         radiusMeters: Double,
         excludeStopId: String? = null,
         maxResults: Int = 60,
+        mergeFeedStationsEnabled: Boolean = true,
     ): List<StopWithDistance> =
-        getStopsWithLocation()
+        getStopsWithLocation(mergeFeedStationsEnabled)
             .asSequence()
             .filter { excludeStopId == null || excludeStopId !in it.memberStopIds }
             .map { stop ->
@@ -1288,6 +1372,64 @@ internal fun groupStationsByParent(rows: List<RawStopRow>): List<StopLocation> {
     }
 
     return result
+}
+
+/** ~250m -- loose enough to cover a secondary feed's own stops sitting a real city block from its
+ * parent agency's own physically-same station (e.g. Bustang's Denver Union Station gates vs RTD's
+ * own platform there), tight enough that two genuinely distinct, unrelated stations don't fold
+ * together just for being in the same neighborhood. A single tunable UX-clustering constant, not
+ * a measured distance for any specific agency. */
+const val STATION_MERGE_RADIUS_METERS = 250.0
+
+/** The "feed{n}:" prefix [GtfsIngestor] applies to a [MultiGtfsFeed]'s own stop_ids (see
+ * [secondaryFeedPrefix]'s own doc) -- "" for a primary-feed stop_id, which never carries one. Used
+ * to find a [StopLocation] that came from a secondary feed within one agency's own database, for
+ * [mergeFeedStations] below -- purely derived from the id string itself, no extra column needed. */
+private val feedPrefixPattern = Regex("^feed\\d+:")
+internal fun feedPrefixOf(stopId: String): String = feedPrefixPattern.find(stopId)?.value ?: ""
+
+/**
+ * The actual logic behind Settings' "Merge feed stations" toggle: within one agency's own
+ * database, folds a [MultiGtfsFeed] secondary's own nearby stop(s) into an existing real station
+ * (one [groupStationsByParent] already grouped platforms under, e.g. RTD Denver's own Union
+ * Station), when they sit within [STATION_MERGE_RADIUS_METERS] of it (e.g. Bustang's own gates at
+ * that same Union Station). Only a real station can absorb a stop this way; a plain stop is never
+ * promoted into one just by receiving a merge, and two plain stops are never merged together just
+ * for being close. The absorbed stop's id is unioned into the station's own
+ * [StopLocation.memberStopIds], so schedule/arrival lookups already written to accept a station's
+ * full member list pick up the secondary feed's trips automatically. This works because both the
+ * primary and secondary feed live in the same database already, distinguished only by a
+ * "feed{n}:" prefix [GtfsIngestor] writes into a secondary feed's own stop_ids (see
+ * [feedPrefixOf]); a cross-schedule merge, spanning separate database files entirely, would need
+ * a different approach.
+ *
+ * Restricted to real stations rather than every stop for performance: checking every stop for a
+ * possible merge significantly slows this down for an agency with a large stop count.
+ */
+internal fun mergeFeedStations(stations: List<StopLocation>): List<StopLocation> {
+    val secondaryStops = stations.filter { feedPrefixOf(it.stopId).isNotEmpty() }
+    if (secondaryStops.isEmpty()) return stations
+    val anchors = stations.filter { it.isStation }
+    if (anchors.isEmpty()) return stations
+
+    val extraMemberIdsByAnchorId = mutableMapOf<String, MutableList<String>>()
+    val absorbedSecondaryStopIds = mutableSetOf<String>()
+    for (secondary in secondaryStops) {
+        val nearestAnchor = anchors.minByOrNull { haversineMeters(it.lat, it.lon, secondary.lat, secondary.lon) } ?: continue
+        if (haversineMeters(nearestAnchor.lat, nearestAnchor.lon, secondary.lat, secondary.lon) > STATION_MERGE_RADIUS_METERS) continue
+        extraMemberIdsByAnchorId.getOrPut(nearestAnchor.stopId) { mutableListOf() } += secondary.memberStopIds
+        absorbedSecondaryStopIds += secondary.stopId
+    }
+    if (absorbedSecondaryStopIds.isEmpty()) return stations
+
+    return stations.mapNotNull { station ->
+        when {
+            station.stopId in absorbedSecondaryStopIds -> null
+            extraMemberIdsByAnchorId.containsKey(station.stopId) ->
+                station.copy(memberStopIds = (station.memberStopIds + extraMemberIdsByAnchorId.getValue(station.stopId)).distinct())
+            else -> station
+        }
+    }
 }
 
 /**
@@ -1449,30 +1591,27 @@ private fun shiftedToNextDay(afterTime: String): String {
 }
 
 /**
- * The real-time-aware replacement for a plain `st.departure_time >= ? AND ${activeTodayClause(...)}`
- * pair -- see [activeTodayClause]'s own doc for the calendar/calendar_dates logic this reuses
- * unchanged, twice. GTFS lets a transit day's own trips run past midnight using hour values >=24
- * (e.g. "25:30:00" for 1:30 AM) rather than rolling over to a new service_id, precisely so a late
- * trip stays attached to the transit day it started on rather than the calendar day it happens to
- * finish on. A query that only checks whether a trip's service is active on the CALENDAR day of
- * "right now" misses exactly those still-running trips for the first several hours of a new
- * calendar day, since their own service_id belongs to YESTERDAY's transit day, not today's --
- * confirmed live 2026-08-24 as the root cause of both a CTA/MBTA fuzzy-run mismatch (a live vehicle
- * still finishing yesterday's transit day got ordinally paired against today's own first trip,
- * hours away) and the same gap in Upcoming Arrivals itself.
+ * Includes a trip whose departure time technically falls on the next calendar day, but still
+ * counts as part of the same transit day it started on, since GTFS represents this by letting a
+ * transit day's own trips use hour values 24 or higher (e.g. "25:30:00" for 1:30 AM), rather than
+ * rolling over to a new service_id. A query that only checks whether a trip's service is active
+ * on today's calendar date would wrongly exclude that trip, since its service_id belongs to
+ * yesterday's transit day, not today's, even though it's genuinely still running right now.
  *
- * Returns an OR'd pair of self-contained clauses, each with its own `st.departure_time >= ?` bound
- * to its own transit day's numbering: today's own service compared against the plain [afterTime] as
- * normal, and yesterday's service compared against [afterTime] shifted forward 24 hours via
- * [shiftedToNextDay] (the equivalent point in yesterday's own >=24:00 numbering). [dayColumn]/
- * [yesterdayDayColumn] are today's and yesterday's own [DayOfWeek.toGtfsColumnName] values.
+ * Checks both transit days at once and includes a trip if either one matches, today's transit
+ * day, compared against the plain [afterTime] as normal, and yesterday's transit day, compared
+ * against [afterTime] shifted forward 24 hours via [shiftedToNextDay] (the same real moment,
+ * expressed in yesterday's own hour-24-or-higher numbering). [dayColumn]/[yesterdayDayColumn] are
+ * today's and yesterday's own [DayOfWeek.toGtfsColumnName] values. See [activeTodayClause]'s own
+ * doc for the calendar/calendar_dates logic reused here, unchanged, for each transit day.
  *
- * Callers bind, in this order, in place of the old plain afterTime + three today-date params:
- * [afterTime], today's own three date params (see [activeTodayClause]), [shiftedToNextDay]'s
- * result, then yesterday's own three date params.
+ * Bind, in order, [afterTime], today's own three date values (see [activeTodayClause]), the
+ * result of [shiftedToNextDay], then yesterday's own three date values.
  *
- * [comparison] defaults to `>=`; pass `>` for a caller (e.g. [getNextConnections]) that means
- * "strictly after", not "at or after".
+ * [comparison] defaults to `>=`, meaning "at or after" the given time. Pass `>` instead for a
+ * caller like [getNextConnections], which needs "strictly after": a connections screen shows
+ * other trips departing after the rider's own trip arrives at that stop, not one departing at
+ * that exact same moment.
  */
 private fun activeTransitDayClause(dayColumn: String, yesterdayDayColumn: String, comparison: String = ">="): String = """
     (

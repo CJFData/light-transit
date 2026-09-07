@@ -24,58 +24,45 @@ private const val CTA_MATCH_GRACE_SECONDS = 10 * 60
 private val ctaTrainJson = Json { ignoreUnknownKeys = true }
 
 /**
- * See [FuzzyRunTrips]'s own doc for why CTA 'L' trains need closest-matching rather than a real
- * trip_id bridge -- Train Tracker identifies a train only by a daily-changing run number, with no
- * schedule-time-equivalent field the way Bus Tracker's `stst`/`stsd` provide for buses.
+ * See [FuzzyRunTrips]'s own doc for the run-associated vs. fuzzy-run split -- CTA 'L' trains are
+ * fuzzy-run. Train Tracker identifies a train only by a daily-changing run number, with no
+ * schedule-time-equivalent field the way Bus Tracker's `stst`/`stsd` give a clean trip_id bridge,
+ * so matching here falls back to closest-match instead. That won't always be right; see
+ * [liveRunOptions]/[tripUpdateForRun] below for the rider's own manual override when it isn't.
  *
- * One call per poll: `ttpositions.aspx?rt=` gives every live train on a route in one shot (run
- * number, and each train's own immediate next stop_id + real predicted time). An earlier version
- * also called `ttfollow.aspx?runnumber=` per live train for its full remaining trip -- confirmed
- * live 2026-08-23 that this meant one HTTP call per live train per 10s poll, directly the
- * over-fetching CTA's own developer guidance warns against, so it's gone; only a matched trip's own
- * immediate next stop ever gets a real live time now, every stop further downstream just falls back
- * to schedule-only, an acceptable trade for an already-approximate "closest match" (see
- * [FuzzyRunTrips]'s own doc).
+ * One call per poll: `ttpositions.aspx?rt=` returns every live train on a route at once, each with
+ * its run number, immediate next stop, and a real predicted time for that stop. Only that one stop
+ * ever gets a real live time -- everything further downstream falls back to schedule-only, which
+ * is a fair trade given the match itself is already just an approximation.
  *
- * Matching is stop-anchored, not route-wide: each live train's own next stop_id (train stop_ids are
- * confirmed the same numbering space as this app's own GTFS `stop_id` per CTA's own Train Tracker
- * docs) is looked up directly via [GtfsRepository.getScheduledArrivals], and whichever real trip on
- * this route has the closest static departure time at that exact stop wins. An earlier version
- * instead built one shared route+direction-wide candidate pool (ranked without knowing which stop a
- * rider was actually viewing) and paired it ordinally against live runs -- confirmed live 2026-08-23
- * this let a candidate that had already passed the rider's own stop rank as "soonest" (it still had
- * stops left elsewhere on the route), which silently zeroed out every match at that stop. Matching
- * directly at each live train's own real next stop can't have that failure mode: the candidate pool
- * for a given train is only ever real trips still scheduled at the one stop that train is truly
- * heading to next. [usedTripIds] still guards against two different live trains claiming the same
- * real trip_id when their candidate windows overlap.
+ * Matching is stop-anchored rather than route-wide: each live train's own next stop_id is looked
+ * up directly via [GtfsRepository.getScheduledArrivals] (train stop_ids share the same numbering
+ * space as this app's own GTFS `stop_id`, per CTA's own Train Tracker docs), and whichever real
+ * trip on this route has the closest static departure time at that exact stop wins. This matters
+ * because a trip that's already passed a rider's stop can never wrongly look like the "soonest"
+ * one -- it's simply not a candidate at that stop anymore. [usedTripIds] guards against two
+ * different live trains claiming the same trip_id when their candidate windows overlap.
  *
- * [stickyRunByTripId] pins a real trip_id to whichever run number first matched it, for this
- * object's whole process lifetime (not just one poll) -- confirmed live 2026-08-23: recomputing the
- * closest match fresh every poll let the SAME rider-viewed trip_id silently flip to a DIFFERENT
- * physical train between polls (or across leaving and returning to Upcoming Arrivals/Trip Detail,
- * which re-polls from scratch) whenever two trains' candidate windows happened to be close. Once a
- * run is pinned, every later poll skips ranking entirely and just refreshes that same run's current
- * next-stop/time against the same trip_id, so a rider always sees one consistent train's position
- * for as long as it keeps appearing in ttpositions -- only unpinned implicitly, by that run no
- * longer appearing at all (see the sticky-first ordering below for why that's still race-safe).
+ * [stickyRunByTripId] pins a real trip_id to whichever run number first matched it, and that pin
+ * lasts for this object's whole process lifetime, not just one poll. Without it, two trains with
+ * close candidate windows could cause the same rider-viewed trip to silently jump to a different
+ * physical train between polls. Once a run is pinned, later polls skip ranking entirely and just
+ * refresh that run's current next-stop/time against the same trip_id. A run is only unpinned
+ * implicitly, by dropping out of ttpositions entirely. Pinned runs are also sorted first each
+ * poll, ahead of soonest-arrival, so a pinned run always reclaims its trip_id before an unpinned
+ * train gets the chance to.
  *
- * [liveRunOptions]/[tripUpdateForRun] are the direct, unranked counterpart to all of the above --
- * see their own doc on [FuzzyRunTrips] for why boarding needs a rider's own explicit pick (Select
- * Run) rather than trusting even the sticky automatic match.
+ * [liveRunOptions]/[tripUpdateForRun] are the direct, unranked counterpart to everything above --
+ * they back Select Run, letting a rider explicitly pick a different train when the automatic
+ * sticky match isn't the one they actually want to track.
  *
- * [propagatedTripUpdate] is what actually builds every [GtfsRtTripUpdate] this source returns --
- * confirmed live 2026-08-23 that a single-entry update (real time at [CtattTrain.nextStpId] only,
- * the original shape here right after `ttfollow` was removed) meant a matched trip's "closest
- * match" was visible on Trip Detail (which only ever cares about that one live stop) but silently
- * never showed up on Upcoming Arrivals for any OTHER stop on that same trip -- which is nearly
- * always the case, since a rider is essentially never viewing the exact stop a live train happens
- * to be approaching at that instant. Rather than reintroducing a second per-run API call (the
- * over-fetching `ttfollow` was removed to fix), the one real data point already in hand -- the
- * difference between [CtattTrain.arrT] and this trip's own scheduled time at that same stop -- is
- * propagated as a constant delay across every remaining stop on the matched trip's own static
- * schedule (one local DB query, no network), the same "hold a delay forward" approximation a real
- * GTFS-RT producer commonly uses when it hasn't got a fresher per-stop prediction either.
+ * [propagatedTripUpdate] builds every [GtfsRtTripUpdate] this source returns. The only real data
+ * point available is the difference between [CtattTrain.arrT] and the matched trip's own
+ * scheduled time at that same stop -- so that one delay is propagated across every remaining stop
+ * on the trip's static schedule (one local DB query, no network lookup needed). This is the same
+ * "hold a delay forward" approximation a real GTFS-RT producer uses when it doesn't have a
+ * fresher per-stop prediction either, and it's what keeps a match visible on Upcoming Arrivals,
+ * not just Trip Detail.
  */
 object CtaTrainTrackerSource : FuzzyRunTrips {
     override val routeIds: Set<String> = setOf("Red", "P", "Y", "Blue", "Pink", "G", "Org", "Brn")
@@ -143,6 +130,7 @@ object CtaTrainTrackerSource : FuzzyRunTrips {
     override suspend fun liveRunOptions(
         routeId: String,
         agency: GtfsAgency,
+        repository: GtfsRepository,
         zoneId: ZoneId,
     ): List<FuzzyRunOption> {
         if (routeId !in routeIds) return emptyList()
@@ -249,10 +237,9 @@ object CtaTrainTrackerSource : FuzzyRunTrips {
             return emptyMap()
         }
         val document = ctaTrainJson.decodeFromString(CtattPositionsDocument.serializer(), response.bodyAsText())
-        // Keyed back to the caller's own requested route_id casing, not CTA's -- confirmed live
-        // 2026-08-23: ttpositions' own "@name" always comes back lowercase ("blue", "red", "g")
-        // regardless of the case sent in rt=, but GTFS route_id is "Blue"/"Red"/"G". Silently keying
-        // by CTA's own casing here made every downstream route_id-scoped lookup miss.
+        // Keyed back to the caller's own requested route_id casing, not CTA's own -- ttpositions'
+        // "@name" always comes back lowercase ("blue", "red", "g") no matter what case was sent in
+        // rt=, but GTFS route_id is "Blue"/"Red"/"G".
         return document.ctatt.route.orEmpty().mapNotNull { route ->
             val matchedRouteId = routeIds.find { it.equals(route.name, ignoreCase = true) } ?: return@mapNotNull null
             matchedRouteId to route.train.orEmpty()
@@ -260,11 +247,10 @@ object CtaTrainTrackerSource : FuzzyRunTrips {
     }
 }
 
-/** ISO-8601 local time with no offset (e.g. "2026-08-23T13:12:30") -- confirmed live 2026-08-23
- * against real ttpositions responses. NOT the older "yyyyMMdd HH:mm:ss" format CTA's own developer
- * docs describe for this endpoint -- that mismatch silently failed to parse (runCatching swallowed
- * every DateTimeParseException), which is why every FuzzyRunTrips match for CTA trains previously
- * came back empty despite positions fetching fine. */
+/** ISO-8601 local time with no offset (e.g. "2026-08-23T13:12:30") -- not the older
+ * "yyyyMMdd HH:mm:ss" format CTA's own developer docs describe for this endpoint. That mismatch
+ * fails to parse silently rather than throwing, since runCatching swallows the
+ * DateTimeParseException. */
 private fun parseTrainTimestamp(raw: String, zoneId: ZoneId): Long? =
     runCatching {
         LocalDateTime.parse(raw, DateTimeFormatter.ISO_LOCAL_DATE_TIME).atZone(zoneId).toEpochSecond()

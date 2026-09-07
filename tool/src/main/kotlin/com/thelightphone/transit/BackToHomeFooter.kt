@@ -25,8 +25,9 @@ private const val POP_STEP_DELAY_MS = 80L
 
 // A plain centered icon in a short Box, not LightBottomBar -- that component's own height
 // (BOTTOMBAR_HEIGHT_UNITS=4f) plus top margin (TOP_MARGIN_UNITS=1f) is sized for a full row of
-// menu icons/labels, and reads as oversized dead space around one lonely circle. Same reasoning
-// as HomeScreen's own top-right Current Trip icons and Trip Detail's header icons, both
+// menu icons/labels, oversized dead space around this footer's one lonely icon that left barely
+// any scroll room on screens with real content between their own header and this footer. Same
+// reasoning as HomeScreen's own top-right Current Trip icons and Trip Detail's header icons, both
 // hand-rolled for the same reason.
 private const val FOOTER_HEIGHT_UNITS = 3f
 private const val ICON_SIZE_UNITS = 1.4f

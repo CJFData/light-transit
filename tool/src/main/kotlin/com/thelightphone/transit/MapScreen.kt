@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Canvas as ComposeCanvas
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.transit.gtfs.AgencyPreferences
 import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
@@ -360,6 +361,7 @@ class MapViewModel(
     private val stopId: String,
     private val mapPreferences: MapPreferences,
     private val tapHoldPreferences: TapHoldPreferences,
+    private val agencyPreferences: AgencyPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -422,10 +424,11 @@ class MapViewModel(
                 val seeEverythingShowSubway = mapPreferences.seeEverythingShowSubwayFlow.first()
                 val seeEverythingShowCommuterRail = mapPreferences.seeEverythingShowCommuterRailFlow.first()
                 val tapHoldVehicleEnabled = tapHoldPreferences.tapHoldVehicleEnabledFlow.first()
+                val mergeFeedStationsEnabled = agencyPreferences.mergeFeedStationsEnabledFlow.first()
                 // Reuses the exact same station-detection query every other screen does (search
                 // results, trip detail) -- non-null only if the selected stop is itself a real,
                 // qualifying multi-platform station.
-                val centerStation = repository.getStationContaining(stopId)
+                val centerStation = repository.getStationContaining(stopId, mergeFeedStationsEnabled)
                 
 // When the selected stop is itself a station, [stopId] is only one of its member
                 // platforms, whichever one the caller happened to pass in. Every platform has its
@@ -486,6 +489,7 @@ class MapViewModel(
                 }
                 val nearbyStops = repository.getStopsWithinRadius(
                     stop.lat, stop.lon, fetchRadiusMeters, excludeStopId = stopId,
+                    mergeFeedStationsEnabled = mergeFeedStationsEnabled,
                 ).map { nearby ->
                     NearbyStopMarker(nearby.stopId, nearby.stopName, nearby.lat, nearby.lon, nearby.isStation, nearby.memberStopIds)
                 }
@@ -590,7 +594,7 @@ class MapViewModel(
         // feed only, unchanged from before secondary feeds existed. Safe to call even when
         // realtimeVehiclePositionsUrl is null -- fetchMerged's own primaryUrl?.let guard just yields
         // primary=null and an empty byTripId map in that case.
-        val vehiclePositions = agency.fetchMergedVehiclePositions("MapScreen")
+        val vehiclePositions = agency.fetchMergedVehiclePositions(repository, "MapScreen")
         if (vehiclePositions.primary == null && liveVehicleSource == null) {
             _state.value = MapState.Loaded(
                 context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
@@ -602,7 +606,7 @@ class MapViewModel(
         }
         val vehiclePositionsByTripId = vehiclePositions.byTripId
 
-        val tripUpdatesByTripId = agency.fetchMergedTripUpdates("MapScreen").byTripId
+        val tripUpdatesByTripId = agency.fetchMergedTripUpdates(repository, "MapScreen").byTripId
 
         // Only trips both scheduled at an active stop and currently reporting a live position become a
         // marker -- no scheduled-only approximation. Each active stop gets its own
@@ -701,11 +705,22 @@ class MapViewModel(
                     currentSeq = preferredLiveVehicle.currentStopSequence
                 } else {
                     val vehicle = vehiclePositionsByTripId[arrival.tripId] ?: return@mapNotNull null
-                    val position = vehicle.position ?: return@mapNotNull null
-                    lat = position.latitude.toDouble()
-                    lon = position.longitude.toDouble()
-                    currentStatus = vehicle.currentStatus
+                    val gpsPosition = vehicle.position
                     currentSeq = vehicle.currentStopSequence
+                    // No real GPS on this entity (see GtfsRepository.getStopLocationForTripSequence's
+                    // own doc -- confirmed live for NYC Subway, tracked underground via track circuits,
+                    // not GPS) -- fall back to this vehicle's own current stop's real coordinates
+                    // instead of dropping the marker entirely. Still null (dropped) if there's no GPS
+                    // AND no resolvable current stop.
+                    val stopFallback = if (gpsPosition == null) {
+                        currentSeq?.let { seq -> repository.getStopLocationForTripSequence(arrival.tripId, seq) }
+                    } else {
+                        null
+                    }
+                    if (gpsPosition == null && stopFallback == null) return@mapNotNull null
+                    lat = gpsPosition?.latitude?.toDouble() ?: stopFallback!!.first
+                    lon = gpsPosition?.longitude?.toDouble() ?: stopFallback!!.second
+                    currentStatus = vehicle.currentStatus
                 }
 
                 
@@ -879,9 +894,23 @@ internal fun buildSeeEverythingBuses(
     showFerry: Boolean = true,
 ): List<BusMarker> {
     val fetchRadiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(centerLat, zoom)
-    val inBounds = vehiclePositionsByTripId.filterValues { vehicle ->
-        val position = vehicle.position ?: return@filterValues false
-        haversineMeters(centerLat, centerLon, position.latitude.toDouble(), position.longitude.toDouble()) <= fetchRadiusMeters
+    // See GtfsRepository.getStopLocationForTripSequence's own doc -- an agency whose VehiclePosition
+    // never carries real GPS (NYC Subway, tracked underground via track circuits) still has
+    // currentStopSequence, so its own current stop's real coordinates stand in for a GPS fix here.
+    // Computed once per vehicle up front, reused for both the bounds filter below and the marker
+    // itself, rather than re-deriving it twice.
+    val resolvedPositionByTripId = vehiclePositionsByTripId.mapNotNull { (tripId, vehicle) ->
+        val gpsPosition = vehicle.position
+        val resolved = if (gpsPosition != null) {
+            gpsPosition.latitude.toDouble() to gpsPosition.longitude.toDouble()
+        } else {
+            vehicle.currentStopSequence?.let { seq -> repository.getStopLocationForTripSequence(tripId, seq) }
+        }
+        resolved?.let { tripId to it }
+    }.toMap()
+    val inBounds = vehiclePositionsByTripId.filterKeys { tripId ->
+        val (lat, lon) = resolvedPositionByTripId[tripId] ?: return@filterKeys false
+        haversineMeters(centerLat, centerLon, lat, lon) <= fetchRadiusMeters
     }
     if (inBounds.isEmpty()) return emptyList()
 
@@ -894,7 +923,7 @@ internal fun buildSeeEverythingBuses(
     }
 
     return inBounds.mapNotNull { (tripId, vehicle) ->
-        val position = vehicle.position ?: return@mapNotNull null
+        val (lat, lon) = resolvedPositionByTripId.getValue(tripId)
         val routeInfo = routesByTripId[tripId] ?: return@mapNotNull null
         val lineType = LineType.forGtfsRouteType(routeInfo.route.routeType)
         val modeShown = when (lineType) {
@@ -905,8 +934,6 @@ internal fun buildSeeEverythingBuses(
         }
         if (!modeShown) return@mapNotNull null
         val routeLabel = routeInfo.route.shortName?.takeIf { it.isNotBlank() } ?: routeInfo.route.displayName
-        val lat = position.latitude.toDouble()
-        val lon = position.longitude.toDouble()
 
         if (filteringByStop) {
             // A candidate whose trip doesn't visit any tap-selected stop at all is excluded
@@ -968,7 +995,10 @@ class MapScreen(
         get() = MapViewModel::class.java
 
     override fun createViewModel(): MapViewModel =
-        MapViewModel(dbFile, agency, stopId, MapPreferences(lightContext.dataStore), TapHoldPreferences(lightContext.dataStore))
+        MapViewModel(
+            dbFile, agency, stopId, MapPreferences(lightContext.dataStore), TapHoldPreferences(lightContext.dataStore),
+            AgencyPreferences(lightContext.dataStore),
+        )
 
     @Composable
     override fun Content() {

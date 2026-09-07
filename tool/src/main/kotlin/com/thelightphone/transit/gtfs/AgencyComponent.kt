@@ -4,9 +4,15 @@ package com.thelightphone.transit.gtfs
  * Marker for an optional extra data source a specific [GtfsAgency] can plug in, beyond the core
  * GTFS static feed + GTFS-RT TripUpdates/VehiclePositions every agency already has (see
  * [GtfsAgency.feedUrl] et al). [GtfsAgency.components] is empty for any agency that doesn't need
- * one -- adding a new kind of integration for one agency is just a new AgencyComponent subtype
- * plugged into that agency's own entry, never a change to [GtfsAgency]'s constructor or any other
- * agency's entry. Retrieved via [GtfsAgency.component].
+ * one, since adding a new kind of integration for one agency is just a new AgencyComponent
+ * subtype plugged into that agency's own entry, never a change to [GtfsAgency]'s constructor or
+ * any other agency's entry. Retrieved via [GtfsAgency.component].
+ *
+ * Current subtypes: [LiveVehicleSource] (a richer live-position source keyed by a real trip_id,
+ * see its own doc), [MultiGtfsFeed] (an extra merged static and/or realtime feed, see its own
+ * doc), [FuzzyRunTrips] (closest-match live tracking for an agency with no real trip_id bridge at
+ * all, see its own doc), and [StopPredictionSource] (per-stop predicted arrival times outside the
+ * standard GTFS-RT feed, see its own doc).
  */
 interface AgencyComponent
 
@@ -73,32 +79,28 @@ interface LiveVehicleSource : AgencyComponent {
 /**
  * An extra GTFS-RT source for an agency, in one of two shapes:
  *
- * - **A real second feed** ([feedUrl] non-null): its own static schedule is merged into the
- *   agency's on-device database under its own id-prefixed namespace (see [GtfsIngestor]'s
- *   `idPrefix` handling) -- e.g. Bustang, CDOT's intercity coach service, whose static schedule
- *   RTD Denver re-hosts and this app merges into RTD's own database (see [GtfsAgency.RTD]). Its
- *   realtime data, if any, is prefixed the same way its static data is, so it never collides with
- *   the primary feed's trip_ids.
- * - **Just another realtime feed** ([feedUrl] null): no separate static schedule -- this agency
- *   already has one static feed on-device whose trip_ids already match this extra realtime feed
- *   directly. E.g. NYC Subway, whose realtime is split across 8 line-group MTA feeds rather than
- *   one combined feed the way LIRR/Metro-North's is (see [GtfsAgency.NYC_SUBWAY]) -- each of the
- *   other 7 feeds (beyond the one occupying the agency's own primary URL fields) is a
- *   [MultiGtfsFeed] with [feedUrl] left null, unioned into the merged realtime view with no id
- *   prefix, since there's no collision to guard against.
+ * - **Additional static and realtime feeds** ([feedUrl] non-null), whose own static schedule is
+ *   merged into the agency's on-device database under its own id-prefixed namespace (see
+ *   [GtfsIngestor]'s `idPrefix` handling), e.g. Bustang, CDOT's intercity coach service, whose
+ *   static schedule RTD Denver re-hosts and this app merges into RTD's own database (see
+ *   [GtfsAgency.RTD]). Its realtime data, if any, is prefixed the same way its static data is, so
+ *   it never collides with the primary feed's trip_ids.
+ * - **Single static feed, multiple realtime feeds** ([feedUrl] null), with no separate static
+ *   schedule of its own, since this agency already has one static feed on-device whose trip_ids
+ *   already match this extra realtime feed directly. For example, NYC Subway's realtime is split
+ *   across 8 line-group MTA feeds rather than one combined feed the way LIRR/Metro-North's is
+ *   (see [GtfsAgency.NYC_SUBWAY]), and each of the other 7 feeds is a [MultiGtfsFeed] with
+ *   [feedUrl] left null, unioned into the merged realtime view with no id prefix, since there's
+ *   no collision to guard against.
  *
- * An [AgencyComponent] like [LiveVehicleSource], so more merged/extra feeds are just more entries
- * in that agency's own `components` list, never a change to [GtfsAgency]'s own shape.
- *
- * [name] is this feed's short, rider-facing label (e.g. "Bustang") -- only meaningful when
- * [feedUrl] is non-null, where it's used two places: (1) appended to one of this feed's own
- * routes/stops whose name doesn't already mention it (see [GtfsIngestor]'s `disambiguatedName`),
- * so a merged route/stop reads as e.g. "West Line - Bustang"; (2) folded into the parent agency's
- * own feed attribution line. Ignored entirely when [feedUrl] is null -- there's no separate
- * static data to disambiguate or credit.
+ * [name] is this feed's short, rider-facing label (e.g. "Bustang"), meaningful only when
+ * [feedUrl] is non-null: it's appended to one of this feed's own routes/stops whose name doesn't
+ * already mention it (e.g. "West Line - Bustang", see [GtfsIngestor]'s `disambiguatedName`), and
+ * folded into the parent agency's own feed attribution line.
  *
  * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] carry this feed's own live data, distinct
- * from the parent agency's -- null when this specific feed has no realtime data of that kind.
+ * from the parent agency's, and are null when this specific feed has no realtime data of that
+ * kind.
  */
 class MultiGtfsFeed(
     val name: String,
@@ -106,6 +108,28 @@ class MultiGtfsFeed(
     val realtimeTripUpdatesUrl: String? = null,
     val realtimeVehiclePositionsUrl: String? = null,
 ) : AgencyComponent
+
+/**
+ * An agency whose GTFS-RT trip_id doesn't literally match its static trip_id, but packs a scheduled
+ * start time that bridges to one via [GtfsRepository.tripIdForScheduledStart] -- the same
+ * run-associated-trip concept [RunAssociatedTripSource] already handles for CTA Bus Tracker's
+ * separate stsd/stst fields, here packed into GTFS-RT's own trip_id string instead of a second API's
+ * fields. NYC Subway is the only current example: its trip_id (e.g. "119000_L..S") packs an origin
+ * time in NYCT's own hundredths-of-a-minute encoding (verified against its real static schedule:
+ * 120050 -> 20:00:30) -- route_id/direction_id need no extraction, GTFS-RT's own TripDescriptor
+ * already carries them as separate fields, same as every other agency.
+ *
+ * Applied by [fetchMerged]/[fetchTripUpdate]/[fetchVehiclePosition] when present: each entity's raw
+ * trip_id is resolved to its real static trip_id and the entity's own [GtfsRtTripDescriptor.tripId]
+ * is rewritten to match, so every existing downstream consumer keeps reading a plain, already-real
+ * trip_id with zero awareness this agency needed bridging at all.
+ */
+interface RealtimeTripIdBridge : AgencyComponent {
+    /** Parses [rawTripId] into a GTFS "HH:MM:SS" scheduled start time, or null if it doesn't match
+     * this agency's expected format -- treated the same as any other "not currently live" case,
+     * never guessed. */
+    fun scheduledStartTime(rawTripId: String): String?
+}
 
 /**
  * Documents that this agency's [GtfsAgency.realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl]
@@ -228,8 +252,12 @@ interface FuzzyRunTrips : AgencyComponent {
      * a rider's own explicit choice rather than an automatic (if sticky) guess -- see
      * [tripUpdateForRun]'s own doc for the other half of that pairing. Not direction-scoped here --
      * see [liveRunOptionsForTrip], which every real caller should use instead of this directly.
+     * [repository] matches [matchedTripUpdates]/[tripUpdateForRun]'s own signatures -- unused by a
+     * source with no need to query it (e.g. [CtaTrainTrackerSource], keyed entirely by run number),
+     * needed by one that has to resolve a trip_id itself (e.g. [MbtaGreenLineFuzzyRunSource] calling
+     * [GtfsAgency.fetchMergedTripUpdates]).
      */
-    suspend fun liveRunOptions(routeId: String, agency: GtfsAgency, zoneId: java.time.ZoneId): List<FuzzyRunOption>
+    suspend fun liveRunOptions(routeId: String, agency: GtfsAgency, repository: GtfsRepository, zoneId: java.time.ZoneId): List<FuzzyRunOption>
 
     /**
      * One specific run's current live data, addressed directly by [FuzzyRunOption.runId] -- no
@@ -314,7 +342,7 @@ suspend fun FuzzyRunTrips.liveRunOptionsForTrip(
     val tripStopIds = tripStops
         .filter { it.stopSequence < boundarySequence }
         .mapTo(mutableSetOf()) { it.stopId }
-    return liveRunOptions(routeId, agency, zoneId)
+    return liveRunOptions(routeId, agency, repository, zoneId)
         .filter { it.nextStopId in tripStopIds }
         .sortedBy { it.soonestPredictedEpochSeconds }
 }

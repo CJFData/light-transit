@@ -22,8 +22,10 @@ import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.clearAllCachedSchedules
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.NetworkPreferences
+import com.thelightphone.transit.gtfs.RegionalGroup
 import com.thelightphone.transit.gtfs.RunSelectionPreferences
 import com.thelightphone.transit.gtfs.TapHoldPreferences
+import com.thelightphone.transit.gtfs.TripDetailPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -55,6 +57,7 @@ class SettingsViewModel(
     private val departurePreferences: DeparturePreferences,
     private val networkPreferences: NetworkPreferences,
     private val runSelectionPreferences: RunSelectionPreferences,
+    private val tripDetailPreferences: TripDetailPreferences,
     private val filesDir: File,
 ) : LightViewModel<Unit>() {
 
@@ -146,6 +149,10 @@ class SettingsViewModel(
         get() = _runStepperEnabled
     private val _runStepperEnabled = MutableStateFlow(false)
 
+    val showStopsBeforeBoardingEnabled: StateFlow<Boolean>
+        get() = _showStopsBeforeBoardingEnabled
+    private val _showStopsBeforeBoardingEnabled = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
             agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
@@ -203,6 +210,9 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             departurePreferences.includeLongerTripsEnabledFlow.collect { _includeLongerTripsEnabled.value = it }
+        }
+        viewModelScope.launch {
+            tripDetailPreferences.showStopsBeforeBoardingEnabledFlow.collect { _showStopsBeforeBoardingEnabled.value = it }
         }
         viewModelScope.launch {
             networkPreferences.wifiOnlyDownloadsEnabledFlow.collect { _wifiOnlyDownloadsEnabled.value = it }
@@ -309,6 +319,10 @@ class SettingsViewModel(
         viewModelScope.launch { runSelectionPreferences.setRunSelectionEnabled(enabled) }
     }
 
+    fun setShowStopsBeforeBoardingEnabled(enabled: Boolean) {
+        viewModelScope.launch { tripDetailPreferences.setShowStopsBeforeBoardingEnabled(enabled) }
+    }
+
     /** Deletes every agency's downloaded schedule to free up space, then re-downloads whichever
      * agency is currently selected -- see [clearAllCachedSchedules]'s own doc for how the running
      * home screen picks this up. File I/O, so off the main thread even though it's usually quick. */
@@ -333,6 +347,7 @@ class SettingsScreen(
         DeparturePreferences(lightContext.dataStore),
         NetworkPreferences(lightContext.dataStore),
         RunSelectionPreferences(lightContext.dataStore),
+        TripDetailPreferences(lightContext.dataStore),
         lightContext.filesDir,
     )
 
@@ -382,6 +397,7 @@ class SettingsScreen(
         val wifiOnlyDownloadsEnabled by viewModel.wifiOnlyDownloadsEnabled.collectAsState()
         val runSelectionEnabled by viewModel.runSelectionEnabled.collectAsState()
         val runStepperEnabled by viewModel.runStepperEnabled.collectAsState()
+        val showStopsBeforeBoardingEnabled by viewModel.showStopsBeforeBoardingEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -440,6 +456,34 @@ class SettingsScreen(
                         size = 1f,
                         contentDescription = "Change agency",
                     )
+                }
+
+                // Only meaningful for a primary that's actually part of a RegionalGroup -- an
+                // agency with no region-mates has nothing to add alongside it (see
+                // ScheduleSelectionScreen's own doc), so the row itself doesn't show at all rather
+                // than opening a screen with nothing real to offer.
+                val primaryRegion = defaultAgency?.let { RegionalGroup.forAgency(it) }
+                if (primaryRegion != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable {
+                                navigateTo(screenFactory = { activity -> ScheduleSelectionScreen(activity, primaryRegion) })
+                            }
+                            .padding(vertical = 12.dp),
+                    ) {
+                        LightText(
+                            text = "Additional Schedules",
+                            variant = LightTextVariant.Copy,
+                            modifier = Modifier.weight(1f),
+                        )
+                        LightIcon(
+                            icon = LightIcons.ARROW_RIGHT,
+                            size = 1f,
+                            contentDescription = "Manage additional schedules",
+                        )
+                    }
                 }
 
                 LightText(
@@ -646,6 +690,22 @@ class SettingsScreen(
                     )
                     ToggleRow("Next/Previous run steppers", runStepperEnabled, viewModel::setRunStepperEnabled)
                 }
+
+                LightText(
+                    text = "Show earlier stops",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, a boarded trip's own stop list also shows the stops before where " +
+                        "you got on, greyed out, so you can see the vehicle's live position as it " +
+                        "approaches your stop instead of only after it arrives. Off by default.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Show earlier stops", showStopsBeforeBoardingEnabled, viewModel::setShowStopsBeforeBoardingEnabled)
 
                 LightText(
                     text = "Double-tap to zoom station maps, tap and hold for arrivals",

@@ -621,11 +621,17 @@ private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader, idPref
 }
 
 /** directions.txt is an optional GTFS extension, absent for most agencies -- when empty, this
- * table stays empty and GtfsRepository.getDirections falls back to a headsign-derived label. Plain
- * INSERT (not OR REPLACE) is safe since (route_id, direction_id) is a guaranteed-unique key. */
+ * table stays empty and GtfsRepository.getDirections falls back to a headsign-derived label.
+ * INSERT OR IGNORE, not a plain INSERT: (route_id, direction_id) is supposed to be a
+ * guaranteed-unique key per the spec, but isn't always in practice -- confirmed live in WestCat's
+ * own real feed, where route 2676's direction_id 0 appears twice with two different `direction`
+ * values ("North", then "Loop"). A plain INSERT threw on that second row and aborted the whole
+ * ingest (this agency's own "won't download" bug); OR IGNORE just keeps whichever row came first
+ * and drops the rest, same fail-open precedent [loadTrips]'s own synthesized-directions insert
+ * already uses for the identical primary key. */
 private fun loadDirections(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
-        "INSERT INTO directions (route_id, direction_id, direction, direction_destination) VALUES (?, ?, ?, ?)"
+        "INSERT OR IGNORE INTO directions (route_id, direction_id, direction, direction_destination) VALUES (?, ?, ?, ?)"
     )
     readCsvEntry(db, reader) { header, row ->
         val routeId = prefixedId(idPrefix, header.get(row, "route_id")) ?: return@readCsvEntry

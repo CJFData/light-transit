@@ -30,11 +30,11 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 
 private data class IconLegendEntry(val icon: LightIconConfiguration, val label: String)
 
-/** Every icon this app actually draws on the map/HomeScreen that a rider would need explained --
- * kept as a single list so it can't quietly drift out of sync with what MapScreen/HomeScreen use
- * (verified against a full grep of every LightIcons.* reference in this package). Chrome-only icons
- * (back, settings, search, this screen's own entry point) aren't map/data indicators, so they're
- * left out per the same reasoning that excluded them from the request this screen was built for. */
+/** Every icon [MapScreen] actually draws on its own canvas -- kept as a single list so it can't
+ * quietly drift out of sync with what MapScreen uses (verified against a full grep of every
+ * LightIcons.* reference actually drawn there, not just imported). Chrome-only icons (back,
+ * settings, search, this screen's own entry point) aren't map/data indicators, so they're left out
+ * per the same reasoning that excluded them from the request this screen was built for. */
 private val ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_SUBWAY, "Subway / Light Rail vehicle"),
     IconLegendEntry(LightIcons.DIRECTIONS_BUS, "Bus vehicle"),
@@ -42,8 +42,16 @@ private val ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_FERRY, "Ferry vehicle"),
     IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Multi-platform station (tap to see all its platforms)"),
     IconLegendEntry(LightIcons.DIRECTIONS_ARRIVAL, "Selected stop (large) / nearby stop (small) on the map"),
-    IconLegendEntry(LightIcons.DOWNLOAD_ARROW, "Agency schedule not yet downloaded"),
-    IconLegendEntry(LightIcons.REFRESH, "Checking for schedule updates"),
+)
+
+/** Icons that show up around schedule selection/download, not on the map or HomeScreen's own
+ * bottom bar -- split out from [ICON_LEGEND] since neither one is actually drawn there:
+ * [LightIcons.DOWNLOAD_ARROW] appears next to a not-yet-downloaded agency in the Transit Agency
+ * picker and Additional Schedules; [LightIcons.REFRESH] appears inline next to the agency name on
+ * HomeScreen while its schedule is being checked/downloaded. */
+private val SCHEDULE_ICON_LEGEND = listOf(
+    IconLegendEntry(LightIcons.DOWNLOAD_ARROW, "Agency schedule not yet downloaded (Transit Agency picker, Additional Schedules)"),
+    IconLegendEntry(LightIcons.REFRESH, "Checking for schedule updates (next to the agency name on the home screen)"),
 )
 
 /** HomeScreen's own bottom icon rows -- kept as a single list for the same reason as [ICON_LEGEND],
@@ -168,7 +176,31 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                             "also shows live progress between your boarding and alight stops. Tap a " +
                             "stop on Trip Detail to set (or clear) it as your alight stop -- reaching " +
                             "it shows a \"You've reached your stop!\" message and ends tracking " +
-                            "automatically, whether you're on Trip Detail or HomeScreen at the time.",
+                            "automatically, whether you're on Trip Detail or HomeScreen at the time. " +
+                            "Boarding a trip from a downloaded schedule that isn't already your primary " +
+                            "agency (see Regional Schedules below) makes it your new primary.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 24.dp),
+                    )
+
+                    LightText(
+                        text = "Regional Schedules",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    LightText(
+                        text = "Some agencies belong to a region -- New York City, Denver, and the SF " +
+                            "Bay Area today -- and can be downloaded together instead of one at a " +
+                            "time. Picking an agency that belongs to one from the \"Transit Agency\" " +
+                            "picker (onboarding, or Settings) first shows that region's own member " +
+                            "list to choose your primary from. Once your primary is regionalized, " +
+                            "Settings' \"Additional Schedules\" row lets you turn on any other schedule " +
+                            "in that same region to browse alongside it -- tap and hold one there to " +
+                            "make it your new primary instead. HomeScreen's Schedule button opens a " +
+                            "\"Choose Schedule\" picker first whenever more than one of a region's " +
+                            "schedules is downloaded, going straight to the route list when there's " +
+                            "only one.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 24.dp),
@@ -205,26 +237,56 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     }
 
                     LightText(
+                        text = "Schedule Icons",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+                    )
+                    SCHEDULE_ICON_LEGEND.forEach { entry ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 6.dp),
+                        ) {
+                            LightIcon(icon = entry.icon, size = 1f, modifier = Modifier.padding(end = 12.dp))
+                            LightText(text = entry.label, variant = LightTextVariant.Detail, lighten = true)
+                        }
+                    }
+
+                    LightText(
                         text = "Settings Toggles",
                         variant = LightTextVariant.Copy,
                         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
                     )
                     LightText(
-                        text = "\"Track tapped stops\" (a tapped-open stop on the Map screen also " +
-                            "contributes its own live vehicles) lives here now, alongside \"Tap and " +
-                            "hold a stop\", \"Double-tap to open a station\", \"Trip progress bar\", " +
-                            "and \"Daily message\" (the small rotating message near the bottom of " +
-                            "the home screen). \"See everything\" shows every live vehicle in view on " +
-                            "the Map/Station map, each labeled with just its route until tapped; " +
-                            "\"Filter by stop\" and per-mode \"Modes shown\" toggles refine it further " +
-                            "and only appear once it's on. \"Tap and hold -- Schedules\" and \"Tap " +
-                            "and hold -- Stations\" (both on by default) add the same tap-and-hold-" +
-                            "for-arrivals gesture to the Schedule stop list and the Stations list. " +
-                            "\"Tap and hold -- Vehicles\" (on by default) opens a live vehicle's own " +
-                            "Trip Detail when tapped and held on the Map screen or a Station map. " +
-                            "\"Randomize daily message\" (off by default) only appears once \"Daily " +
-                            "message\" itself is on, and picks a fresh message at random each time " +
-                            "you return to the home screen instead of once per calendar day.",
+                        text = "\"Only download over Wi-Fi\" (on by default) waits for Wi-Fi before " +
+                            "downloading or updating a schedule, so a large agency's schedule never " +
+                            "becomes a surprise cellular cost -- your last-downloaded schedule keeps " +
+                            "working meanwhile. \"Merge feed stations\" (on by default) folds a " +
+                            "MultiGtfsFeed secondary's own stops into the same physical station as its " +
+                            "parent agency's, e.g. Bustang's gates at RTD Denver's Union Station, " +
+                            "rather than showing them as a separate station of their own. \"Track " +
+                            "tapped stops\" (a tapped-open stop on the Map screen also contributes its " +
+                            "own live vehicles) lives here too, alongside \"Tap and hold a stop\", " +
+                            "\"Double-tap to open a station\", \"Trip progress bar\", and \"Daily " +
+                            "message\" (the small rotating message near the bottom of the home " +
+                            "screen). \"Include longer trips in departures\" (on by default) widens a " +
+                            "route/direction's departures list to also include any trip that runs at " +
+                            "least as far as the direction you picked. \"Run selection\" (on by " +
+                            "default, with a nested \"Next/Previous run steppers\" toggle, off by " +
+                            "default) lets you correct a boarded CTA 'L' or MBTA Green Line trip's " +
+                            "automatic closest-live-train match yourself. \"Stations list opens " +
+                            "arrivals on tap\" (on by default) makes a plain tap in the Stations list " +
+                            "jump straight to a station's live arrivals instead of its platform map -- " +
+                            "tap and hold opens the platform map instead. \"See everything\" shows " +
+                            "every live vehicle in view on the Map/Station map, each labeled with just " +
+                            "its route until tapped; \"Filter by stop\" and per-mode \"Modes shown\" " +
+                            "toggles refine it further and only appear once it's on. \"Tap and hold -- " +
+                            "Schedules\" and \"Tap and hold -- Stations\" (both on by default) add the " +
+                            "same tap-and-hold-for-arrivals gesture to the Schedule stop list and the " +
+                            "Stations list. \"Tap and hold -- Vehicles\" (on by default) opens a live " +
+                            "vehicle's own Trip Detail when tapped and held on the Map screen or a " +
+                            "Station map. \"Randomize daily message\" (off by default) only appears " +
+                            "once \"Daily message\" itself is on, and picks a fresh message at random " +
+                            "each time you return to the home screen instead of once per calendar day.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 8.dp),

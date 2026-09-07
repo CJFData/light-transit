@@ -73,8 +73,9 @@ class DepartureListViewModel(
     val state: StateFlow<DepartureListState> = _state
 
     /** Whether the list below shows tomorrow's service day instead of today's, toggled by tapping
-     * the header (see [DepartureListScreen.Content]). Departures queries already accept an
-     * arbitrary service date, so shifting this by one day is all [loadDepartures] needs to do. */
+     * the header's own "Today - tap for tomorrow" / "Tomorrow - tap for today" label (see
+     * [DepartureListScreen.Content]). Departures queries already accept an arbitrary service date,
+     * so shifting this by one day is all [loadDepartures] needs to do. */
     private val _showTomorrow = MutableStateFlow(startOnTomorrow)
     val showTomorrow: StateFlow<Boolean> = _showTomorrow
 
@@ -102,10 +103,13 @@ class DepartureListViewModel(
             val includeLongerTrips = departurePreferences.includeLongerTripsEnabledFlow.first()
             val departures = when {
                 directionId == null -> repository.getDepartures(routeId, null, stopId, serviceDate)
-                // See GtfsRepository.getDeparturesForVariant's own doc: also includes any
-                // longer trip that reaches at least as far as the chosen variant (e.g. a
-                // "South Station" train under a "Toward Readville" pick), unless the rider has
-                // turned that off in Settings, in which case it's an exact headsign match only.
+                // See GtfsRepository.getDeparturesForVariant's own doc: also includes any longer
+                // trip that reaches at least as far as the chosen variant (e.g. a "South Station"
+                // train also shows up under a "Toward Readville" pick, since it passes through
+                // Readville on the way) -- deliberately asymmetric, so the inverse never happens (a
+                // "Toward Readville" trip never shows up under "Toward South Station"). Unless the
+                // rider has turned this off in Settings, in which case it's an exact headsign match
+                // only, in both directions.
                 includeLongerTrips -> repository.getDeparturesForVariant(routeId, directionId, headsign, lastStopId, stopId, serviceDate)
                 else -> repository.getDeparturesForExactVariant(routeId, directionId, headsign, lastStopId, stopId, serviceDate)
             }

@@ -45,6 +45,7 @@ import com.thelightphone.transit.gtfs.FuzzyRunTrips
 import com.thelightphone.transit.gtfs.LiveVehicleSource
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.MultiGtfsFeed
+import com.thelightphone.transit.gtfs.RegionalGroup
 import com.thelightphone.transit.gtfs.StopPredictionSource
 import com.thelightphone.transit.gtfs.fetchTripUpdate
 import com.thelightphone.transit.gtfs.fetchVehiclePosition
@@ -352,10 +353,24 @@ class HomeScreenViewModel(
 
     /** The currently-selected agency's own GTFS-feed attribution, plus one entry for every
      * [MultiGtfsFeed] component it has -- e.g. RTD Denver's attribution followed by "Bustang",
-     * so a merged feed's data source gets credited too. See GtfsRepository.getFeedAttribution's own
-     * doc for the primary entry's fallback chain. Reset to empty the moment a new agency is
-     * selected, same reasoning as [agencyHasStations]. */
+     * so a merged feed's data source gets credited too -- and the same for every agency in
+     * [AgencyPreferences.additionalDownloadsFlow] (Schedule Selection's own "extra downloads
+     * alongside my primary" list, see that flow's own doc), so a rider with more than one schedule
+     * downloaded sees all of them credited, not just whichever one drives Home. Deduplicated by
+     * name (see [refreshFeedAttribution]) -- e.g. NYC Subway + a NYC bus borough both attribute
+     * "MTA New York City Transit", which should only ever show once, not once per schedule that
+     * happens to share it. See GtfsRepository.getFeedAttribution's own doc for the primary entry's
+     * fallback chain. Reset to empty the moment a new agency is selected, same reasoning as
+     * [agencyHasStations]. */
     val feedAttribution = MutableStateFlow<List<FeedAttribution>>(emptyList())
+
+    /** See [feedAttribution]'s own doc for why this is tracked at all (reacting to
+     * [AgencyPreferences.additionalDownloadsFlow] changing independently of [selectedAgency], same
+     * reasoning as [preferences]' defaultAgencyFlow collector in [init]) -- also read directly by
+     * Content()'s own "Schedule" bottom-bar button, to decide whether tapping it should prompt for
+     * which downloaded schedule to browse first (see [ScheduleAgencyPickerScreen]) or, the common
+     * single-schedule case, go straight to [LineTypeSelectionScreen] the way it always has. */
+    val additionalDownloads = MutableStateFlow<Set<GtfsAgency>>(emptySet())
 
     init {
         viewModelScope.launch {
@@ -392,6 +407,12 @@ class HomeScreenViewModel(
                     default != null && default != selectedAgency.value -> selectAgency(default)
                     default == null && selectedAgency.value == null -> showAgencyPicker()
                 }
+            }
+        }
+        viewModelScope.launch {
+            preferences.additionalDownloadsFlow.collect { extras ->
+                additionalDownloads.value = extras
+                refreshFeedAttribution()
             }
         }
         // Settings' "Clear schedule cache" deletes the selected agency's own database without changing
@@ -514,8 +535,8 @@ class HomeScreenViewModel(
             }
             val (stop, stops) = alightStop
 
-            val vehicle = trip.agency.fetchVehiclePosition(trip.tripId)
-            val tripUpdate = trip.agency.fetchTripUpdate(trip.tripId)
+            val vehicle = trip.agency.fetchVehiclePosition(trip.tripId, repository)
+            val tripUpdate = trip.agency.fetchTripUpdate(trip.tripId, repository)
 
             // A richer live source (e.g. CTA Bus Tracker's RunAssociatedTripSource) can locate this
             // trip's vehicle even when the agency has no standard GTFS-RT feed at all -- same
@@ -739,19 +760,64 @@ class HomeScreenViewModel(
             val stationRepo = GtfsRepository(gtfsDbFile(filesDir, agency))
             try {
                 agencyHasStations.value = stationRepo.getAllStations().isNotEmpty()
-                feedAttribution.value = listOfNotNull(stationRepo.getFeedAttribution()) +
-                    // Only feeds with their own static schedule (feedUrl != null) warrant a separate
-                    // attribution credit -- a feedUrl-less MultiGtfsFeed (e.g. NYC Subway's extra line-group
-                    // realtime feeds) is still the same underlying static feed/agency already credited above.
-                    agency.components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }
-                        .map { FeedAttribution(it.name, url = null) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e("HomeScreen", "Station/attribution lookup failed for ${agency.displayName}", e)
+                Log.e("HomeScreen", "Station lookup failed for ${agency.displayName}", e)
             } finally {
                 stationRepo.close()
             }
+            refreshFeedAttribution()
+        }
+    }
+
+    /** One [FeedAttribution] entry per (agency, [MultiGtfsFeed]) pair with a static feed of its
+     * own -- [agency]'s own primary entry first, then one per component, same shape
+     * [selectAgency]'s tail always credited for the single-agency case. A feedUrl-less
+     * [MultiGtfsFeed] (e.g. NYC Subway's extra line-group realtime feeds) has no static schedule
+     * of its own to attribute, so it's skipped, same as before this was split out. Empty (not
+     * thrown) for an agency with no database on disk yet, or any other lookup failure -- this is
+     * always best-effort enrichment, never something [refreshFeedAttribution]'s caller should have
+     * to guard against failing. */
+    private fun attributionForAgency(agency: GtfsAgency): List<FeedAttribution> {
+        val dbFile = gtfsDbFile(filesDir, agency)
+        if (!dbFile.exists()) return emptyList()
+        val repo = GtfsRepository(dbFile)
+        return try {
+            listOfNotNull(repo.getFeedAttribution()) +
+                agency.components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }
+                    .map { FeedAttribution(it.name, url = null) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("HomeScreen", "Attribution lookup failed for ${agency.displayName}", e)
+            emptyList()
+        } finally {
+            repo.close()
+        }
+    }
+
+    /** Recomputes [feedAttribution] across [selectedAgency] plus every
+     * [AgencyPreferences.additionalDownloadsFlow] extra that's actually a region-mate of the
+     * primary (see [RegionalGroup.forAgency]) -- [additionalDownloads] itself is one flat,
+     * ungrouped preference (see that field's own doc), so a rider who toggled on NYC extras while
+     * NYC Subway was primary and *later* switches primary to an unrelated, ungrouped agency (e.g.
+     * a plain Colorado one) would otherwise still see those stale NYC credits leak into that
+     * unrelated agency's own attribution line -- confirmed live this session. An ungrouped primary
+     * (no [RegionalGroup] at all) therefore only ever credits itself, regardless of what's sitting
+     * in [additionalDownloads]. Deduplicated by [FeedAttribution.name] (a [LinkedHashMap] keeps
+     * first-seen order stable -- [selectedAgency]'s own credits always lead, extras follow) so two
+     * schedules sharing a real-world publisher (e.g. NYC Subway and a NYC bus borough both crediting
+     * "MTA New York City Transit") only ever show once. */
+    private fun refreshFeedAttribution() {
+        val primary = selectedAgency.value ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val regionExtras = RegionalGroup.forAgency(primary)?.members?.filter { it in additionalDownloads.value } ?: emptyList()
+            val byName = LinkedHashMap<String, FeedAttribution>()
+            (listOf(primary) + regionExtras).distinct().forEach { agency ->
+                attributionForAgency(agency).forEach { entry -> byName.putIfAbsent(entry.name, entry) }
+            }
+            if (selectedAgency.value == primary) feedAttribution.value = byName.values.toList()
         }
     }
 }
@@ -792,6 +858,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
         val dailyMessageText by viewModel.dailyMessageText.collectAsState()
         val reachedAlightStop by viewModel.reachedAlightStop.collectAsState()
+        val additionalDownloads by viewModel.additionalDownloads.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
 
@@ -1017,13 +1084,27 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                             ),
                         )
                         readyAgency?.let { agency ->
+                            // Only region-mates of the primary agency count as "other available
+                            // schedules" here -- an additional download outside the primary's own
+                            // region (possible in principle, see AgencyPreferences.additionalDownloadsFlow's
+                            // own doc -- nothing stops a rider from ending up with a cross-region mix)
+                            // isn't treated as part of "this region's schedules" for this prompt -- go
+                            // straight to LineTypeSelectionScreen for the primary alone in that case,
+                            // same as the always-only-one-schedule case already does.
+                            val regionSchedules = RegionalGroup.forAgency(agency)?.members
+                                ?.filter { it == agency || (it in additionalDownloads && gtfsDbFile(lightContext.filesDir, it).exists()) }
+                                ?: listOf(agency)
                             add(
                                 LightBarButton.LightIcon(
                                     icon = LightIcons.LIST,
                                     contentDescription = "Schedule",
                                     onClick = {
                                         navigateTo(screenFactory = { activity ->
-                                            LineTypeSelectionScreen(activity, gtfsDbFile(lightContext.filesDir, agency))
+                                            if (regionSchedules.size > 1) {
+                                                ScheduleAgencyPickerScreen(activity, regionSchedules, lightContext.filesDir)
+                                            } else {
+                                                LineTypeSelectionScreen(activity, gtfsDbFile(lightContext.filesDir, agency))
+                                            }
                                         })
                                     },
                                 ),
