@@ -73,7 +73,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
    ![alt text](docs/screenshots/Screenshot_20260810_172200.png)
 
 
-- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus, ferry). Flip on "See Everything" (Settings) to drop the usual "just this stop's own vehicles" filter and plot every live vehicle in view instead, labeled with just its route until you tap it; narrow it back down by tapping a stop ("Filter by stop" — tags each vehicle TO/FROM/AT that stop) or by mode (Bus/Subway/Commuter Rail).
+- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus, ferry). "See Everything" (Settings, on by default) plots every live vehicle in view, not just ones relevant to your stop, labeled with just its route until you tap it; narrow it down by tapping a stop ("Filter by stop" — tags each vehicle TO/FROM/AT that stop) or by mode (Bus/Subway/Commuter Rail), or turn it off in Settings to fall back to just your stop's own vehicles.
   
   ![alt text](docs/screenshots/Screenshot_20260801_200838.png)
   ![alt text](docs/screenshots/Screenshot_20260801_204556.png)
