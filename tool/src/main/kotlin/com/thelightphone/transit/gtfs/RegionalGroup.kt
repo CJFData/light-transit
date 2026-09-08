@@ -1,5 +1,9 @@
 package com.thelightphone.transit.gtfs
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+
 /**
  * Groups agencies that belong to the same real-world region -- not merely a display label:
  * [forAgency] already gates a real feature (HomeScreen's Schedule button decides whether to show
@@ -95,4 +99,56 @@ enum class RegionalGroup(val id: String, val displayName: String, val members: L
     companion object {
         fun forAgency(agency: GtfsAgency): RegionalGroup? = entries.find { agency in it.members }
     }
+}
+
+/** One member agency's own realtime, both merged feeds -- exactly what
+ * [GtfsAgency.fetchMergedTripUpdates]/[GtfsAgency.fetchMergedVehiclePositions] already return
+ * per-agency; [fetchRegionalRealtime] just runs several of these concurrently. */
+data class RegionalRealtimeFeed(
+    val tripUpdates: MergedRealtimeFeed<GtfsRtTripUpdate>,
+    val vehiclePositions: MergedRealtimeFeed<GtfsRtVehiclePosition>,
+)
+
+/**
+ * Fetches every one of [selectedMembers]' own realtime concurrently, never one agency after
+ * another -- a rider who has more than one of this region's agencies active at once (their primary
+ * plus whichever [AgencyPreferences.additionalDownloadsFlow] extras belong to this same
+ * [RegionalGroup] -- the existing "Additional Schedules" toggle already IS the selection this reads
+ * from, nothing new to pick) gets every selected agency's live data at the same real-world moment,
+ * not staggered by however many agencies came before it in some arbitrary fetch order. Only ever
+ * checks as many feeds in parallel as [selectedMembers] actually holds -- a rider with just their
+ * primary selected still makes exactly one agency's own fetch, same cost as today.
+ *
+ * Deliberately a [RegionalGroup]-scoped concern, not a generic "fetch N agencies in parallel"
+ * utility -- it only ever makes sense for agencies already known to belong together (this enum's
+ * own [members]), never an arbitrary unrelated set. Each member's own multi-feed internals (NYC
+ * Subway's own line-group feeds, merged server-side by pico-transit-proxy into one URL; a
+ * 511-integrated agency's own regional-aggregator fetch) stay entirely that agency's own concern --
+ * this only concerns itself with fetching different AGENCIES' feeds concurrently, never how any
+ * single agency's own feed(s) get fetched internally. That split is intentional: consolidating
+ * NYC Subway's own line-group feeds server-side (one URL, shared across every rider) is a genuine
+ * efficiency win, but merging feeds ACROSS agencies server-side would mean the worker fetching data
+ * for agency combinations most riders never select at all -- this instead only ever fetches exactly
+ * the agencies one specific rider has actually chosen, client-side, once per rider.
+ *
+ * [selectedMembers] maps each agency the rider actually wants to its own already-open
+ * [GtfsRepository] -- callers are expected to have already filtered [members] down to the primary
+ * plus enabled [AgencyPreferences.additionalDownloadsFlow] extras (and to only pass an agency whose
+ * static schedule is actually downloaded on-device); this function does no filtering of its own.
+ */
+suspend fun RegionalGroup.fetchRegionalRealtime(
+    selectedMembers: Map<GtfsAgency, GtfsRepository>,
+    logTag: String,
+): Map<GtfsAgency, RegionalRealtimeFeed> = coroutineScope {
+    selectedMembers.map { (agency, repository) ->
+        async {
+            // Each agency's own two feed kinds are also fetched concurrently with each other, not
+            // just concurrently with other agencies -- same reasoning as UpcomingArrivalsScreen's
+            // existing StopPredictionSource/LiveVehicleSource pattern (two independent network
+            // round trips, awaiting one after the other bought nothing).
+            val tripUpdatesDeferred = async { agency.fetchMergedTripUpdates(repository, logTag) }
+            val vehiclePositionsDeferred = async { agency.fetchMergedVehiclePositions(repository, logTag) }
+            agency to RegionalRealtimeFeed(tripUpdatesDeferred.await(), vehiclePositionsDeferred.await())
+        }
+    }.awaitAll().toMap()
 }

@@ -275,7 +275,10 @@ private fun matchesOwnRoute(rawRouteId: String?, prefixedTripId: String, prefix:
  * every feed the agency has, since a caller here always already knows exactly which trip it wants
  * (typically a boarded trip's own id, polled in a loop). Null for a trip_id whose owning feed has
  * no realtime URL, or whose fetch fails or has no matching entry -- identical to every other "not
- * currently live" case this app already treats uniformly.
+ * currently live" case this app already treats uniformly. When this agency has a
+ * [RealtimeTripIdBridge] component, every feed's own entities (primary included) are resolved
+ * through it before being compared to [tripId], rather than assuming any feed's raw trip_id
+ * already matches -- see that interface's own doc.
  */
 suspend fun GtfsAgency.fetchTripUpdate(tripId: String, repository: GtfsRepository): GtfsRtTripUpdate? {
     components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }.forEachIndexed { index, feed ->
@@ -293,10 +296,31 @@ suspend fun GtfsAgency.fetchTripUpdate(tripId: String, repository: GtfsRepositor
             }
         }
     }
+    // Applied to the PRIMARY feed's own entities too, not just the unprefixed loop below -- a
+    // RealtimeTripIdBridge-backed agency's own primary feed (e.g. NYC Subway's own combined feed,
+    // served by pico-transit-proxy's /nyc_subway/combined) needs exactly the same resolution its
+    // other feeds do, since its own raw trip_ids are just as unresolved as any of them. A plain
+    // direct-key lookup here would silently never match anything for such an agency -- confirmed:
+    // this was a real, previously-unnoticed gap when NYC Subway's ACE lines (occupying the primary
+    // URL slot) never got the bridge treatment the other 7 line groups did as separate MultiGtfsFeed
+    // components.
+    val bridge = components.filterIsInstance<RealtimeTripIdBridge>().firstOrNull()
+    // Computed once per call, not once per entity -- see scheduledStartTimesByRoute's own doc for
+    // why a per-entity repository.tripIdForScheduledStart call each re-ran an expensive query.
+    val scheduleMap = if (bridge != null) repository.scheduledStartTimesByRoute(todayForGtfs(zoneId)) else null
+    fun resolvedMatch(entities: Map<String, GtfsRtTripUpdate>): GtfsRtTripUpdate? =
+        if (bridge != null && scheduleMap != null) {
+            entities.entries.firstNotNullOfOrNull { (rawTripId, update) ->
+                resolvedTripUpdateOrNull(update, rawTripId, tripId, bridge, scheduleMap)
+            }
+        } else {
+            entities[tripId]
+        }
+
     val url = realtimeTripUpdatesUrl
     val primaryMatch = url?.let {
         try {
-            GtfsRealtimeClient.fetchFeed(it).tripUpdatesByTripId[tripId]
+            resolvedMatch(GtfsRealtimeClient.fetchFeed(it).tripUpdatesByTripId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -305,25 +329,15 @@ suspend fun GtfsAgency.fetchTripUpdate(tripId: String, repository: GtfsRepositor
         }
     }
     if (primaryMatch != null) return primaryMatch
-    // Unprefixed multi-feed agencies (NYC Subway): tripId alone doesn't say which feed owns it,
-    // unlike a prefixed MultiGtfsFeed above -- probe each in list order, first match wins. A no-op
-    // loop for every agency with none of these. Each hit is served from the proxy worker's own
+    // Unprefixed multi-feed agencies: tripId alone doesn't say which feed owns it, unlike a
+    // prefixed MultiGtfsFeed above -- probe each in list order, first match wins. A no-op loop for
+    // every agency with none of these (including NYC Subway now that its own 8 line-group feeds
+    // are merged server-side into one primary URL). Each hit is served from the proxy worker's own
     // ~10s edge cache, not a fresh MTA round trip every time.
-    val bridge = components.filterIsInstance<RealtimeTripIdBridge>().firstOrNull()
-    // Computed once per call, not once per entity -- see scheduledStartTimesByRoute's own doc for
-    // why a per-entity repository.tripIdForScheduledStart call each re-ran an expensive query.
-    val scheduleMap = if (bridge != null) repository.scheduledStartTimesByRoute(todayForGtfs(zoneId)) else null
     for (feed in components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl == null }) {
         val additionalUrl = feed.realtimeTripUpdatesUrl ?: continue
         val match = try {
-            val entities = GtfsRealtimeClient.fetchFeed(additionalUrl).tripUpdatesByTripId
-            if (bridge != null && scheduleMap != null) {
-                entities.entries.firstNotNullOfOrNull { (rawTripId, update) ->
-                    resolvedTripUpdateOrNull(update, rawTripId, tripId, bridge, scheduleMap)
-                }
-            } else {
-                entities[tripId]
-            }
+            resolvedMatch(GtfsRealtimeClient.fetchFeed(additionalUrl).tripUpdatesByTripId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -363,10 +377,22 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String, repository: GtfsRepo
             }
         }
     }
+    // See fetchTripUpdate's identical primary-feed treatment for why this is applied here too.
+    val bridge = components.filterIsInstance<RealtimeTripIdBridge>().firstOrNull()
+    val scheduleMap = if (bridge != null) repository.scheduledStartTimesByRoute(todayForGtfs(zoneId)) else null
+    fun resolvedMatch(entities: Map<String, GtfsRtVehiclePosition>): GtfsRtVehiclePosition? =
+        if (bridge != null && scheduleMap != null) {
+            entities.entries.firstNotNullOfOrNull { (rawTripId, position) ->
+                resolvedVehiclePositionOrNull(position, rawTripId, tripId, bridge, scheduleMap)
+            }
+        } else {
+            entities[tripId]
+        }
+
     val url = realtimeVehiclePositionsUrl
     val primaryMatch = url?.let {
         try {
-            GtfsRealtimeClient.fetchFeed(it).vehiclePositionsByTripId[tripId]
+            resolvedMatch(GtfsRealtimeClient.fetchFeed(it).vehiclePositionsByTripId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -376,19 +402,10 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String, repository: GtfsRepo
     }
     if (primaryMatch != null) return primaryMatch
     // See fetchTripUpdate's identical loop for why this exists.
-    val bridge = components.filterIsInstance<RealtimeTripIdBridge>().firstOrNull()
-    val scheduleMap = if (bridge != null) repository.scheduledStartTimesByRoute(todayForGtfs(zoneId)) else null
     for (feed in components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl == null }) {
         val additionalUrl = feed.realtimeVehiclePositionsUrl ?: continue
         val match = try {
-            val entities = GtfsRealtimeClient.fetchFeed(additionalUrl).vehiclePositionsByTripId
-            if (bridge != null && scheduleMap != null) {
-                entities.entries.firstNotNullOfOrNull { (rawTripId, position) ->
-                    resolvedVehiclePositionOrNull(position, rawTripId, tripId, bridge, scheduleMap)
-                }
-            } else {
-                entities[tripId]
-            }
+            resolvedMatch(GtfsRealtimeClient.fetchFeed(additionalUrl).vehiclePositionsByTripId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -420,11 +437,13 @@ private fun resolvedVehiclePositionOrNull(
  * [byTripId] additionally folds in every reachable extra feed's own trip_id -> value map: a
  * prefixed one (real [MultiGtfsFeed.feedUrl], see [secondaryFeedPrefix]) so a caller iterating
  * scheduled trips finds a merged secondary-feed trip's live data (e.g. a Bustang trip under RTD
- * Denver) the same way it finds the primary agency's own; an unprefixed one (no feedUrl, e.g. NYC
- * Subway's extra line-group feeds) put in directly, since its trip_ids already match the shared
- * static database with nothing to disambiguate -- unless the agency also has a
- * [RealtimeTripIdBridge] component (NYC Subway does), in which case each entity is resolved and
- * aliased to its real trip_id first (see that interface's own doc).
+ * Denver) the same way it finds the primary agency's own; an unprefixed one (no feedUrl) put in
+ * directly, since its trip_ids already match the shared static database with nothing to
+ * disambiguate. When the agency also has a [RealtimeTripIdBridge] component (NYC Subway does),
+ * every entity -- the primary feed's own included -- is resolved and aliased to its real trip_id
+ * first instead (see that interface's own doc); NYC Subway's own 8 line-group feeds are merged
+ * server-side by pico-transit-proxy into one combined primary URL, so there's no unprefixed
+ * [MultiGtfsFeed] involved for it at all anymore, just the primary feed's own resolution.
  */
 class MergedRealtimeFeed<T>(val primary: GtfsRtFeedMessage?, val byTripId: Map<String, T>)
 
@@ -450,11 +469,29 @@ private suspend fun <T> GtfsAgency.fetchMerged(
     val bridge = components.filterIsInstance<RealtimeTripIdBridge>().firstOrNull()
     // Computed once per poll, not once per entity -- see scheduledStartTimesByRoute's own doc for
     // why a per-entity repository.tripIdForScheduledStart call each re-ran an expensive query
-    // (confirmed live: made NYC Subway's own feeds, which have thousands of entities across their 7
-    // unprefixed feeds, take unacceptably long to load).
+    // (confirmed live: made NYC Subway's own feeds, which have thousands of entities across their
+    // (now server-side merged) feeds, take unacceptably long to load).
     val scheduleMap = if (bridge != null) repository.scheduledStartTimesByRoute(todayForGtfs(zoneId)) else null
+    // Resolves and aliases every entity's raw trip_id to its real static trip_id before it's put in
+    // the map, so every downstream consumer still sees a plain real-trip_id-keyed entity -- applied
+    // to the PRIMARY feed's own entities too, not just unprefixed MultiGtfsFeed ones below, since a
+    // RealtimeTripIdBridge-backed agency's own primary feed (e.g. NYC Subway's combined feed) needs
+    // exactly the same resolution its other feeds do. A no-op (`putAll`) for every agency with no
+    // bridge component.
+    fun MutableMap<String, T>.putResolved(entities: Map<String, T>) {
+        if (bridge != null && scheduleMap != null) {
+            entities.forEach { (rawTripId, value) ->
+                val routeId = routeIdOf(value) ?: return@forEach
+                val startTime = bridge.scheduledStartTime(rawTripId) ?: return@forEach
+                val resolvedId = scheduleMap[routeId to startTime] ?: return@forEach
+                put(resolvedId, withResolvedTripId(value, resolvedId))
+            }
+        } else {
+            putAll(entities)
+        }
+    }
     val merged = buildMap {
-        primaryFeed?.let { putAll(byTripId(it)) }
+        primaryFeed?.let { putResolved(byTripId(it)) }
         components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }.forEachIndexed { index, feed ->
             val url = secondaryUrl(feed) ?: return@forEachIndexed
             try {
@@ -472,25 +509,14 @@ private suspend fun <T> GtfsAgency.fetchMerged(
                 Log.e(logTag, "Realtime fetch failed for $displayName's secondary feed", e)
             }
         }
-        // Unprefixed (NYC Subway-style): trip_ids already match the shared static database
-        // directly, no prefix -- unless a RealtimeTripIdBridge is present (see that interface's own
-        // doc), in which case each entity's raw trip_id is resolved to its real static trip_id and
-        // aliased onto the entity itself before it's put in the map, so every downstream consumer
-        // still sees a plain real-trip_id-keyed entity. A no-op loop for every agency with neither.
+        // Unprefixed multi-feed agencies: trip_ids already match the shared static database
+        // directly, no prefix needed -- a no-op loop for every agency with none of these (NYC
+        // Subway's own line-group feeds are merged server-side into one primary URL now, so this
+        // stays a no-op for it too, but the shape remains for any future agency shaped this way).
         components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl == null }.forEach { feed ->
             val url = secondaryUrl(feed) ?: return@forEach
             try {
-                val entities = byTripId(GtfsRealtimeClient.fetchFeed(url))
-                if (bridge != null && scheduleMap != null) {
-                    entities.forEach { (rawTripId, value) ->
-                        val routeId = routeIdOf(value) ?: return@forEach
-                        val startTime = bridge.scheduledStartTime(rawTripId) ?: return@forEach
-                        val resolvedId = scheduleMap[routeId to startTime] ?: return@forEach
-                        put(resolvedId, withResolvedTripId(value, resolvedId))
-                    }
-                } else {
-                    putAll(entities)
-                }
+                putResolved(byTripId(GtfsRealtimeClient.fetchFeed(url)))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

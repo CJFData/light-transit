@@ -87,11 +87,15 @@ interface LiveVehicleSource : AgencyComponent {
  *   it never collides with the primary feed's trip_ids.
  * - **Single static feed, multiple realtime feeds** ([feedUrl] null), with no separate static
  *   schedule of its own, since this agency already has one static feed on-device whose trip_ids
- *   already match this extra realtime feed directly. For example, NYC Subway's realtime is split
- *   across 8 line-group MTA feeds rather than one combined feed the way LIRR/Metro-North's is
- *   (see [GtfsAgency.NYC_SUBWAY]), and each of the other 7 feeds is a [MultiGtfsFeed] with
- *   [feedUrl] left null, unioned into the merged realtime view with no id prefix, since there's
- *   no collision to guard against.
+ *   already match this extra realtime feed directly -- unioned into the merged realtime view with
+ *   no id prefix, since there's no collision to guard against. No current agency needs this shape:
+ *   NYC Subway used to (its realtime is split across 8 line-group MTA feeds rather than one
+ *   combined feed the way LIRR/Metro-North's is), but pico-transit-proxy now merges those 8
+ *   server-side into one combined URL (see [GtfsAgency.NYC_SUBWAY]'s own doc), so it's a plain
+ *   single-realtime-URL agency again. Kept as a supported shape for a future agency split the same
+ *   way NYC Subway's own feeds used to be, where a worker-side merge either isn't possible or
+ *   isn't worth it (e.g. if the split ever varied per rider rather than being the same fixed set
+ *   of upstream feeds for everyone).
  *
  * [name] is this feed's short, rider-facing label (e.g. "Bustang"), meaningful only when
  * [feedUrl] is non-null: it's appended to one of this feed's own routes/stops whose name doesn't

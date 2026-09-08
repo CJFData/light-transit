@@ -1050,10 +1050,12 @@ enum class GtfsAgency(
      * CTA's own proprietary, documented APIs, wired as [AgencyComponent]s rather than a
      * [realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl] swap: [RunAssociatedTripSource] (Bus
      * Tracker) matches a live bus back to a real trip_id via its own scheduled-start-time fields
-     * (see that class's own doc) and is fully wired below. CTA Train Tracker ('L' trains) isn't
-     * wired at all yet -- it identifies trains by run number, with no static-GTFS field that
-     * bridges back to a trip_id, so it's a [FuzzyRunTrips] candidate, not a [RunAssociatedTripSource]
-     * one; declared/scoped below, actual fetching not implemented yet. ~6.0M stop_times rows --
+     * (see that class's own doc), and [CtaTrainTrackerSource] (Train Tracker, for 'L' trains) is a
+     * [FuzzyRunTrips] implementation instead -- Train Tracker identifies a train only by run
+     * number, with no static-GTFS field that bridges back to a trip_id, so it ranks live trains
+     * against scheduled trips ordinally rather than matching one with certainty (see
+     * [FuzzyRunTrips]'s own doc), surfaced as "Closest match." Both are fully wired below. ~6.0M
+     * stop_times rows --
      * larger than STM's 5.1M that already needed the streaming/batching fixes; same order of
      * magnitude, not UK-BODS-regional scale, but wants its own real device ingest test before being
      * trusted. */
@@ -1099,30 +1101,29 @@ enum class GtfsAgency(
     ),
     /** Realtime: no key needed, HTTPS (pico-transit-proxy's own default User-Agent satisfies MTA's
      * WAF, which 403s a request with no real UA at all). Unlike LIRR/Metro-North's single combined
-     * feed, MTA splits NYC Subway's realtime across 8 line-group feeds (ACE, BDFM, G, JZ, NQRW, L,
-     * numbered lines/1234567S, SIR -- verified live, non-overlapping trip_id ranges), each still a
-     * single URL combining TripUpdates+VehiclePositions the same way LIRR/Metro-North's is. ACE
-     * occupies the primary URL fields below so the `realtimeVehiclePositionsUrl == null` "has
-     * realtime at all" check elsewhere (see MapScreen's NOT_SUPPORTED/UNAVAILABLE gating) keeps
-     * working unchanged; the other 7 (see [NycSubwaySecondaryFeeds]) are unprefixed [MultiGtfsFeed]
-     * components (feedUrl left null) rather than a real second static feed -- every one of these
-     * feeds' trip_ids already matches trips loaded from this agency's single static feed directly --
-     * except the feeds' own trip_id isn't the real static trip_id verbatim, it packs a scheduled
-     * start time in NYCT's own encoding (e.g. "119000_L..S"), which [NycSubwayTripIdBridge] bridges
-     * back to the real trip_id (see [RealtimeTripIdBridge]'s own doc for why, and the verified
-     * decode). All 8 proxied through pico-transit-proxy's own /nyc_subway/&lt;group&gt; routes. Every
-     * entity also carries several NYCT-specific protobuf fields (TripDescriptor field 1001,
-     * FeedEntity fields 2/5, VehiclePosition field 6, StopTimeUpdate fields 7 and 1001) declared in
-     * GtfsRealtime.kt -- this hand-rolled decoder faults on any undeclared field rather than
-     * skipping it. */
+     * feed, MTA itself splits NYC Subway's realtime across 8 line-group feeds (ACE, BDFM, G, JZ,
+     * NQRW, L, numbered lines/1234567S, SIR -- verified live, non-overlapping trip_id ranges) --
+     * pico-transit-proxy merges all 8 server-side into one combined response at
+     * `/nyc_subway/combined` (fetched/cached once per rider hitting that route, shared by everyone,
+     * a pure efficiency win since it's genuinely the same schedule split only for MTA's own
+     * publishing convenience -- see the worker's own `serveNycSubwayCombinedRoute`), so this agency
+     * has a single realtime URL like any other, no [MultiGtfsFeed] components needed for it. Every
+     * one of those 8 feeds' own trip_ids isn't the real static trip_id verbatim, though -- it packs
+     * a scheduled start time in NYCT's own encoding (e.g. "119000_L..S"), which
+     * [NycSubwayTripIdBridge] bridges back to the real trip_id (see [RealtimeTripIdBridge]'s own doc
+     * for why, and the verified decode) -- applied to the combined feed's entities regardless of
+     * which of the 8 original upstream feeds each one came from. Every entity also carries several
+     * NYCT-specific protobuf fields (TripDescriptor field 1001, FeedEntity fields 2/5,
+     * VehiclePosition field 6, StopTimeUpdate fields 7 and 1001) declared in GtfsRealtime.kt --
+     * this hand-rolled decoder faults on any undeclared field rather than skipping it. */
     NYC_SUBWAY(
         "nyc_subway",
         "NYC Subway",
         "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip",
-        "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/ace",
-        "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/ace",
+        "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/combined",
+        "https://pico-transit-proxy.data-32b.workers.dev/nyc_subway/combined",
         timeZoneId = "America/New_York",
-        components = NycSubwaySecondaryFeeds + NycSubwayTripIdBridge,
+        components = listOf(NycSubwayTripIdBridge),
     ),
     /** Realtime: no key needed, HTTPS, one combined TripUpdates+VehiclePositions feed -- wired in
      * below. Shares [GtfsRtStopTimeUpdate]'s field 1005 (see that field's own doc for verification
