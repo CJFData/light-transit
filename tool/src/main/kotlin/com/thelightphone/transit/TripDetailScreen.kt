@@ -34,6 +34,9 @@ import com.thelightphone.transit.gtfs.GtfsRtStopTimeUpdate
 import com.thelightphone.transit.gtfs.fetchTripUpdate
 import com.thelightphone.transit.gtfs.fetchVehiclePosition
 import com.thelightphone.transit.gtfs.matchCurrentStopByProximity
+import com.thelightphone.transit.gtfs.matchCurrentStopByShapeProjection
+import com.thelightphone.transit.gtfs.TripPositionAnchor
+import com.thelightphone.transit.gtfs.TripShapeSource
 import com.thelightphone.transit.gtfs.FuzzyRunTrips
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.LiveVehicleSource
@@ -264,7 +267,15 @@ class TripDetailViewModel(
                 // but no coordinates here for GPS-proximity matching (e.g. RIPTA, which never
                 // populates current_stop_sequence) to ever find it.
                 val stopLocations = repository.getTripStopLocations(tripId, if (showEarlierStops) 0 else fromStopSequence)
-                var lastMatchedStopSequence: Int? = null
+                // Path-aware alternative to matchCurrentStopByProximity -- see
+                // matchCurrentStopByShapeProjection's own doc. Resolved once (an agency's own
+                // components never change), same as agency/liveVehicleSource above; null for every
+                // agency but RIPTA today, in which case matchViaShape below is a cheap no-op and the
+                // existing point-radius tier runs exactly as before. gtfsZip is [dbFile]'s own sibling
+                // (see gtfsZipFile's own doc -- same per-agency directory, just no filesDir available
+                // here to call that helper directly the way HomeScreenViewModel does).
+                val shapeSource = agency.component<TripShapeSource>()
+                val gtfsZip = dbFile.parentFile?.let { File(it, "gtfs.zip") }
 
                 while (isActive) {
                     // Recomputed every poll, not hoisted above the loop -- confirmed live
@@ -386,22 +397,40 @@ class TripDetailViewModel(
                     // TripUpdates' own remaining stops (see GtfsRtTripUpdate.inferCurrentStopSequence)
                     // -- RIPTA's feed needs one of these two fallbacks, since it never populates
                     // current_stop_sequence itself.
+                    val anchorBefore = TripPositionAnchor.get(tripId)
+                    suspend fun matchViaShape(lat: Double, lon: Double, bearing: Float?): Int? {
+                        val source = shapeSource ?: return null
+                        val zip = gtfsZip ?: return null
+                        val points = source.shapePoints(tripId, repository, zip) ?: return null
+                        val stopDistances = source.stopDistancesAlongShape(tripId, repository, zip, stops, stopLocations)
+                            ?: return null
+                        val match = matchCurrentStopByShapeProjection(
+                            stops, stopDistances, points, lat, lon, bearing,
+                            TripPositionAnchor.getShapeDistance(tripId), tripUpdateInferredSequence,
+                        ) ?: return null
+                        TripPositionAnchor.recordShapeDistance(tripId, match.distanceAlongShapeMeters)
+                        return match.stopSequence
+                    }
                     val liveStopSequence = matchedStopFromVehicle?.stopSequence
                         ?: liveVehicleInfo?.currentStopSequence
+                        ?: liveVehicleInfo?.let { info -> matchViaShape(info.latitude, info.longitude, null) }
                         ?: liveVehicleInfo?.let { info ->
                             matchCurrentStopByProximity(
-                                stops, stopLocations, info.latitude, info.longitude, lastMatchedStopSequence,
+                                stops, stopLocations, info.latitude, info.longitude,
+                                anchorBefore, coldStartSequenceHint = tripUpdateInferredSequence,
                             )
                         }?.stopSequence
                         ?: vehiclePosition?.currentStopSequence
+                        ?: vehiclePosition?.position?.let { pos -> matchViaShape(pos.latitude.toDouble(), pos.longitude.toDouble(), pos.bearing) }
                         ?: vehiclePosition?.position?.let { pos ->
                             matchCurrentStopByProximity(
-                                stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(), lastMatchedStopSequence,
+                                stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(),
+                                anchorBefore, coldStartSequenceHint = tripUpdateInferredSequence,
                             )
                         }?.stopSequence
                         ?: tripUpdateInferredSequence
                         ?: matchedStopFromFuzzy?.stopSequence
-                    lastMatchedStopSequence = liveStopSequence ?: lastMatchedStopSequence
+                    liveStopSequence?.let { TripPositionAnchor.record(tripId, it) }
 
                     val matchedStop = matchedStopFromVehicle
                         ?: liveStopSequence?.let { seq -> stops.find { it.stopSequence == seq } }

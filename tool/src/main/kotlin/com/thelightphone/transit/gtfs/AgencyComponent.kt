@@ -11,8 +11,9 @@ package com.thelightphone.transit.gtfs
  * Current subtypes: [LiveVehicleSource] (a richer live-position source keyed by a real trip_id,
  * see its own doc), [MultiGtfsFeed] (an extra merged static and/or realtime feed, see its own
  * doc), [FuzzyRunTrips] (closest-match live tracking for an agency with no real trip_id bridge at
- * all, see its own doc), and [StopPredictionSource] (per-stop predicted arrival times outside the
- * standard GTFS-RT feed, see its own doc).
+ * all, see its own doc), [StopPredictionSource] (per-stop predicted arrival times outside the
+ * standard GTFS-RT feed, see its own doc), and [TripShapeSource] (a trip's own route-polyline
+ * points, see its own doc).
  */
 interface AgencyComponent
 
@@ -408,3 +409,42 @@ interface StopPredictionSource : AgencyComponent {
 
 /** See [StopPredictionSource.nextStopForVehicle]. */
 data class VehicleNextStop(val stopId: String, val predictedEpochSeconds: Long)
+
+/** One point along a trip's own route polyline (GTFS shapes.txt), ordered by [sequence] --
+ * [shape_pt_sequence]'s own name in the spec, shortened here since this type only ever appears
+ * already scoped to one shape. [cumulativeMeters] is this point's own distance along the polyline
+ * from the shape's first point -- computed locally in [StaticGtfsShapeSource] (RIPTA's real feed
+ * confirmed to have no `shape_dist_traveled` column in either shapes.txt or stop_times.txt, so this
+ * can't just be read off the feed the way that GTFS-optional column is meant to provide it), used by
+ * [projectOntoShape] to turn a raw lat/lon into a position along the route. */
+data class ShapePoint(val latitude: Double, val longitude: Double, val sequence: Int, val cumulativeMeters: Double)
+
+/**
+ * A trip's own route-polyline points, from GTFS's optional shapes.txt -- not ingested into this
+ * app's shared SQLite schema at all (see [StaticGtfsShapeSource]'s own doc for why), so this is the
+ * only way any screen can reach shape data today. Piloted narrowly: opt-in per agency (an agency
+ * with no [TripShapeSource] component just has no shape data available, same universal fallback
+ * convention every other component follows) and looked up one trip at a time, never bulk-fetched
+ * for a whole schedule.
+ *
+ * Consumed by [matchCurrentStopByShapeProjection] as a higher-priority, path-aware alternative to
+ * [matchCurrentStopByProximity]'s straight-line-to-stop heuristic for any agency with this component
+ * attached (RIPTA today) -- see that function's own doc. A second intended future consumer, not yet
+ * built: drawing a trip's actual path on a map.
+ */
+interface TripShapeSource : AgencyComponent {
+    /** Null = no shape data for this trip (missing shape_id, or the feed has no shapes.txt at
+     * all) -- both normal, common cases, never an error. Ordered by [ShapePoint.sequence]. */
+    suspend fun shapePoints(tripId: String, repository: GtfsRepository, gtfsZipFile: java.io.File): List<ShapePoint>?
+
+    /** Each of [stops]' own position along this trip's shape (stopSequence -> distanceAlongShapeMeters)
+     * -- see [StaticGtfsShapeSource.stopDistancesAlongShape]'s own doc. Null when [shapePoints] has no
+     * shape for this trip at all. */
+    suspend fun stopDistancesAlongShape(
+        tripId: String,
+        repository: GtfsRepository,
+        gtfsZipFile: java.io.File,
+        stops: List<TripStopRow>,
+        stopLocations: Map<String, Pair<Double, Double>>,
+    ): Map<Int, Double>?
+}

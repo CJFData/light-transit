@@ -717,6 +717,15 @@ class GtfsRepository(dbFile: File) {
             cursor.mapRows { getString(0) }.firstOrNull()
         }
 
+    /** [tripId]'s own shape_id, already stored on every ingested trip (trips.txt's own optional
+     * column) but otherwise unread anywhere in this codebase -- see [TripShapeSource]'s own doc for
+     * the one current consumer. Null for any trip whose feed doesn't publish shapes.txt at all, or
+     * doesn't set this column for this specific trip -- both are normal, common cases, not errors. */
+    fun getShapeIdForTrip(tripId: String): String? =
+        db.rawQuery("SELECT shape_id FROM trips WHERE trip_id = ?", arrayOf(tripId)).use { cursor ->
+            cursor.mapRows { getString(0) }.firstOrNull()
+        }
+
     /** Every trip_id -> route_id pair loaded under [prefix] (a [MultiGtfsFeed]'s own "feedN:"),
      * both stripped back to their real, unprefixed form -- the same collision safeguard as
      * [getRouteIdForTrip], batched for [fetchMerged]'s bulk case (matching an entire live feed's
@@ -1461,9 +1470,18 @@ internal fun platformLabelFromStopDesc(stopDesc: String?): String? {
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0
 
-/** ~33ft, kept a round metric value -- see [matchCurrentStopByProximity]'s own doc for why this
- * replaced a relative "is the next stop closer than the current one" comparison. */
-private const val PROXIMITY_ARRIVAL_RADIUS_METERS = 10
+/** ~165ft, kept a round metric value -- see [matchCurrentStopByProximity]'s own doc for why this
+ * replaced a relative "is the next stop closer than the current one" comparison. Expanded from 10
+ * meters (2026-09-12) after the tighter radius was found to miss stops within a single 10-second
+ * poll interval. */
+private const val PROXIMITY_ARRIVAL_RADIUS_METERS = 50
+
+/** See [matchCurrentStopByProximity]'s own doc -- a looser plausibility check than
+ * [PROXIMITY_ARRIVAL_RADIUS_METERS] on purpose: a cold-start hint can legitimately mean the vehicle
+ * is still "en route to" that stop (up to a full inter-stop distance away, per the GTFS-RT spec), not
+ * necessarily already arrived, so a tight radius would reject most correct hints. Still tight enough
+ * to reject a hint that's off by kilometers. */
+private const val COLD_START_HINT_SANITY_RADIUS_METERS = 500
 
 /** See [GtfsRepository.getScheduledTripCandidates]'s own doc for why a trip this close to its own
  * end is excluded outright rather than just ranked normally. */
@@ -1495,11 +1513,10 @@ data class StopProximityMatch(
 
 /**
  * Infers which stop a vehicle currently occupies from its own raw GPS position, for agencies whose
- * VehiclePositions feed never populates current_stop_sequence (confirmed empirically for RIPTA --
- * see [getTripStopLocations]'s own doc). [stops] must be sorted ascending by stop_sequence (as
- * [GtfsRepository.getTripStops] already returns them); [lastMatchedStopSequence] is whatever
- * [StopProximityMatch.stopSequence] this function returned on the previous poll, or null for the
- * first poll of a trip.
+ * VehiclePositions feed never populates current_stop_sequence. [stops] must be sorted ascending by
+ * stop_sequence (as [GtfsRepository.getTripStops] already returns them); [lastMatchedStopSequence] is
+ * whatever [StopProximityMatch.stopSequence] this function returned on the previous poll, or null for
+ * the first poll of a trip.
  *
  * Forward-only once an anchor exists: starting from the last matched stop, only ever advances to
  * the immediate next stop in sequence, and only once the vehicle has come within
@@ -1511,16 +1528,24 @@ data class StopProximityMatch(
  * Deliberately NOT a relative "is the next stop closer than the current one" comparison -- a route
  * that loops or backtracks near itself could put a stop several positions ahead in sequence
  * geometrically closer than the true current one, before the vehicle has actually traveled the
- * real path to reach it, causing an incorrect multi-stop forward jump (confirmed live on a real
- * RIPTA trip). Checking only the immediate next stop's own absolute distance makes a
- * geometrically-close-but-sequentially-distant stop simply never a candidate.
+ * real path to reach it, causing an incorrect multi-stop forward jump. Checking only the immediate
+ * next stop's own absolute distance makes a geometrically-close-but-sequentially-distant stop simply
+ * never a candidate.
  *
- * A null [lastMatchedStopSequence] (first poll) is a special case: a forward-only walk starting at
- * [stops]' own first entry assumes distance to the vehicle roughly decreases monotonically from
- * there, which fails on a long route where the vehicle is actually near the far end -- confirmed
- * live on a RIPTA Route 60 trip, where a vehicle near the end of a ~100-stop route matched to the
- * very first stop instead. So cold start alone gets a one-time global nearest-of-all-stops search
- * to establish a sane anchor; every later poll uses the cheaper walk below.
+ * A null [lastMatchedStopSequence] (first poll, or an anchor that hasn't been established yet) is a
+ * special case with two fallbacks, tried in order:
+ *
+ * 1. [coldStartSequenceHint], when it resolves to a stop actually in [stops] AND the vehicle's own
+ *    GPS position is within [COLD_START_HINT_SANITY_RADIUS_METERS] of that specific stop --
+ *    [GtfsRtTripUpdate.inferCurrentStopSequence] (the intended source for this hint) is only reliable
+ *    when an agency's feed actually prunes already-passed stops, which isn't universal. Requiring GPS
+ *    agreement keeps the hint useful for genuinely close-in disambiguation while discarding it the
+ *    moment it's stale.
+ * 2. Otherwise, a one-time global nearest-of-all-stops search by straight-line distance -- a
+ *    forward-only walk starting at [stops]' own first entry would instead get stuck near the start on
+ *    a long route where the vehicle is actually far along it already.
+ *
+ * Every later poll (an anchor already exists) uses the cheaper, sequence-safe walk below instead.
  */
 fun matchCurrentStopByProximity(
     stops: List<TripStopRow>,
@@ -1528,6 +1553,7 @@ fun matchCurrentStopByProximity(
     vehicleLat: Double,
     vehicleLon: Double,
     lastMatchedStopSequence: Int?,
+    coldStartSequenceHint: Int? = null,
 ): StopProximityMatch? {
     if (stops.isEmpty()) return null
     fun distanceToIndex(index: Int): Double? {
@@ -1539,6 +1565,9 @@ fun matchCurrentStopByProximity(
     var index = lastMatchedStopSequence
         ?.let { seq -> stops.indexOfFirst { it.stopSequence == seq } }
         ?.takeIf { it >= 0 }
+        ?: coldStartSequenceHint
+            ?.let { seq -> stops.indexOfFirst { it.stopSequence == seq } }
+            ?.takeIf { it >= 0 && (distanceToIndex(it) ?: Double.MAX_VALUE) <= COLD_START_HINT_SANITY_RADIUS_METERS }
         ?: (stops.indices.minByOrNull { distanceToIndex(it) ?: Double.MAX_VALUE } ?: 0)
     while (true) {
         val nextDistance = distanceToIndex(index + 1) ?: break
@@ -1551,6 +1580,58 @@ fun matchCurrentStopByProximity(
         distanceMeters = currentDistance,
         distanceToNextStopMeters = distanceToIndex(index + 1),
     )
+}
+
+/**
+ * Shared in-memory anchor for [matchCurrentStopByProximity]'s forward-only walk, keyed to whichever
+ * trip is currently boarded. A rider only ever tracks one boarded trip's live position at a time,
+ * but two independent ViewModels poll it: HomeScreenViewModel, which is alive for the entire
+ * boarded-trip lifetime, and TripDetailViewModel, which is torn down and rebuilt fresh every single
+ * time that screen is navigated to (see [SimpleLightScreen]/[LightScreen]'s own per-navigation
+ * ViewModelStore). A private per-ViewModel anchor field would reset on every Trip Detail revisit
+ * mid-trip, discarding an already-correct match and re-running the riskier cold-start guess from
+ * scratch -- confirmed as the cause of the two screens disagreeing on a real RIPTA trip, since
+ * RIPTA's VehiclePositions feed never populates current_stop_sequence, forcing both screens through
+ * this GPS-proximity path at all (an agency that does populate it never touches this). Cleared only
+ * when the boarded trip's own identity changes -- see HomeScreenViewModel's boardedTripFlow
+ * collector, the sole owner of that transition since it's the one ViewModel alive for the whole
+ * boarded-trip lifetime.
+ */
+object TripPositionAnchor {
+    @Volatile private var tripId: String? = null
+    @Volatile private var stopSequence: Int? = null
+    /** Only meaningful for a trip whose agency has a [TripShapeSource] attached -- see
+     * [matchCurrentStopByShapeProjection]'s own doc. Null for every other agency, and for a
+     * shape-tracked trip until its first successful shape match. Cleared/set independently of
+     * [stopSequence] is intentional: a plain point-radius match (this tier's own fallback when shape
+     * matching itself fails for one poll) still advances [stopSequence] without a corresponding shape
+     * position, since it has none to report. */
+    @Volatile private var distanceAlongShapeMeters: Double? = null
+
+    @Synchronized
+    fun get(forTripId: String): Int? = stopSequence.takeIf { tripId == forTripId }
+
+    @Synchronized
+    fun getShapeDistance(forTripId: String): Double? = distanceAlongShapeMeters.takeIf { tripId == forTripId }
+
+    @Synchronized
+    fun record(forTripId: String, sequence: Int) {
+        tripId = forTripId
+        stopSequence = sequence
+    }
+
+    @Synchronized
+    fun recordShapeDistance(forTripId: String, meters: Double) {
+        tripId = forTripId
+        distanceAlongShapeMeters = meters
+    }
+
+    @Synchronized
+    fun clear() {
+        tripId = null
+        stopSequence = null
+        distanceAlongShapeMeters = null
+    }
 }
 
 /**

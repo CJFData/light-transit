@@ -67,6 +67,9 @@ enum class GtfsAgency(
         "https://pico-transit-proxy.data-32b.workers.dev/ripta/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/ripta/vehiclepositions",
         timeZoneId = "America/New_York",
+        // Pilot agency for TripShapeSource -- see StaticGtfsShapeSource's own doc for why this reads
+        // shapes.txt on demand from the already-downloaded zip rather than through ingestion.
+        components = listOf(StaticGtfsShapeSource),
     ),
     RTD(
         "rtd",
@@ -1231,6 +1234,8 @@ enum class GtfsAgency(
         "https://pico-transit-proxy.data-32b.workers.dev/wego_nashville/vehiclepositions",
         timeZoneId = "America/Chicago",
     ),
+
+
     ;
 
     /** Cached lookup -- [ZoneId.of] parses/interns the zone's rules, no need to redo that on every

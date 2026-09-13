@@ -8,8 +8,10 @@ import java.io.BufferedReader
  * Minimal RFC 4180 line splitter: handles quoted fields, embedded commas, and "" as an escaped
  * quote. No CSV library is in the SDK's allowed-dependency list, and GTFS fields like
  * route_long_name/stop_name routinely contain commas, so a plain split(",") would corrupt rows.
+ * Internal (not private) so a reader that isn't writing into SQLite at all -- e.g.
+ * [TripShapeSource]'s own on-demand shapes.txt scan -- can reuse it without duplicating this parser.
  */
-private fun parseCsvLine(line: String): List<String> {
+internal fun parseCsvLine(line: String): List<String> {
     val fields = mutableListOf<String>()
     val field = StringBuilder()
     var inQuotes = false

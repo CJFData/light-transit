@@ -55,6 +55,16 @@ private val ingestMutex = Mutex()
 fun gtfsDbFile(filesDir: File, agency: GtfsAgency): File =
     File(filesDir, "gtfs/${agency.id}/transit.db")
 
+/** Path to an agency's own already-downloaded primary static feed zip -- the same file [ingest]
+ * downloads into and parses from, kept on disk afterward rather than deleted. Only ever the primary
+ * feed's zip (index 0 in [ingestInternal]'s own `zipFiles`, always named "gtfs.zip"); an agency with
+ * a [MultiGtfsFeed] secondary static feed has its own separate "gtfs-N.zip" this doesn't resolve --
+ * out of scope for [TripShapeSource]'s current pilot, which only reads this for RIPTA (no secondary
+ * feeds). Reused (rather than re-downloaded) so a shape lookup costs nothing beyond ordinary
+ * schedule ingestion the rider already paid for. */
+fun gtfsZipFile(filesDir: File, agency: GtfsAgency): File =
+    File(filesDir, "gtfs/${agency.id}/gtfs.zip")
+
 /** Deletes every agency's downloaded schedule (zip, database, and cached ETag/schema metadata) --
  * the Settings screen's "Clear schedule cache" action. A no-op if nothing's downloaded yet. Bumps
  * [GtfsCacheClearedSignal] so HomeScreenViewModel can re-ingest the currently selected agency,

@@ -50,6 +50,10 @@ import com.thelightphone.transit.gtfs.StopPredictionSource
 import com.thelightphone.transit.gtfs.fetchTripUpdate
 import com.thelightphone.transit.gtfs.fetchVehiclePosition
 import com.thelightphone.transit.gtfs.matchCurrentStopByProximity
+import com.thelightphone.transit.gtfs.matchCurrentStopByShapeProjection
+import com.thelightphone.transit.gtfs.gtfsZipFile
+import com.thelightphone.transit.gtfs.TripPositionAnchor
+import com.thelightphone.transit.gtfs.TripShapeSource
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.TripStopRow
 import com.thelightphone.transit.gtfs.computeArrivalEta
@@ -310,12 +314,6 @@ class HomeScreenViewModel(
     private val tripStatusRefreshTrigger = Channel<Unit>(Channel.CONFLATED)
     private var tripStatusPollJob: Job? = null
 
-    /** Anchor for [matchCurrentStopByProximity]'s flicker-resistant walk across successive polls -- a
-     * local var in [refreshActiveTripStatus] wouldn't persist between calls, since this function is
-     * re-entered fresh every cycle. Reset to null on every boarded-trip change so a new trip doesn't
-     * inherit the previous one's anchor. */
-    private var lastMatchedStopSequence: Int? = null
-
     /** Null until Stage 1's onboarding modal (or a Settings-driven switch) picks one -- see the
      * defaultAgencyFlow collector in [init]. Declared, along with every field below through
      * [feedAttribution], before that init block: viewModelScope uses Dispatchers.Main.immediate, so
@@ -374,10 +372,19 @@ class HomeScreenViewModel(
 
     init {
         viewModelScope.launch {
-            boardedTripPreferences.boardedTripFlow.collect {
-                boardedTrip.value = it
-                if (it == null) activeTripStatus.value = null
-                lastMatchedStopSequence = null
+            boardedTripPreferences.boardedTripFlow.collect { newTrip ->
+                // TripPositionAnchor is shared with TripDetailViewModel (see its own doc) and must
+                // only be wiped when the boarded trip's own identity actually changes -- not on
+                // every re-emission of the same trip's record, e.g. picking/clearing the alight
+                // stop on Trip Detail also rewrites this same DataStore entry and re-emits it.
+                // Resetting on every emission discarded an already-advancing anchor mid-ride,
+                // confirmed live on RIPTA as the cause of this progress bar looking permanently
+                // frozen after the alight stop was set.
+                if (newTrip?.tripId != boardedTrip.value?.tripId) {
+                    TripPositionAnchor.clear()
+                }
+                boardedTrip.value = newTrip
+                if (newTrip == null) activeTripStatus.value = null
                 tripStatusRefreshTrigger.trySend(Unit)
             }
         }
@@ -615,30 +622,58 @@ class HomeScreenViewModel(
             // Computed once, reused both in the fallback chain below and in isClosestMatch's own
             // check, so the two can never drift out of sync with each other.
             val tripUpdateInferredSequence = tripUpdate?.inferCurrentStopSequence()
+            // Shared by both the shape and point-radius tiers below -- computed once rather than per
+            // tier, since either (or both, across successive polls) may need it.
+            val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
+            // Path-aware alternative to matchCurrentStopByProximity, tried first when this agency has
+            // one -- see matchCurrentStopByShapeProjection's own doc for why point-radius matching
+            // alone wasn't enough (RIPTA confirmed live: a real GPS cadence of ~30-60s let a vehicle
+            // advance many stops between two distinct position reports, stalling the point-radius walk
+            // for 7+ minutes since it needs a sample within PROXIMITY_ARRIVAL_RADIUS_METERS of *each*
+            // intervening stop). A trip whose agency has no TripShapeSource (every agency but RIPTA
+            // today) pays nothing here -- shapeSource is null, matchViaShape returns null immediately,
+            // and the existing point-radius tier right below it runs exactly as before.
+            val shapeSource = trip.agency.component<TripShapeSource>()
+            suspend fun matchViaShape(lat: Double, lon: Double, bearing: Float?): Int? {
+                val source = shapeSource ?: return null
+                val zipFile = gtfsZipFile(filesDir, trip.agency)
+                val points = source.shapePoints(trip.tripId, repository, zipFile) ?: return null
+                val stopDistances = source.stopDistancesAlongShape(trip.tripId, repository, zipFile, stops, stopLocations)
+                    ?: return null
+                val match = matchCurrentStopByShapeProjection(
+                    stops, stopDistances, points, lat, lon, bearing,
+                    TripPositionAnchor.getShapeDistance(trip.tripId), tripUpdateInferredSequence,
+                ) ?: return null
+                TripPositionAnchor.recordShapeDistance(trip.tripId, match.distanceAlongShapeMeters)
+                return match.stopSequence
+            }
 
             // VehiclePositions' own current_stop_sequence is preferred when present; falls back to
-            // GPS-proximity matching, and only as a last resort to inferring it from TripUpdates' own
-            // remaining stops -- same fallback chain as TripDetailScreen's poll loop, needed since RIPTA's
-            // feed never populates current_stop_sequence (see matchCurrentStopByProximity). Without this,
-            // RIPTA's progress bar never moves even though Trip Detail shows live movement for the same trip.
+            // shape-aware matching, then GPS-proximity matching, and only as a last resort to inferring
+            // it from TripUpdates' own remaining stops -- same fallback chain as TripDetailScreen's poll
+            // loop, needed since RIPTA's feed never populates current_stop_sequence (see
+            // matchCurrentStopByProximity). Without this, RIPTA's progress bar never moves even though
+            // Trip Detail shows live movement for the same trip.
             val currentSeq = matchedStopFromVehicle?.stopSequence
                 ?: liveVehicleInfo?.currentStopSequence
+                ?: liveVehicleInfo?.let { info -> matchViaShape(info.latitude, info.longitude, null) }
                 ?: liveVehicleInfo?.let { info ->
-                    val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
                     matchCurrentStopByProximity(
-                        stops, stopLocations, info.latitude, info.longitude, lastMatchedStopSequence,
+                        stops, stopLocations, info.latitude, info.longitude,
+                        TripPositionAnchor.get(trip.tripId), coldStartSequenceHint = tripUpdateInferredSequence,
                     )
                 }?.stopSequence
                 ?: vehicle?.currentStopSequence
+                ?: vehicle?.position?.let { pos -> matchViaShape(pos.latitude.toDouble(), pos.longitude.toDouble(), pos.bearing) }
                 ?: vehicle?.position?.let { pos ->
-                    val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
                     matchCurrentStopByProximity(
-                        stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(), lastMatchedStopSequence,
+                        stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(),
+                        TripPositionAnchor.get(trip.tripId), coldStartSequenceHint = tripUpdateInferredSequence,
                     )
                 }?.stopSequence
                 ?: tripUpdateInferredSequence
                 ?: matchedStopFromFuzzy?.stopSequence
-            lastMatchedStopSequence = currentSeq ?: lastMatchedStopSequence
+            currentSeq?.let { TripPositionAnchor.record(trip.tripId, it) }
             // True only when nothing above this point resolved a stop -- matchedStopFromFuzzy is
             // exactly what filled currentSeq's last fallback slot, so this stays in sync with the
             // priority chain above by construction. A rider's own pinned run is never "closest
