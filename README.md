@@ -8,6 +8,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 
 ## 🔄 Recent updates
 
+- 🐛 **Fixed RIPTA's live position drifting or freezing** — RIPTA's vehicle feed doesn't report which stop a bus is at directly, so Pico Transit has to work it out from GPS alone; that could pick the wrong stop off a stale signal, let the home screen and Trip Detail disagree with each other about where the bus was, or freeze in place for several minutes once real GPS updates came in more slowly than stops passed by. Home and Trip Detail now share one tracked position, validate that signal against real GPS before trusting it, and (for RIPTA specifically) match a vehicle's actual GPS against its route's real path instead of just checking distance to each stop one at a time — catching up correctly even when several stops pass between updates.
 - 🎶 **Nashville's WeGo Public Transit, live** — added in honor of Dolly Parton ("And I Will Always Love You"), Music City's own agency joins with full live tracking from day one: real-time arrivals and vehicles right on the map, not just a static schedule.
 - 🚌 **NYC Bus, live** — all 5 boroughs (Bronx, Brooklyn, Manhattan, Queens, Staten Island) plus MTA Bus Company, each its own selectable schedule, all sharing MTA's one combined live feed so real buses show up on the map and in Trip Detail regardless of which borough you picked. Also fixed along the way: "Choose Route" was listing every one of NYC's 306 citywide bus routes for every borough (MTA republishes the same route catalog in all 5 division feeds) — now scoped to only the routes that borough actually runs.
 - 🚇 **NYC Subway, genuinely live** — not an approximation: subway trip_ids pack their own scheduled start time in MTA's encoding, which Pico Transit now decodes and matches back to the real scheduled trip, the same certainty LIRR/Metro-North already had. Fixed along the way: that decoding was only ever being applied to 7 of the 8 line-group feeds, so A/C/E trains never showed live data at all until now. Also faster — all 8 feeds are now merged into one request server-side, instead of the app fetching all 8 itself on every poll.
@@ -31,6 +32,7 @@ Pico Transit can be used alongside the light phone's directions tool for more co
 
 - 🚏 **More agencies coming soon** — thanks to community support, Pico Transit's agency list keeps growing beyond where it started.
 - ⚠️ **Service alerts** — surfacing GTFS-RT's Alerts feed (detours, delays, service changes) isn't wired in yet; today Pico Transit only reads TripUpdates and VehiclePositions. Planned so riders get a heads-up on disruptions, not just a vehicle that's simply running late.
+- 🗺️ **Trip shape maps** — Pico Transit can now read a trip's actual route path, not just its stops (currently RIPTA only); drawing that real path on the map is next, so you can see where the road or rails actually go between stops instead of a straight line connecting them.
 
 ## 🗺️ What can it do?
 
