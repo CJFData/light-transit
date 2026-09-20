@@ -1,5 +1,6 @@
 package com.thelightphone.transit
 
+import android.Manifest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import com.thelightphone.transit.gtfs.DeparturePreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.clearAllCachedSchedules
+import com.thelightphone.transit.gtfs.LocationPreferences
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.RegionalGroup
@@ -29,6 +31,11 @@ import com.thelightphone.transit.gtfs.TripDetailPreferences
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
+import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.checkPermission
+import com.thelightphone.sdk.rememberPermissionRequestLauncher
+import com.thelightphone.sdk.shared.LightServiceMethod
+import com.thelightphone.sdk.shared.getOrNull
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
@@ -58,6 +65,7 @@ class SettingsViewModel(
     private val networkPreferences: NetworkPreferences,
     private val runSelectionPreferences: RunSelectionPreferences,
     private val tripDetailPreferences: TripDetailPreferences,
+    private val locationPreferences: LocationPreferences,
     private val filesDir: File,
 ) : LightViewModel<Unit>() {
 
@@ -153,6 +161,20 @@ class SettingsViewModel(
         get() = _showStopsBeforeBoardingEnabled
     private val _showStopsBeforeBoardingEnabled = MutableStateFlow(false)
 
+    /** Explore's own "use my location" toggle -- separate from the OS/LightOS permission grant
+     * itself, which this screen has no way to revoke; see [LocationPreferences]'s own doc. */
+    val locationEnabled: StateFlow<Boolean>
+        get() = _locationEnabled
+    private val _locationEnabled = MutableStateFlow(true)
+
+    /** Live OS/LightOS permission status, re-checked on every [onScreenShow] (covers coming back
+     * from the system permission prompt or from OS app settings) -- unlike every other field on
+     * this screen, this isn't a stored preference, just a live query via [checkPermission]. Null
+     * until the first check completes. */
+    val locationPermissionStatus: StateFlow<LightServiceMethod.GetPermission.Result?>
+        get() = _locationPermissionStatus
+    private val _locationPermissionStatus = MutableStateFlow<LightServiceMethod.GetPermission.Result?>(null)
+
     init {
         viewModelScope.launch {
             agencyPreferences.defaultAgencyFlow.collect { _defaultAgency.value = it }
@@ -223,6 +245,23 @@ class SettingsViewModel(
         viewModelScope.launch {
             runSelectionPreferences.runStepperEnabledFlow.collect { _runStepperEnabled.value = it }
         }
+        viewModelScope.launch {
+            locationPreferences.locationEnabledFlow.collect { _locationEnabled.value = it }
+        }
+    }
+
+    override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
+        super.onScreenShow(screen)
+        // Refreshed on every visit, not just once, so returning from the system permission prompt
+        // (or from a manual revoke in OS app settings) is reflected without leaving and re-entering.
+        viewModelScope.launch(Dispatchers.IO) {
+            _locationPermissionStatus.value = checkPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                .getOrNull()?.permissionResult
+        }
+    }
+
+    fun setLocationEnabled(enabled: Boolean) {
+        viewModelScope.launch { locationPreferences.setLocationEnabled(enabled) }
     }
 
     /** Called from the AgencyPickerModal opened by the "Transit Agency" row below -- persisting the
@@ -348,6 +387,7 @@ class SettingsScreen(
         NetworkPreferences(lightContext.dataStore),
         RunSelectionPreferences(lightContext.dataStore),
         TripDetailPreferences(lightContext.dataStore),
+        LocationPreferences(lightContext.dataStore),
         lightContext.filesDir,
     )
 
@@ -398,7 +438,10 @@ class SettingsScreen(
         val runSelectionEnabled by viewModel.runSelectionEnabled.collectAsState()
         val runStepperEnabled by viewModel.runStepperEnabled.collectAsState()
         val showStopsBeforeBoardingEnabled by viewModel.showStopsBeforeBoardingEnabled.collectAsState()
+        val locationEnabled by viewModel.locationEnabled.collectAsState()
+        val locationPermissionStatus by viewModel.locationPermissionStatus.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
+        val locationPermissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.ACCESS_FINE_LOCATION)
 
         LightTheme(colors = themeColors) {
             Column(
@@ -431,6 +474,7 @@ class SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(start = 16.dp)
                         .lightClickable {
                             // Same AgencyPickerModal Stage 1 onboarding uses, just with a close
                             // button (allowCancel = true) since -- unlike first launch -- there's
@@ -468,6 +512,7 @@ class SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .padding(start = 16.dp)
                             .lightClickable {
                                 navigateTo(screenFactory = { activity -> ScheduleSelectionScreen(activity, primaryRegion) })
                             }
@@ -482,6 +527,43 @@ class SettingsScreen(
                             icon = LightIcons.ARROW_RIGHT,
                             size = 1f,
                             contentDescription = "Manage additional schedules",
+                        )
+                    }
+                }
+
+                LightText(
+                    text = "Location (Testing)",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "Lets Explore rank stops by distance from where you are, instead of only by a searched address.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Use my location", locationEnabled, viewModel::setLocationEnabled)
+                if (locationEnabled) {
+                    val statusText = when (locationPermissionStatus) {
+                        LightServiceMethod.GetPermission.Result.Granted -> "Location access is enabled."
+                        LightServiceMethod.GetPermission.Result.Denied,
+                        LightServiceMethod.GetPermission.Result.BlockedByServer -> "Location access was denied."
+                        LightServiceMethod.GetPermission.Result.Unknown, null -> "Location access hasn't been granted yet."
+                    }
+                    LightText(
+                        text = statusText,
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+                    )
+                    if (locationPermissionStatus != LightServiceMethod.GetPermission.Result.Granted) {
+                        LightText(
+                            text = "Enable Location Access",
+                            variant = LightTextVariant.Copy,
+                            modifier = Modifier
+                                .lightClickable { locationPermissionLauncher?.launch() }
+                                .padding(bottom = 16.dp),
                         )
                     }
                 }

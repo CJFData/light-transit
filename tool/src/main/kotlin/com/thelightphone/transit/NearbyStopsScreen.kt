@@ -1,5 +1,6 @@
 package com.thelightphone.transit
 
+import android.Manifest
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
@@ -26,14 +28,19 @@ import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3KeyboardViewModel
 import com.thelightphone.transit.gtfs.GeocodeResult
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
-import com.thelightphone.transit.gtfs.IpGeolocator
+import com.thelightphone.transit.gtfs.LocationPreferences
 import com.thelightphone.transit.gtfs.NominatimGeocoder
 import com.thelightphone.transit.gtfs.StopWithDistance
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.callRemoteServiceMethod
+import com.thelightphone.sdk.checkPermission
 import com.thelightphone.sdk.rememberKeyboardOptions
+import com.thelightphone.sdk.rememberPermissionRequestLauncher
+import com.thelightphone.sdk.shared.LightServiceMethod
+import com.thelightphone.sdk.shared.getOrNull
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
@@ -48,54 +55,179 @@ import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 private const val METERS_PER_MILE = 1609.344
 private const val NEARBY_STOP_LIMIT = 20
+// Polls GetCurrentLocation for ~12s (LightOS needs a moment to acquire a fix after
+// RequestLocationUpdates) before giving up and falling back to manual search.
+private const val LOCATION_POLL_ATTEMPTS = 8
+private const val LOCATION_POLL_INTERVAL_MS = 1500L
 
+/** Which action "Try Again" performs for a given [NearbyStopsMode.Error] -- a GPS/ranking failure
+ * retries the location fix, a geocoding failure reopens address entry instead. */
+enum class NearbyStopsErrorRetry { Location, Search }
+
+/**
+ * This screen has one job -- "closest stops to a location" -- and a search only ever changes
+ * *which* location that is (GPS vs. a geocoded address), never what the screen does. [Input] /
+ * [Searching] / [GeocodeResults] are a full-screen takeover for typing an address (same as this
+ * screen's own former IP-geolocation prefill flow); everything else shares one frame with a pinned
+ * Search/Current Location row (see [NearbyStopsScreen.Content]).
+ */
 sealed class NearbyStopsMode {
-    /** Initial state: resolving an IP-based approximate location to pre-fill the search field. */
+    /** Initial state, and re-entered on resume: checking/awaiting GPS location permission. */
     object Locating : NearbyStopsMode()
-    data class LocationInput(val prefillText: String = "") : NearbyStopsMode()
+    /** Location permission was denied (or not yet granted) -- non-blocking; Search stays usable. */
+    object NeedsPermission : NearbyStopsMode()
+    /** The rider turned location off in Settings ([com.thelightphone.transit.gtfs.LocationPreferences]) --
+     * distinct from [NeedsPermission] since there's nothing to grant here, only a Settings link. */
+    object LocationOff : NearbyStopsMode()
+    data class Input(val prefillText: String = "") : NearbyStopsMode()
     object Searching : NearbyStopsMode()
     data class GeocodeResults(val results: List<GeocodeResult>) : NearbyStopsMode()
-    data class NearbyStops(val stops: List<StopWithDistance>) : NearbyStopsMode()
-    data class Error(val message: String) : NearbyStopsMode()
+    /** Ranking stops around a freshly-acquired GPS fix or a newly-picked search result. */
+    object Ranking : NearbyStopsMode()
+    /** [anchorLabel] is null while ranked against the GPS fix, or the picked [GeocodeResult]'s own
+     * display name when ranked against a searched address instead -- drives both the pinned header
+     * row's icon/text (see [NearbyStopsScreen.Content]) and which retry a ranking failure offers. */
+    data class NearbyStops(val stops: List<StopWithDistance>, val anchorLabel: String?) : NearbyStopsMode()
+    data class Error(val message: String, val retry: NearbyStopsErrorRetry) : NearbyStopsMode()
 }
 
 fun StopWithDistance.displayLabel(): String = stopName?.takeIf { it.isNotBlank() } ?: "Stop $stopId"
 
 fun StopWithDistance.distanceLabel(): String = "%.1f mi".format(distanceMeters / METERS_PER_MILE)
 
-class NearbyStopsViewModel(dbFile: File) : LightViewModel<Unit>() {
+class NearbyStopsViewModel(dbFile: File, private val locationPreferences: LocationPreferences) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
     private val geocoder = NominatimGeocoder()
-    private val ipGeolocator = IpGeolocator()
 
     private val _mode = MutableStateFlow<NearbyStopsMode>(NearbyStopsMode.Locating)
     val mode: StateFlow<NearbyStopsMode> = _mode
 
+    /** Cached once GPS gives a real fix, so "recenter" is instant when possible instead of
+     * re-polling from scratch. */
+    private var lastGpsFix: Pair<Double, Double>? = null
+
+    /** Snapshot of [_mode] taken by [openSearch], so cancelling out of address entry restores
+     * exactly what was on screen before rather than always bouncing back to [NearbyStopsMode.Locating]. */
+    private var modeBeforeSearch: NearbyStopsMode? = null
+
+    /** Drives whether the Search Location screen offers "Current Location" at all -- mirrored from
+     * [LocationPreferences] into a plain [StateFlow] the Composable can collect, same pattern
+     * [SettingsViewModel] already uses for its own preference-backed fields. */
+    val locationEnabled: StateFlow<Boolean>
+        get() = _locationEnabled
+    private val _locationEnabled = MutableStateFlow(true)
+
+    init {
+        viewModelScope.launch {
+            locationPreferences.locationEnabledFlow.collect { _locationEnabled.value = it }
+        }
+    }
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
-        // Only the very first time this screen becomes visible -- onScreenShow fires again on
-        // returning here from a child screen (e.g. backing out of Upcoming Arrivals), and without
-        // this guard that re-ran IP geolocation and reset straight back to the search prompt,
-        // discarding whatever search results/stop list was already on screen.
-        if (_mode.value !is NearbyStopsMode.Locating) return
+        // Runs on the first appearance, and again on any resume while still Locating/NeedsPermission/
+        // LocationOff (e.g. returning from the system permission prompt Home may have already
+        // triggered, or from flipping the Settings toggle) -- but never once real content (a stop
+        // list, an in-progress search) is on screen, since that would discard it.
+        if (_mode.value !is NearbyStopsMode.Locating &&
+            _mode.value !is NearbyStopsMode.NeedsPermission &&
+            _mode.value !is NearbyStopsMode.LocationOff
+        ) return
         viewModelScope.launch(Dispatchers.IO) {
-            val prefill = try {
-                ipGeolocator.locate().displayName
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e("NearbyStopsScreen", "IP geolocation failed, falling back to blank input", e)
-                ""
+            locateFromGps()
+        }
+    }
+
+    private suspend fun locateFromGps() {
+        if (!locationPreferences.locationEnabledFlow.first()) {
+            _mode.value = NearbyStopsMode.LocationOff
+            return
+        }
+        val granted = checkPermission(Manifest.permission.ACCESS_FINE_LOCATION).getOrNull()
+            ?.permissionResult == LightServiceMethod.GetPermission.Result.Granted
+        if (!granted) {
+            _mode.value = NearbyStopsMode.NeedsPermission
+            return
+        }
+        _mode.value = NearbyStopsMode.Locating
+        // Home already primes this lease when "Explore" is tapped; requesting it again here is
+        // idempotent (a renewal) and covers a direct/returning entry that skipped Home's priming.
+        callRemoteServiceMethod(LightServiceMethod.RequestLocationUpdates, Unit)
+        try {
+            repeat(LOCATION_POLL_ATTEMPTS) { attempt ->
+                val fix = callRemoteServiceMethod(LightServiceMethod.GetCurrentLocation, Unit).getOrNull()
+                val lat = fix?.latitude
+                val lon = fix?.longitude
+                if (lat != null && lon != null) {
+                    lastGpsFix = lat to lon
+                    rankAndShow(lat, lon, anchorLabel = null)
+                    return
+                }
+                if (attempt < LOCATION_POLL_ATTEMPTS - 1) delay(LOCATION_POLL_INTERVAL_MS)
             }
-            _mode.value = NearbyStopsMode.LocationInput(prefillText = prefill)
+            // No fix in time -- Search stays pinned above regardless, so this doesn't dead-end.
+            _mode.value = NearbyStopsMode.Error("Couldn't find your location.", NearbyStopsErrorRetry.Location)
+        } finally {
+            withContext(NonCancellable) {
+                callRemoteServiceMethod(LightServiceMethod.ReleaseLocationUpdates, Unit)
+            }
+        }
+    }
+
+    private suspend fun rankAndShow(lat: Double, lon: Double, anchorLabel: String?) {
+        _mode.value = try {
+            NearbyStopsMode.NearbyStops(repository.rankStopsByDistance(lat, lon, NEARBY_STOP_LIMIT), anchorLabel)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("NearbyStopsScreen", "Failed to rank nearby stops", e)
+            NearbyStopsMode.Error(
+                "Unable to load nearby stops.",
+                retry = if (anchorLabel != null) NearbyStopsErrorRetry.Search else NearbyStopsErrorRetry.Location,
+            )
+        }
+    }
+
+    fun retryLocation() {
+        viewModelScope.launch(Dispatchers.IO) { locateFromGps() }
+    }
+
+    /** Switches the ranking anchor back to GPS -- called from the Search Location screen's own
+     * "Current Location" option, not just a same-screen "recenter" action. */
+    fun recenterToGps() {
+        modeBeforeSearch = null
+        val fix = lastGpsFix
+        if (fix != null) {
+            viewModelScope.launch(Dispatchers.IO) { rankAndShow(fix.first, fix.second, anchorLabel = null) }
+        } else {
+            retryLocation()
+        }
+    }
+
+    fun openSearch() {
+        modeBeforeSearch = _mode.value
+        _mode.value = NearbyStopsMode.Input()
+    }
+
+    fun cancelSearch() {
+        val restore = modeBeforeSearch
+        modeBeforeSearch = null
+        if (restore != null) {
+            _mode.value = restore
+        } else {
+            retryLocation()
         }
     }
 
@@ -107,7 +239,7 @@ class NearbyStopsViewModel(dbFile: File) : LightViewModel<Unit>() {
             _mode.value = try {
                 val results = geocoder.search(text)
                 if (results.isEmpty()) {
-                    NearbyStopsMode.Error("No matching location found.")
+                    NearbyStopsMode.Error("No matching location found.", NearbyStopsErrorRetry.Search)
                 } else {
                     NearbyStopsMode.GeocodeResults(results)
                 }
@@ -115,35 +247,21 @@ class NearbyStopsViewModel(dbFile: File) : LightViewModel<Unit>() {
                 throw e
             } catch (e: Exception) {
                 Log.e("NearbyStopsScreen", "Geocoding failed for '$text'", e)
-                NearbyStopsMode.Error("Unable to search that location.")
+                NearbyStopsMode.Error("Unable to search that location.", NearbyStopsErrorRetry.Search)
             }
         }
     }
 
     fun selectGeocodeResult(result: GeocodeResult) {
-        _mode.value = NearbyStopsMode.Searching
-        viewModelScope.launch(Dispatchers.IO) {
-            _mode.value = try {
-                val ranked = repository.rankStopsByDistance(result.lat, result.lon, NEARBY_STOP_LIMIT)
-                NearbyStopsMode.NearbyStops(ranked)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e("NearbyStopsScreen", "Failed to rank nearby stops", e)
-                NearbyStopsMode.Error("Unable to load nearby stops.")
-            }
-        }
-    }
-
-    fun backToInput() {
-        _mode.value = NearbyStopsMode.LocationInput()
+        modeBeforeSearch = null
+        _mode.value = NearbyStopsMode.Ranking
+        viewModelScope.launch(Dispatchers.IO) { rankAndShow(result.lat, result.lon, anchorLabel = result.displayName) }
     }
 
     override fun onCleared() {
         super.onCleared()
         repository.close()
         geocoder.close()
-        ipGeolocator.close()
     }
 }
 
@@ -156,16 +274,19 @@ class NearbyStopsScreen(
     override val viewModelClass: Class<NearbyStopsViewModel>
         get() = NearbyStopsViewModel::class.java
 
-    override fun createViewModel(): NearbyStopsViewModel = NearbyStopsViewModel(dbFile)
+    override fun createViewModel(): NearbyStopsViewModel =
+        NearbyStopsViewModel(dbFile, LocationPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
         val mode by viewModel.mode.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
         val keyboardOptionsFlow = rememberKeyboardOptions()
+        val locationPermissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.ACCESS_FINE_LOCATION)
 
         when (val m = mode) {
-            is NearbyStopsMode.LocationInput -> {
+            is NearbyStopsMode.Input -> {
+                val locationEnabled by viewModel.locationEnabled.collectAsState()
                 val textFieldState = rememberTextFieldState(m.prefillText)
                 // Submit-triggered, not live-filtered like Stations search -- this hits Nominatim's
                 // free geocoding API (see this app's own "be kind to their free APIs" note), so it
@@ -185,7 +306,7 @@ class NearbyStopsScreen(
                             .background(LightThemeTokens.colors.background)
                     ) {
                         LightTopBar(
-                            leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                            leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { viewModel.cancelSearch() }),
                             center = LightTopBarCenter.Text("Search Location"),
                         )
                         Column(modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp)) {
@@ -218,6 +339,24 @@ class NearbyStopsScreen(
                             )
                             LightText(text = "Search", variant = LightTextVariant.Copy, lighten = true)
                         }
+                        // Always offered below Search -- the one exception is location turned off
+                        // in Settings, since there's then no GPS fix for this to switch to at all.
+                        if (locationEnabled) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .lightClickable { viewModel.recenterToGps() }
+                                    .padding(horizontal = 32.dp, vertical = 8.dp),
+                            ) {
+                                LightIcon(
+                                    icon = LightIcons.CROSSHAIR,
+                                    size = 1.2f,
+                                    contentDescription = "Current Location",
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                LightText(text = "Current Location", variant = LightTextVariant.Copy, lighten = true)
+                            }
+                        }
                         Spacer(modifier = Modifier.weight(1f))
                         LightEmbeddedLp3Keyboard(viewModel = keyboardViewModel)
                     }
@@ -238,15 +377,94 @@ class NearbyStopsScreen(
                         },
                     )
                     Column(modifier = Modifier.weight(1f).padding(32.dp)) {
+                    // Same row structure/spacing StationListScreen's own "Search stations" row uses
+                    // (icon size 1.2f, lighten=true text, 12dp bottom gap, no divider) -- pinned
+                    // regardless of body state below, since searching only ever changes which
+                    // location this screen is ranking stops against, so it stays reachable the whole
+                    // time. Also doubles as a live indicator of the current anchor: the magnifying
+                    // glass is always shown (implying it's always replaceable), with either the
+                    // searched address's own name, or "Current Location" plus a trailing crosshair
+                    // when ranked against GPS instead. Tapping it always opens Search Location, which
+                    // offers "Current Location" as its own option to switch back (see the Input
+                    // branch above).
+                    val searchedLabel = (m as? NearbyStopsMode.NearbyStops)?.anchorLabel
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable { viewModel.openSearch() }
+                            .padding(bottom = 12.dp),
+                    ) {
+                        LightIcon(
+                            icon = LightIcons.SEARCH,
+                            size = 1.2f,
+                            contentDescription = "Search",
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                        if (searchedLabel != null) {
+                            LightText(
+                                text = searchedLabel,
+                                variant = LightTextVariant.Copy,
+                                lighten = true,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            LightText(text = "Current Location", variant = LightTextVariant.Copy, lighten = true)
+                            LightIcon(
+                                icon = LightIcons.CROSSHAIR,
+                                size = 1f,
+                                contentDescription = "Tracking current location",
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
                     when (m) {
                         is NearbyStopsMode.Locating -> LightText(
-                            text = "Finding your approximate location...",
+                            text = "Finding your location...",
                             variant = LightTextVariant.Copy,
                             lighten = true,
                         )
 
+                        is NearbyStopsMode.NeedsPermission -> {
+                            LightText(
+                                text = "Enable location access to see stops near you.",
+                                variant = LightTextVariant.Copy,
+                                lighten = true,
+                                modifier = Modifier.padding(bottom = 16.dp),
+                            )
+                            LightText(
+                                text = "Enable Location",
+                                variant = LightTextVariant.Copy,
+                                modifier = Modifier.lightClickable { locationPermissionLauncher?.launch() },
+                            )
+                        }
+
+                        is NearbyStopsMode.LocationOff -> {
+                            LightText(
+                                text = "Location is turned off.",
+                                variant = LightTextVariant.Copy,
+                                lighten = true,
+                                modifier = Modifier.padding(bottom = 16.dp),
+                            )
+                            LightText(
+                                text = "Go to Settings",
+                                variant = LightTextVariant.Copy,
+                                modifier = Modifier.lightClickable {
+                                    navigateTo(screenFactory = { activity -> SettingsScreen(activity) })
+                                },
+                            )
+                        }
+
                         is NearbyStopsMode.Searching -> LightText(
                             text = "Searching...",
+                            variant = LightTextVariant.Copy,
+                            lighten = true,
+                        )
+
+                        is NearbyStopsMode.Ranking -> LightText(
+                            text = "Loading nearby stops...",
                             variant = LightTextVariant.Copy,
                             lighten = true,
                         )
@@ -258,33 +476,19 @@ class NearbyStopsScreen(
                                 lighten = true,
                                 modifier = Modifier.padding(bottom = 16.dp),
                             )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.lightClickable { viewModel.backToInput() },
-                            ) {
-                                LightIcon(
-                                    icon = LightIcons.SEARCH,
-                                    size = 1f,
-                                    modifier = Modifier.padding(end = 8.dp),
-                                )
-                                LightText(text = "Search Again", variant = LightTextVariant.Copy)
-                            }
+                            LightText(
+                                text = "Try Again",
+                                variant = LightTextVariant.Copy,
+                                modifier = Modifier.lightClickable {
+                                    when (m.retry) {
+                                        NearbyStopsErrorRetry.Location -> viewModel.retryLocation()
+                                        NearbyStopsErrorRetry.Search -> viewModel.openSearch()
+                                    }
+                                },
+                            )
                         }
 
                         is NearbyStopsMode.GeocodeResults -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .lightClickable { viewModel.backToInput() }
-                                    .padding(bottom = 16.dp),
-                            ) {
-                                LightIcon(
-                                    icon = LightIcons.SEARCH,
-                                    size = 1f,
-                                    modifier = Modifier.padding(end = 8.dp),
-                                )
-                                LightText(text = "Search Again", variant = LightTextVariant.Copy, lighten = true)
-                            }
                             LazyColumn(modifier = Modifier.weight(1f)) {
                                 items(m.results) { result ->
                                     LightText(
@@ -306,19 +510,6 @@ class NearbyStopsScreen(
                         }
 
                         is NearbyStopsMode.NearbyStops -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .lightClickable { viewModel.backToInput() }
-                                    .padding(bottom = 16.dp),
-                            ) {
-                                LightIcon(
-                                    icon = LightIcons.SEARCH,
-                                    size = 1f,
-                                    modifier = Modifier.padding(end = 8.dp),
-                                )
-                                LightText(text = "Search Again", variant = LightTextVariant.Copy, lighten = true)
-                            }
                             if (m.stops.isEmpty()) {
                                 LightText(
                                     text = "No stops found.",
@@ -389,7 +580,7 @@ class NearbyStopsScreen(
                             )
                         }
 
-                        is NearbyStopsMode.LocationInput -> Unit
+                        is NearbyStopsMode.Input -> Unit
                     }
                     }
                     BackToHomeFooter(onGoBackOnce = { goBack() })

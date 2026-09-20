@@ -43,6 +43,7 @@ import com.thelightphone.transit.gtfs.GtfsRtStopTimeUpdate
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
 import com.thelightphone.transit.gtfs.FuzzyRunTrips
 import com.thelightphone.transit.gtfs.LiveVehicleSource
+import com.thelightphone.transit.gtfs.LocationPreferences
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.MultiGtfsFeed
 import com.thelightphone.transit.gtfs.RegionalGroup
@@ -60,12 +61,18 @@ import com.thelightphone.transit.gtfs.computeArrivalEta
 import com.thelightphone.transit.gtfs.formatGtfsTime
 import com.thelightphone.transit.gtfs.gtfsDbFile
 import com.thelightphone.transit.gtfs.todayForGtfs
+import android.Manifest
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightConnectivity
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.callRemoteServiceMethod
+import com.thelightphone.sdk.checkPermission
+import com.thelightphone.sdk.rememberPermissionRequestLauncher
+import com.thelightphone.sdk.shared.LightServiceMethod
+import com.thelightphone.sdk.shared.getOrNull
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcon
@@ -89,9 +96,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.Instant
@@ -263,6 +272,7 @@ class HomeScreenViewModel(
     private val homeScreenPreferences: HomeScreenPreferences,
     private val connectivity: LightConnectivity,
     private val networkPreferences: NetworkPreferences,
+    private val locationPreferences: LocationPreferences,
 ) : LightViewModel<Unit>() {
 
     private val ingestor = GtfsIngestor(filesDir, connectivity, networkPreferences)
@@ -487,6 +497,24 @@ class HomeScreenViewModel(
 
     fun clearReachedAlightStop() {
         reachedAlightStop.value = null
+    }
+
+    /** Fired the moment "Explore" is tapped, before NearbyStopsScreen opens -- skipped entirely if
+     * the rider has turned location off in Settings ([LocationPreferences]). Otherwise, always
+     * primes LightOS's ~30s update lease (fire-and-forget, harmless without permission -- gives the
+     * GPS radio a beat's head start over waiting for NearbyStopsScreen's own onScreenShow), and
+     * separately -- only if the permission has never been asked about before ([GetPermission.Result.Unknown])
+     * -- fires [requestPermission], the actual system/Light permission prompt, right here while Home
+     * is still the visible screen. A rider who already said no isn't re-prompted on every tap. */
+    fun primeLocation(requestPermission: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!locationPreferences.locationEnabledFlow.first()) return@launch
+            callRemoteServiceMethod(LightServiceMethod.RequestLocationUpdates, Unit)
+            val result = checkPermission(Manifest.permission.ACCESS_FINE_LOCATION).getOrNull()?.permissionResult
+            if (result == LightServiceMethod.GetPermission.Result.Unknown) {
+                withContext(Dispatchers.Main) { requestPermission() }
+            }
+        }
     }
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -876,6 +904,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
             HomeScreenPreferences(lightContext.dataStore),
             lightContext.connectivity,
             NetworkPreferences(lightContext.dataStore),
+            LocationPreferences(lightContext.dataStore),
         )
     }
 
@@ -895,6 +924,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val reachedAlightStop by viewModel.reachedAlightStop.collectAsState()
         val additionalDownloads by viewModel.additionalDownloads.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
+        val locationPermissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.ACCESS_FINE_LOCATION)
 
 
         /** OH this, isn't part of the initial screen, Only on the homescreen and trip detail screen will this appear
@@ -1162,6 +1192,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                     icon = LightIcons.DIRECTIONS_PEDESTRIAN,
                                     contentDescription = if (agency.realtimeTripUpdatesUrl == null) "Explore (Offline)" else "Explore",
                                     onClick = {
+                                        viewModel.primeLocation(requestPermission = { locationPermissionLauncher?.launch() })
                                         navigateTo(screenFactory = { activity ->
                                             NearbyStopsScreen(activity, gtfsDbFile(lightContext.filesDir, agency), agency)
                                         })
