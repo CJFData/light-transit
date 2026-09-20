@@ -167,6 +167,10 @@ class GtfsIngestor(
                 val secondaryFeedName = if (index == 0) null else secondaryFeeds[index - 1].name
                 parseAndLoad(zipFile, db, if (index == 0) "" else "feed$index:", secondaryFeedName, tripDirectionColumn)
             }
+            // Built once, here, rather than up front in openGtfsDatabase -- see that function's own
+            // doc for why building an index against data that's already fully loaded is faster than
+            // maintaining it incrementally across every insert above.
+            createGtfsIndexes(db)
         } finally {
             db.close()
         }

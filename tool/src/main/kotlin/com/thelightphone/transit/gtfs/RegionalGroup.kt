@@ -94,6 +94,26 @@ enum class RegionalGroup(val id: String, val displayName: String, val members: L
      * still be able to pick it individually, same reasoning as it getting its own top-level
      * agency entry in the first place. */
     DENVER("denver", "Denver", listOf(GtfsAgency.RTD, GtfsAgency.BUSTANG)),
+    /** Unlike SF Bay Area, no shared regional aggregator here -- each agency has its own independent
+     * static feed (and, once wired, its own OneBusAway realtime by agency_id), so this membership
+     * list is the only region-scoped mechanism these nine currently share. See each agency's own
+     * doc comment in [GtfsAgency] for why Amtrak/Solid Ground EZ Loop/Seattle Streetcar aren't
+     * included. */
+    PUGET_SOUND(
+        "puget_sound",
+        "Puget Sound",
+        listOf(
+            GtfsAgency.KING_COUNTY_METRO,
+            GtfsAgency.SOUND_TRANSIT,
+            GtfsAgency.PIERCE_TRANSIT,
+            GtfsAgency.COMMUNITY_TRANSIT,
+            GtfsAgency.KITSAP_TRANSIT,
+            GtfsAgency.EVERETT_TRANSIT,
+            GtfsAgency.INTERCITY_TRANSIT,
+            GtfsAgency.WA_STATE_FERRIES,
+            GtfsAgency.SEATTLE_MONORAIL,
+        ),
+    ),
     ;
 
     companion object {

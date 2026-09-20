@@ -1235,6 +1235,99 @@ enum class GtfsAgency(
         timeZoneId = "America/Chicago",
     ),
 
+    // Puget Sound region -- regionalized like NYC/SF Bay Area (see RegionalGroup.PUGET_SOUND), each
+    // agency independently ingested from its own per-agency static feed, not the 261MB consolidated
+    // zip covering all regional operators at once (confirmed via direct inspection: shapes.txt alone
+    // is ~50MB, stop_times.txt ~196MB -- far more than a Light Phone III should download for a rider
+    // who only wants one of these agencies). Realtime is available per agency_id (in parens below)
+    // via OneBusAway's Puget Sound API (trip-updates-for-agency/<id>.pb,
+    // vehicle-positions-for-agency/<id>.pb), same static/realtime namespace, but requires a real API
+    // key (a TEST key exists but isn't for production) and per-agency coverage isn't confirmed yet --
+    // not wired here, "(No Live)" pending that. Amtrak, Solid Ground EZ Loop, and Seattle Streetcar
+    // (City of Seattle) are deliberately not included: the first two aren't really "Puget Sound
+    // regional" the way these are, and Seattle Streetcar has no standalone per-agency feed of its own
+    // -- it only exists inside the consolidated zip.
+    //
+    // King County Metro/Pierce Transit/Community Transit/Sound Transit are all hosted on
+    // soundtransit.org, whose cert chain terminates at a Let's Encrypt root not yet present in this
+    // device's trust store (confirmed live: SSLHandshakeException, "Trust anchor for certification
+    // path not found") -- routed through pico-transit-proxy's own /<id>/static route instead of
+    // fetched directly, the same fix already proven out for LTC's identical problem (see that
+    // worker's own comment on this). The other five Puget Sound agencies are hosted on
+    // gtfs.sound.obaweb.org (a standard Amazon root, confirmed fine) and fetch directly, same as
+    // every other non-511 agency in this file.
+    KING_COUNTY_METRO(
+        "kcm",
+        "King County Metro (No Live)",
+        "https://pico-transit-proxy.data-32b.workers.dev/kcm/static",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    PIERCE_TRANSIT(
+        "pierce_transit",
+        "Pierce Transit (No Live)",
+        "https://pico-transit-proxy.data-32b.workers.dev/pierce_transit/static",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    INTERCITY_TRANSIT(
+        "intercity_transit",
+        "Intercity Transit (No Live)",
+        "https://gtfs.sound.obaweb.org/prod/19_gtfs.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    KITSAP_TRANSIT(
+        "kitsap_transit",
+        "Kitsap Transit (No Live)",
+        "https://gtfs.sound.obaweb.org/prod/20_gtfs.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    COMMUNITY_TRANSIT(
+        "community_transit",
+        "Community Transit (No Live)",
+        "https://pico-transit-proxy.data-32b.workers.dev/community_transit/static",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    SOUND_TRANSIT(
+        "sound_transit",
+        "Sound Transit (No Live)",
+        "https://pico-transit-proxy.data-32b.workers.dev/sound_transit/static",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    WA_STATE_FERRIES(
+        "wa_state_ferries",
+        "Washington State Ferries (No Live)",
+        "https://gtfs.sound.obaweb.org/prod/95_gtfs.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    SEATTLE_MONORAIL(
+        "seattle_monorail",
+        "Seattle Center Monorail (No Live)",
+        "https://gtfs.sound.obaweb.org/prod/96_gtfs.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
+    EVERETT_TRANSIT(
+        "everett_transit",
+        "Everett Transit (No Live)",
+        "https://gtfs.sound.obaweb.org/prod/97_gtfs.zip",
+        null,
+        null,
+        timeZoneId = "America/Los_Angeles",
+    ),
 
     ;
 

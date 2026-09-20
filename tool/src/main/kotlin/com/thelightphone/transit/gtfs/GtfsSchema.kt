@@ -19,9 +19,16 @@ internal const val GTFS_SCHEMA_VERSION = 2
  * Mirrors the subset of the GTFS static spec this app ingests. trip_id, route_id, stop_id, and
  * service_id are the join/filter keys every later screen uses, so each gets an explicit index
  * except where it's already the leading column of a table's primary key.
+ *
+ * Split into [TABLE_STATEMENTS] and [INDEX_STATEMENTS] (rather than one flat list) so
+ * [openGtfsDatabase] can create just the tables up front and [createGtfsIndexes] can build every
+ * index once, after [GtfsIngestor] has finished inserting all of a table's rows -- building an index
+ * incrementally across tens of thousands of inserts is a well-known SQLite bulk-load slowdown
+ * compared to building it once against data that's already there. Same statements, same order, as
+ * before this split -- only *when* each group runs changed.
  */
 private object GtfsSchema {
-    val STATEMENTS = listOf(
+    val TABLE_STATEMENTS = listOf(
         """
         CREATE TABLE IF NOT EXISTS routes (
             route_id TEXT PRIMARY KEY,
@@ -49,8 +56,6 @@ private object GtfsSchema {
             bikes_allowed INTEGER
         )
         """,
-        "CREATE INDEX IF NOT EXISTS idx_trips_route_id ON trips(route_id)",
-        "CREATE INDEX IF NOT EXISTS idx_trips_service_id ON trips(service_id)",
         """
         CREATE TABLE IF NOT EXISTS stops (
             stop_id TEXT PRIMARY KEY,
@@ -80,7 +85,6 @@ private object GtfsSchema {
             PRIMARY KEY (trip_id, stop_sequence)
         ) WITHOUT ROWID
         """,
-        "CREATE INDEX IF NOT EXISTS idx_stop_times_stop_id ON stop_times(stop_id)",
         """
         CREATE TABLE IF NOT EXISTS calendar (
             service_id TEXT PRIMARY KEY,
@@ -103,7 +107,6 @@ private object GtfsSchema {
             PRIMARY KEY (service_id, date)
         ) WITHOUT ROWID
         """,
-        "CREATE INDEX IF NOT EXISTS idx_calendar_dates_service_id ON calendar_dates(service_id)",
         // feed_info.txt is optional per the GTFS spec, so agency.txt (required) is kept as a fallback
         // attribution source -- see GtfsRepository.getFeedAttribution. Neither table has a natural
         // single-row key (feed_info.txt has none at all; a feed can list several agency.txt rows), so
@@ -135,20 +138,49 @@ private object GtfsSchema {
         ) WITHOUT ROWID
         """,
     )
+
+    val INDEX_STATEMENTS = listOf(
+        "CREATE INDEX IF NOT EXISTS idx_trips_route_id ON trips(route_id)",
+        "CREATE INDEX IF NOT EXISTS idx_trips_service_id ON trips(service_id)",
+        "CREATE INDEX IF NOT EXISTS idx_stop_times_stop_id ON stop_times(stop_id)",
+        "CREATE INDEX IF NOT EXISTS idx_calendar_dates_service_id ON calendar_dates(service_id)",
+    )
 }
 
 /**
- * Opens (creating if needed) the SQLite database backing one agency's ingested GTFS data.
+ * Opens (creating if needed) the SQLite database backing one agency's ingested GTFS data, with just
+ * its tables created -- see [createGtfsIndexes] for the other half of [GtfsSchema]'s own statements,
+ * called separately by [GtfsIngestor] once every row is actually in place.
  *
  * Uses [SQLiteDatabase.openOrCreateDatabase]'s file-based entry point rather than
  * [android.database.sqlite.SQLiteOpenHelper] or Room, since both require an
  * android.content.Context, which isn't reachable from tool code (SealedLightContext keeps its
  * Context internal, and importing android.content.Context directly is blocked by the SDK build
  * plugin).
+ *
+ * [SQLiteDatabase.openOrCreateDatabase] is only ever called here, for [GtfsIngestor]'s own scratch
+ * `transit.db.tmp` -- every other reader opens the finished, already-renamed database completely
+ * separately ([GtfsRepository]'s own `OPEN_READONLY` connection), so `synchronous=NORMAL` below is
+ * scoped to this one ingest-only connection and never reaches a reader at all: SQLite's `synchronous`
+ * pragma lives on the connection, not the file, so a later connection just gets the normal default
+ * back automatically. Safe against the real crash [COMMIT_BATCH_SIZE] (`GtfsCsv.kt`) exists to
+ * prevent -- that fix bounds how much data one open transaction holds in memory; this pragma only
+ * changes how aggressively each already-happening commit flushes to disk, a different axis
+ * entirely. The only real cost is durability if the process dies mid-write, which this app already
+ * tolerates by design: a crash mid-ingest just leaves `transit.db.tmp` to be discarded and rebuilt
+ * from scratch next time, whether or not its writes were fsynced -- the real `transit.db` is only
+ * ever replaced by the atomic rename in [GtfsIngestor] once ingestion fully succeeds.
  */
 fun openGtfsDatabase(dbFile: File): SQLiteDatabase {
     dbFile.parentFile?.mkdirs()
     val db = SQLiteDatabase.openOrCreateDatabase(dbFile, null)
-    GtfsSchema.STATEMENTS.forEach { db.execSQL(it) }
+    db.execSQL("PRAGMA synchronous = NORMAL")
+    GtfsSchema.TABLE_STATEMENTS.forEach { db.execSQL(it) }
     return db
+}
+
+/** The other half of [GtfsSchema]'s own statements -- called once by [GtfsIngestor], after every zip
+ * file's rows are already inserted into [db], never before. */
+fun createGtfsIndexes(db: SQLiteDatabase) {
+    GtfsSchema.INDEX_STATEMENTS.forEach { db.execSQL(it) }
 }
