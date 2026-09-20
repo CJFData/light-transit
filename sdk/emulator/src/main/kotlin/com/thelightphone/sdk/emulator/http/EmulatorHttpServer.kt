@@ -2,6 +2,7 @@ package com.thelightphone.sdk.emulator.http
 
 import android.content.Context
 import android.util.Log
+import com.thelightphone.sdk.emulator.EmulatorLocationHelper
 import com.thelightphone.sdk.server.BuildConfig
 import com.thelightphone.sdk.server.LightPushDistributor
 import com.thelightphone.sdk.server.LightPushRegistry
@@ -16,6 +17,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import kotlin.time.Clock
 
 class EmulatorHttpServer(private val context: Context) {
 
@@ -51,6 +53,46 @@ class EmulatorHttpServer(private val context: Context) {
                     body.toByteArray()
                 )
                 call.respondText("OK", status = HttpStatusCode.OK)
+            }
+            post("/location/default") {
+                val latitude = call.request.queryParameters["latitude"]?.toDoubleOrNull()
+                val longitude = call.request.queryParameters["longitude"]?.toDoubleOrNull()
+                if (latitude == null || longitude == null) {
+                    EmulatorLocationHelper.updateDefaultLocation(null)
+                    call.respondText("Cleared default location", status = HttpStatusCode.OK)
+                    return@post
+                }
+                EmulatorLocationHelper.updateDefaultLocation(
+                    EmulatorLocationHelper.Location(latitude, longitude)
+                )
+                call.respondText("OK", status = HttpStatusCode.OK)
+            }
+            post("/location/current") {
+                val latitude = call.request.queryParameters["latitude"]?.toDoubleOrNull()
+                val longitude = call.request.queryParameters["longitude"]?.toDoubleOrNull()
+                if (latitude == null || longitude == null) {
+                    EmulatorLocationHelper.updateCurrentLocation(null)
+                    call.respondText("Cleared current location", status = HttpStatusCode.OK)
+                    return@post
+                }
+                val accuracyMeters =
+                    call.request.queryParameters["accuracyMeters"]?.toDoubleOrNull() ?: 0.0
+                val updated = EmulatorLocationHelper.updateCurrentLocation(
+                    EmulatorLocationHelper.CurrentLocation(
+                        latitude,
+                        longitude,
+                        accuracyMeters,
+                        Clock.System.now()
+                    )
+                )
+                if (updated) {
+                    call.respondText("OK", status = HttpStatusCode.OK)
+                } else {
+                    call.respondText(
+                        "No tools are currently polling for location updates",
+                        status = HttpStatusCode.Conflict
+                    )
+                }
             }
         }
     }

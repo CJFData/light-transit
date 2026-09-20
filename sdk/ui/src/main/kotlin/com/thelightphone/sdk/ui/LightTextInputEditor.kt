@@ -54,6 +54,8 @@ fun LightTextInputEditor(
     modifier: Modifier = Modifier,
     submitLabel: String = "SUBMIT",
     submitIcon: LightIconConfiguration? = null,
+    leftBottomBarItem: LightBottomBarItem? = null,
+    rightBottomBarItem: LightBottomBarItem? = null,
     showBackButton: Boolean = true,
     singleLine: Boolean = false,
     initialCaps: Boolean = false,
@@ -88,6 +90,8 @@ fun LightTextInputEditor(
         modifier,
         submitLabel,
         submitIcon,
+        leftBottomBarItem,
+        rightBottomBarItem,
         showBackButton,
         singleLine,
     )
@@ -110,6 +114,8 @@ fun LightTextInputEditor(
     modifier: Modifier = Modifier,
     submitLabel: String = "SUBMIT",
     submitIcon: LightIconConfiguration? = null,
+    leftBottomBarItem: LightBottomBarItem? = null,
+    rightBottomBarItem: LightBottomBarItem? = null,
     showBackButton: Boolean = true,
     singleLine: Boolean = false,
 ) {
@@ -198,20 +204,23 @@ fun LightTextInputEditor(
                 viewModel = viewModel,
                 additionalBottomHeight = 5f.gridUnitsAsDp(),
                 bottomBar = {
+                    val submitItem: LightBottomBarItem = when (submitIcon) {
+                        null -> LightBarButton.Text(
+                            text = submitLabel,
+                            onClick = { onSubmit(state.text) },
+                        )
+                        else -> LightBarButton.LightIcon(
+                            icon = submitIcon,
+                            onClick = { onSubmit(state.text) },
+                            contentDescription = submitLabel,
+                        )
+                    }
                     LightBottomBar(
-                        items = listOf(
-                            when (submitIcon) {
-                                null -> LightBarButton.Text(
-                                    text = submitLabel,
-                                    onClick = { onSubmit(state.text) },
-                                )
-                                else -> LightBarButton.LightIcon(
-                                    icon = submitIcon,
-                                    onClick = { onSubmit(state.text) },
-                                    contentDescription = submitLabel,
-                                )
-                            },
-                        ),
+                        items = if (leftBottomBarItem == null && rightBottomBarItem == null) {
+                            listOf(submitItem)
+                        } else {
+                            listOf(leftBottomBarItem, submitItem, rightBottomBarItem)
+                        },
                     )
                 }
             )

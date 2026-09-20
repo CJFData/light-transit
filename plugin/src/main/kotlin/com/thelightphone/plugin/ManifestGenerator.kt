@@ -17,10 +17,16 @@ object ManifestGenerator {
         appendLine("""<manifest xmlns:android="http://schemas.android.com/apk/res/android">""")
         // A capability declares what the tool does and the permissions it needs
         // follow from that, so they are unioned in here rather than written by the tool.
+        // Some bare permissions likewise imply another one (e.g. FINE location
+        // implies COARSE, to keep lint quiet), so those are unioned in too.
         val permissions = (
-            metadata.permissions + metadata.capabilities.flatMap {
-                LightToolPolicy.CAPABILITY_IMPLIED_PERMISSIONS[it].orEmpty()
-            }
+            metadata.permissions +
+                metadata.permissions.flatMap {
+                    LightToolPolicy.PERMISSION_IMPLIED_PERMISSIONS[it].orEmpty()
+                } +
+                metadata.capabilities.flatMap {
+                    LightToolPolicy.CAPABILITY_IMPLIED_PERMISSIONS[it].orEmpty()
+                }
         ).distinct()
         for (perm in permissions) {
             appendLine("""    <uses-permission android:name="${xmlAttr(perm)}" />""")

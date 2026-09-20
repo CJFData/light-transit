@@ -94,6 +94,30 @@ class ManifestGeneratorTest {
     }
 
     @Test
+    fun `fine location permission also emits coarse location permission`() {
+        // CoarseFineLocation lint wants COARSE declared alongside FINE; devs
+        // shouldn't have to remember to list both themselves.
+        val xml = render(permissions = listOf("android.permission.ACCESS_FINE_LOCATION"))
+        assertTrue(xml.contains("""<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />"""))
+        assertTrue(xml.contains("""<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />"""))
+    }
+
+    @Test
+    fun `explicit fine and coarse location permissions are not duplicated`() {
+        val xml = render(permissions = listOf(
+            "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.ACCESS_COARSE_LOCATION",
+        ))
+        assertTrue(xml.split("android.permission.ACCESS_COARSE_LOCATION").size - 1 == 1)
+    }
+
+    @Test
+    fun `coarse location alone does not imply fine location`() {
+        val xml = render(permissions = listOf("android.permission.ACCESS_COARSE_LOCATION"))
+        assertFalse(xml.contains("android.permission.ACCESS_FINE_LOCATION"))
+    }
+
+    @Test
     fun `permission without implied feature emits no uses-feature`() {
         val xml = render(permissions = listOf("android.permission.INTERNET"))
         assertFalse(xml.contains("uses-feature"))

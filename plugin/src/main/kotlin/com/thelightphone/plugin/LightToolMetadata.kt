@@ -227,6 +227,16 @@ object LightToolPolicy {
         "android.permission.ACCESS_COARSE_LOCATION" to listOf("android.hardware.location.network"),
         "android.permission.NFC" to listOf("android.hardware.nfc"),
     )
+
+    /**
+     * Permissions that pull in another permission's `<uses-permission>` element.
+     * Android/Play Store lint (`CoarseFineLocation`) flags requesting FINE
+     * without also requesting COARSE, so we emit both any time a tool declares
+     * just FINE rather than making every tool remember to list both.
+     */
+    val PERMISSION_IMPLIED_PERMISSIONS: Map<String, List<String>> = mapOf(
+        "android.permission.ACCESS_FINE_LOCATION" to listOf("android.permission.ACCESS_COARSE_LOCATION"),
+    )
 }
 
 // --- TomlTable extension helpers --------------------------------------------
