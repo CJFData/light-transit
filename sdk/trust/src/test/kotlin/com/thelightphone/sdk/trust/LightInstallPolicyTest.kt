@@ -59,7 +59,8 @@ class LightInstallPolicyTest {
 
     private class Case(val attack: String, val expected: LightInstallDecision, val actual: () -> LightInstallDecision)
 
-    @Test fun `threat matrix`() {
+    @Test
+    fun `threat matrix`() {
         val blocked = bundle(block = listOf(TrustBlock(BlockMatch.ToolId(toolId), BlockAction.Purge, "compromised")))
         val cases = buildList {
             // A self-signed developer build carries no stamp and no statement.
@@ -160,7 +161,8 @@ class LightInstallPolicyTest {
         for (case in cases) assertEquals(case.expected, case.actual(), case.attack)
     }
 
-    @Test fun `approval is read from the bundle, never from the statement`() {
+    @Test
+    fun `approval is read from the bundle, never from the statement`() {
         val text = """{"schemaVersion":1,"tool":{"id":"$toolId","versionCode":7,"versionName":"1.0",""" +
             """"gitUrl":"https://example.com/repo","gitCommit":"abc"},"sdkGitRef":"v1","devId":"dev",""" +
             """"signerSha256":"$appKey","buildId":"$buildId","issuedAt":"2026-08-25T00:00:00Z"}"""
@@ -174,7 +176,8 @@ class LightInstallPolicyTest {
         assertEquals(decide(statement = parse(text)), decide(statement = forged))
     }
 
-    @Test fun `an unverified statement can only make the decision stricter`() {
+    @Test
+    fun `an unverified statement can only make the decision stricter`() {
         // Block matching reads toolId before the stamp is checked. An attacker who
         // controls that field can therefore only match a block and kill their own
         // APK; approval is read after provenance, so it can never be reached this way.
@@ -195,13 +198,15 @@ class LightInstallPolicyTest {
         )
     }
 
-    @Test fun `the permissive level reports what a stricter one would have done`() {
+    @Test
+    fun `the permissive level reports what a stricter one would have done`() {
         val blocked = bundle(block = listOf(TrustBlock(BlockMatch.ToolId(toolId), BlockAction.Purge, "compromised")))
         assertEquals(Allow, decide(bundle = blocked, level = AllowAllApks))
         assertEquals(Kill(BlockAction.Purge, "compromised"), decide(bundle = blocked, level = AllowLightApprovedApks))
     }
 
-    @Test fun `the APK is hashed only when a rule asks for its hash, and only once`() {
+    @Test
+    fun `the APK is hashed only when a rule asks for its hash, and only once`() {
         var hashed = 0
         val hash = { hashed++; apkHash }
 
@@ -250,7 +255,8 @@ class LightInstallPolicyTest {
         assertEquals(1, hashed)
     }
 
-    @Test fun `every input combination returns a decision`() {
+    @Test
+    fun `every input combination returns a decision`() {
         val stamps = listOf(verified, StampResult.NotPresent, StampResult.NotVerified, StampResult.Unavailable("no verifier"))
         val statements = listOf(null, statement(), statement(signerSha256 = attackerKey), statement(id = "com.bad.tool", versionCode = 0))
         val bundles = listOf(

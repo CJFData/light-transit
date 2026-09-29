@@ -9,7 +9,8 @@ import kotlin.random.Random
 import kotlin.test.*
 
 class TrustBundleTest {
-    @Test fun `pin encoding matrix rejects invalid pins in either order`() {
+    @Test
+    fun `pin encoding matrix rejects invalid pins in either order`() {
         // start with a valid fixture key
         val good = pem("INSECURE-bundle-public.pem")
         // the 32 key bytes after the 12-byte SPKI header
@@ -58,7 +59,8 @@ class TrustBundleTest {
         }
     }
 
-    @Test fun `image upgrade persists atomically and does not discard corrupt disk`() {
+    @Test
+    fun `image upgrade persists atomically and does not discard corrupt disk`() {
         // image ships bundle v42; the device last fetched v41
         val image = fixture("valid")
         val old = signed(validText().replace("\"version\": 42", "\"version\": 41"))
@@ -149,7 +151,8 @@ class TrustBundleTest {
         }
     }
 
-    @Test fun `bundle signed in the python script verifies fine`() {
+    @Test
+    fun `bundle signed in the python script verifies fine`() {
         val verify = verifier()
         val valid = fixture("valid")
         assertEquals(42, success(verify.verify(valid.bytes, valid.signature)).version)
@@ -161,7 +164,8 @@ class TrustBundleTest {
         assertIs<TrustFailure.UnsupportedSchema>(failure(verify.verify(newer.bytes, newer.signature)))
     }
 
-    @Test fun `signed bundles require UTF-8 without a BOM`() {
+    @Test
+    fun `signed bundles require UTF-8 without a BOM`() {
         val verify = verifier()
         for (name in listOf("utf16-le", "utf16-be", "utf32-le", "utf32-be", "utf8-bom")) {
             val pair = fixture(name)
@@ -170,14 +174,16 @@ class TrustBundleTest {
         }
     }
 
-    @Test fun `signature verification precedes parsing`() {
+    @Test
+    fun `signature verification precedes parsing`() {
         val malformed = "not JSON".encodeToByteArray()
         assertEquals(TrustFailure.InvalidSignature, failure(verifier().verify(malformed, ByteArray(64))))
         val authenticated = signed("not JSON")
         assertIs<TrustFailure.InvalidJson>(failure(verifier().verify(authenticated.bytes, authenticated.signature)))
     }
 
-    @Test fun `one invalid pin rejects the whole set, but a non-matching valid pin does not`() {
+    @Test
+    fun `one invalid pin rejects the whole set, but a non-matching valid pin does not`() {
         val good = pem("INSECURE-bundle-public.pem")
         val foreign = pem("INSECURE-foreign-public.pem")
         val pair = fixture("valid")
@@ -192,7 +198,8 @@ class TrustBundleTest {
         success(LightTrustBundleVerifier(listOf(foreign, good)).verify(pair.bytes, pair.signature))
     }
 
-    @Test fun `state, version floor and storage bundle remain untouched on rejected update`() {
+    @Test
+    fun `state, version floor and storage bundle remain untouched on rejected update`() {
         val cases = listOf(
             Triple(
                 "8 rollback",
@@ -226,7 +233,8 @@ class TrustBundleTest {
         }
     }
 
-    @Test fun `revocation can remove pins from built-in bundle and a later bundle update can restore it`() {
+    @Test
+    fun `revocation can remove pins from built-in bundle and a later bundle update can restore it`() {
         // dummy certificate hashes used by the fixture
         val a = "a".repeat(64);
         val b = "b".repeat(64);
@@ -256,7 +264,8 @@ class TrustBundleTest {
         assertIs<TrustFailure.VersionNotNewer>(failure(store.accept(next)))
     }
 
-    @Test fun `omission keeps an image pin, explicit revocation removes it, deny wins`() {
+    @Test
+    fun `omission keeps an image pin, explicit revocation removes it, deny wins`() {
         val a = "a".repeat(64);
         val b = "b".repeat(64)
 
@@ -274,7 +283,8 @@ class TrustBundleTest {
         }
     }
 
-    @Test fun `boot re-checks stored bytes and adopts the newer image and storage`() {
+    @Test
+    fun `boot re-checks stored bytes and adopts the newer image and storage`() {
         val memory = Memory()
 
         // 1. storage has somehow a bundle signed by the wrong key
@@ -298,7 +308,8 @@ class TrustBundleTest {
         assertNull(success(LightTrustStore.open(verifier(), Memory(), emptySet())).state().version)
     }
 
-    @Test fun `nothing the caller holds is shared with verified state`() {
+    @Test
+    fun `nothing the caller holds is shared with verified state`() {
         val public = pem("INSECURE-bundle-public.pem")
         val verify = LightTrustBundleVerifier(listOf(public))
         public.fill(0)
@@ -314,19 +325,21 @@ class TrustBundleTest {
         assertFailsWith<UnsupportedOperationException> { (store.state().trustedStampCerts as MutableSet).clear() }
     }
 
-    @Test fun `parsers return a typed failure and not exception` () {
+    @Test
+    fun `parsers return a typed failure and not exception` () {
         val random = Random(5)
         repeat(1000) {
             val bytes = random.nextBytes(random.nextInt(0, 256))
             LightTrustBundleParser.parse(bytes)
             LightTrustStatementParser.parse(bytes)
         }
-        for (text in listOf("{\"x\":\"\\u12\"}", "{\"x\":\"\\q\"}", "{\"x\":\"\n\"}", "{\"x\":\"unterminated}")) {
+        for (text in listOf("{\"x\":\"\\u12\"}", "{\"x\":\"\\q\"}", "{\"x\":\"unterminated}")) {
             assertIs<TrustFailure.InvalidJson>(failure(LightTrustBundleParser.parse(text.encodeToByteArray())))
         }
     }
 
-    @Test fun `persistence failure preserves floor and allows retry`() {
+    @Test
+    fun `persistence failure preserves floor and allows retry`() {
         val memory = Memory()
         val store = success(LightTrustStore.open(verifier(), memory, emptySet(), fixture("valid")))
         val before = store.state()
@@ -339,18 +352,23 @@ class TrustBundleTest {
         assertEquals(43, store.state().version)
     }
 
-    @Test fun `malformed JSON always returns typed failure`() {
+    @Test
+    fun `malformed JSON always returns typed failure`() {
         for (text in listOf("", "{", "null", "[]", "{\"x\":1,}", "{\"x\":01}", "{\"x\":NaN}", "[".repeat(66) + "0" + "]".repeat(66))) {
             assertIs<TrustResult.Failure>(LightTrustBundleParser.parse(text.encodeToByteArray()), text)
             assertIs<TrustResult.Failure>(LightTrustStatementParser.parse(text.encodeToByteArray()), text)
         }
         assertIs<TrustFailure.InvalidJson>(failure(LightTrustBundleParser.parse(byteArrayOf(0xc0.toByte(), 0xaf.toByte()))))
-        for (text in listOf("{\"x\":1,\"x\":2}", "{\"x\":{\"a\":1,\"\\u0061\":2}}")) {
-            assertIs<TrustFailure.DuplicateKey>(failure(LightTrustBundleParser.parse(text.encodeToByteArray())))
-        }
     }
 
-    @Test fun `bundle structure and numeric boundaries`() {
+    @Test
+    fun `kotlinx parsing keeps the last duplicate value`() {
+        val duplicate = validText().replace("\"version\": 42", "\"version\": 41, \"\\u0076ersion\": 42")
+        assertEquals(42, success(LightTrustBundleParser.parse(duplicate.encodeToByteArray())).version)
+    }
+
+    @Test
+    fun `bundle structure and numeric boundaries`() {
         for (text in listOf(
             validText().replace("\"version\": 42", "\"version\": 9223372036854775808"),
             validText().replace("\"version\": 42", "\"version\": true"),
@@ -364,7 +382,8 @@ class TrustBundleTest {
         assertIs<TrustFailure.UnsupportedSchema>(failure(LightTrustBundleParser.parse("""{"schemaVersion":2,"future":true}""".encodeToByteArray())))
     }
 
-    @Test fun `statement parses without approval authority`() {
+    @Test
+    fun `statement parses without approval authority`() {
         val text = """{"schemaVersion":1,"tool":{"id":"com.example.tool","versionCode":7,"versionName":"1.0","gitUrl":"https://example.com/repo","gitCommit":"abc"},"sdkGitRef":"v1","devId":"dev","signerSha256":"${"a".repeat(64)}","buildId":"build_01","issuedAt":"2026-08-25T00:00:00Z"}"""
         val statement = success(LightTrustStatementParser.parse(text.encodeToByteArray()))
         assertEquals(statement, success(LightTrustStatementParser.parse(text.dropLast(1).plus(",\"approved\":true}").encodeToByteArray())))

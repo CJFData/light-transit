@@ -2,10 +2,11 @@
 
 `bundle-schema-v1.json` describes the signed document. Python performs equivalent
 structural checks without a runtime JSON Schema dependency, plus unique allow
-`toolId` enforcement and duplicate JSON-key rejection. All counters fit a
-nonnegative signed 64-bit integer. `issuedAt` is a valid calendar timestamp in
-UTC, exactly `YYYY-MM-DDTHH:MM:SSZ`; it does not control expiry. JSON nesting is
-limited to 64 levels. The schema version is checked before other root fields so
+`toolId` enforcement and duplicate JSON-key rejection. Kotlin uses
+`kotlinx.serialization`, which keeps the last value of a duplicate JSON key.
+All counters fit a nonnegative signed 64-bit integer. `issuedAt` is a valid calendar timestamp in
+UTC, exactly `YYYY-MM-DDTHH:MM:SSZ`; it does not control expiry. Python limits JSON
+nesting to 64 levels. The schema version is checked before other root fields so
 newer formats are refused with a schema-specific reason.
 
 Signed bundle JSON must be UTF-8 without a byte-order mark (BOM). Both verifiers

@@ -1,6 +1,8 @@
 package com.thelightphone.sdk.trust
 
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
+import java.nio.charset.CharacterCodingException
 import java.time.LocalDateTime
 import java.time.format.DateTimeParseException
 import java.util.Collections
@@ -42,10 +44,23 @@ private fun JsonObject.certs(name: String): Set<String> {
     return frozenSet(values)
 }
 
+private fun parseJson(bytes: ByteArray): JsonElement {
+    val text = try {
+        bytes.decodeToString(throwOnInvalidSequence = true)
+    } catch (_: CharacterCodingException) {
+        reject(TrustFailure.InvalidJson("invalid UTF-8"))
+    }
+    return try {
+        Json.parseToJsonElement(text)
+    } catch (_: SerializationException) {
+        reject(TrustFailure.InvalidJson("invalid JSON"))
+    }
+}
+
 object LightTrustStatementParser {
     /** Parsing is structural only; callers must first verify the containing APK's stamp. */
     fun parse(bytes: ByteArray): TrustResult<LightTrustStatement> = parsed {
-        val root = StrictJson(bytes).read().obj("statement")
+        val root = parseJson(bytes).obj("statement")
         root.schema()
         val tool = root.field("tool").obj("tool")
         // Extra statement fields cannot confer approval; only the bundle does that.
@@ -58,7 +73,7 @@ object LightTrustStatementParser {
 
 object LightTrustBundleParser {
     fun parse(bytes: ByteArray): TrustResult<LightTrustBundle> = parsed {
-        val root = StrictJson(bytes).read().obj("bundle")
+        val root = parseJson(bytes).obj("bundle")
         root.schema()
         root.fields("schemaVersion", "version", "issuedAt", "allow", "block", "trustedStampCerts", "revokedStampCerts")
         val approvals = root.field("allow").array("allow").map { raw ->

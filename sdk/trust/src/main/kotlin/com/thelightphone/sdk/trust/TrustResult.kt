@@ -7,7 +7,6 @@ sealed interface TrustResult<out T> {
 
 sealed interface TrustFailure {
     data class InvalidJson(val detail: String) : TrustFailure
-    data class DuplicateKey(val key: String) : TrustFailure
     data class InvalidField(val path: String) : TrustFailure
     data class UnsupportedSchema(val version: String) : TrustFailure
     data object InvalidKey : TrustFailure
