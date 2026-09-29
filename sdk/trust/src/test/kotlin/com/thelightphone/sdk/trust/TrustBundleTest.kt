@@ -202,22 +202,22 @@ class TrustBundleTest {
     fun `state, version floor and storage bundle remain untouched on rejected update`() {
         val cases = listOf(
             Triple(
-                "8 rollback",
+                "rollback",
                 signed(validText().replace("\"version\": 42", "\"version\": 41")),
                 TrustFailure.VersionNotNewer::class
             ),
             Triple(
-                "9 foreign key",
+                "foreign key",
                 fixture("foreign-key"),
                 TrustFailure.InvalidSignature::class
             ),
             Triple(
-                "14 lower approval floor",
+                "lower approval floor",
                 signed(validText().replace("\"version\": 42", "\"version\": 41").replace("\"minVersionCode\": 7", "\"minVersionCode\": 1")),
                 TrustFailure.VersionNotNewer::class
             ),
             Triple(
-                "18 newer schema",
+                "newer schema",
                 fixture("newer-schema"),
                 TrustFailure.UnsupportedSchema::class
             ),
@@ -273,8 +273,8 @@ class TrustBundleTest {
         val cases = listOf(
             Case("image pin cannot be removed by omission", "", "", setOf(a)),
             Case("delegated cert added", "\"$b\"", "", setOf(a, b)),
-            Case("17 revoked image cert", "", "\"$a\"", emptySet()),
-            Case("19 deny wins", "\"$a\",\"$b\"", "\"$a\",\"$b\"", emptySet())
+            Case("revoked image cert", "", "\"$a\"", emptySet()),
+            Case("deny wins", "\"$a\",\"$b\"", "\"$a\",\"$b\"", emptySet())
         )
         for (case in cases) {
             val record = signed("""{"schemaVersion":1,"version":1,"issuedAt":"2026-08-25T00:00:00Z","allow":[],"block":[],"trustedStampCerts":[${case.trust}],"revokedStampCerts":[${case.revoke}]}""")

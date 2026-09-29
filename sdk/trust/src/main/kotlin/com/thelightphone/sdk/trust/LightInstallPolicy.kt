@@ -7,10 +7,10 @@ import com.thelightphone.sdk.trust.LightInstallDecision.Kill
 /**
  * Local mirror of the Android-owned `ClientFilterLevel`, which this module cannot import:
  * `:sdk:server` is an Android library, and Gradle will not hand an `androidJvm` variant to
- * a `jvm` consumer. Subtask 07 also makes `:sdk:server` depend on this module, so the
- * reverse edge would be a cycle.
+ * a `jvm` consumer. `:sdk:server` is expected to depend on this module, so the reverse edge
+ * would be a cycle.
  *
- * The constants are named identically so the mapping in 07 stays a rename-free `when`.
+ * The constants are named identically so the mapping between them stays a rename-free `when`.
  * Collapsing the two into one enum in `:sdk:shared` is deferred — it touches published API.
  */
 enum class LightTrustFilterLevel {

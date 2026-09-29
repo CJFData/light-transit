@@ -33,10 +33,10 @@ the remaining validated pins.
 
 The firmware integration owns image-pinned source-stamp SHA-256 digests and
 bundle verification public keys. Keep them in image-owned resources in LightOS,
-outside downloaded bundles and outside this reusable trust library. The 05b
-store will receive image stamp pins as an explicit immutable constructor input;
-09a/14 supply those pins from the image. The bundle verifier independently
-receives pinned bundle public keys.
+outside downloaded bundles and outside this reusable trust library. The store
+receives image stamp pins as an explicit immutable constructor input, supplied
+by the firmware from the image. The bundle verifier independently receives
+pinned bundle public keys.
 
 The image must also supply the initial signed bundle and its version floor.
 Production key values and the concrete LightOS resource path belong to firmware
@@ -45,7 +45,7 @@ integration; no insecure fixture key is a production default. JVM fixtures use
 
 The effective install trust set is `(imagePins | trustedStampCerts) -
 revokedStampCerts`. Omitting an image pin from `trustedStampCerts` cannot remove
-it; explicitly revoking it can. Executable store guarantees belong to 05b.
+it; explicitly revoking it can.
 
 ## Builder publication
 
