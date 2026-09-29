@@ -131,14 +131,14 @@ platform `MediaSession` separately and renders its own controls.
 ## Lifetime and idle stop
 
 Playing detached audio keeps the service alive after the tool releases its handle.
-A paused service must not retain its player and process forever, so the service starts a 60-second timer when both conditions hold:
+A paused service must not retain its player and process forever, so the service starts a 15-minute timer when both conditions hold:
 
 1. playback is not playing
 2. no tool holds the detached handle.
 
 Playback resuming or a handle opening cancels the timer. When it fires, the service stops itself and releases the session and player.
 The handle, rather than the number of connected controllers, is the liveness signal because it covers controller connection gaps and gives ownership one source of truth.
-The timeout governs abandoned paused playback, not active playback. A paused tool that still holds its player can resume after 60 seconds.
+The timeout governs abandoned paused playback, not active playback. A paused tool that still holds its player can resume after 15 minutes.
 
 ## Reconnecting
 

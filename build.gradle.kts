@@ -21,6 +21,10 @@ val localProperties = java.util.Properties().apply {
 }
 
 subprojects {
+    tasks.matching { it.name == "check" }.configureEach {
+        dependsOn(gradle.includedBuild("plugin").task(":check"))
+    }
+
     afterEvaluate {
         plugins.withId("maven-publish") {
             extensions.configure<PublishingExtension> {
