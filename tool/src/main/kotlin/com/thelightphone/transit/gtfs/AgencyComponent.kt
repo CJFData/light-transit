@@ -137,6 +137,34 @@ interface RealtimeTripIdBridge : AgencyComponent {
 }
 
 /**
+ * An agency whose realtime feed's own StopTimeUpdate.stop_id values don't match its static
+ * schedule's stop_id space. Applied by [fetchTripUpdate] the same way [RealtimeTripIdBridge] is:
+ * each StopTimeUpdate's own raw stop_id is rewritten to the matching local static stop_id right
+ * after parsing, so every existing downstream consumer ([GtfsRtTripUpdate.updateFor], etc.) keeps
+ * reading a plain, already-real stop_id with zero awareness this agency needed bridging at all. Not
+ * wired into [fetchVehiclePosition] -- [GtfsRtVehiclePosition] carries no stop_id field of its own,
+ * only [GtfsRtVehiclePosition.currentStopSequence], which this mismatch never touches.
+ */
+interface RealtimeStopIdBridge : AgencyComponent {
+    /** Converts one raw stop_id from the realtime feed into this agency's own static schedule's
+     * stop_id space, or null if it doesn't match this agency's expected format -- treated the same
+     * as any other "no match" case, never guessed. */
+    fun bridgeStopId(rawStopId: String): String?
+}
+
+/**
+ * [RealtimeStopIdBridge] for 511.org's SF Bay Area regional feed: each operator sharing the
+ * regional catalog gets a fixed leading-digit [prefix], with its own native stop_id zero-padded to
+ * 4 digits after it (VTA's own prefix is "6"). [prefix] is always copied from a hand-verified live
+ * sample, the same rule [RegionalGtfsFeed.regionalOperatorCode] follows, never guessed. Returns null
+ * for a raw stop_id that doesn't start with [prefix] at all, or isn't numeric after stripping it.
+ */
+class RegionalStopIdPrefixBridge(private val prefix: String) : RealtimeStopIdBridge {
+    override fun bridgeStopId(rawStopId: String): String? =
+        rawStopId.removePrefix(prefix).takeIf { it != rawStopId }?.toIntOrNull()?.toString()
+}
+
+/**
  * Documents that this agency's [GtfsAgency.realtimeTripUpdatesUrl]/[realtimeVehiclePositionsUrl]
  * are sourced from a shared multi-agency regional aggregator (e.g. 511.org's SF Bay Area feed)
  * rather than a feed dedicated to this agency alone. The URLs already point at

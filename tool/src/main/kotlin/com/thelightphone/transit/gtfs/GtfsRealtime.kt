@@ -281,13 +281,27 @@ private fun matchesOwnRoute(rawRouteId: String?, prefixedTripId: String, prefix:
  * already matches -- see that interface's own doc.
  */
 suspend fun GtfsAgency.fetchTripUpdate(tripId: String, repository: GtfsRepository): GtfsRtTripUpdate? {
+    // Rewrites every StopTimeUpdate's own raw stop_id into this agency's static stop_id space right
+    // before the result leaves this function, whichever of the return points below produced it --
+    // see RealtimeStopIdBridge's own doc.
+    val stopIdBridge = components.filterIsInstance<RealtimeStopIdBridge>().firstOrNull()
+    fun bridged(update: GtfsRtTripUpdate?): GtfsRtTripUpdate? {
+        if (stopIdBridge == null || update == null) return update
+        return update.copy(
+            stopTimeUpdate = update.stopTimeUpdate.map { stopTimeUpdate ->
+                val rawStopId = stopTimeUpdate.stopId ?: return@map stopTimeUpdate
+                stopIdBridge.bridgeStopId(rawStopId)?.let { stopTimeUpdate.copy(stopId = it) } ?: stopTimeUpdate
+            },
+        )
+    }
+
     components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }.forEachIndexed { index, feed ->
         val prefix = secondaryFeedPrefix(index)
         if (tripId.startsWith(prefix)) {
             val url = feed.realtimeTripUpdatesUrl ?: return null
             return try {
                 val match = GtfsRealtimeClient.fetchFeed(url).tripUpdatesByTripId[tripId.removePrefix(prefix)]
-                match?.takeIf { matchesOwnRoute(it.trip.routeId, tripId, prefix, repository) }
+                bridged(match?.takeIf { matchesOwnRoute(it.trip.routeId, tripId, prefix, repository) })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -328,7 +342,7 @@ suspend fun GtfsAgency.fetchTripUpdate(tripId: String, repository: GtfsRepositor
             null
         }
     }
-    if (primaryMatch != null) return primaryMatch
+    if (primaryMatch != null) return bridged(primaryMatch)
     // Unprefixed multi-feed agencies: tripId alone doesn't say which feed owns it, unlike a
     // prefixed MultiGtfsFeed above -- probe each in list order, first match wins. A no-op loop for
     // every agency with none of these (including NYC Subway now that its own 8 line-group feeds
@@ -344,7 +358,7 @@ suspend fun GtfsAgency.fetchTripUpdate(tripId: String, repository: GtfsRepositor
             Log.e("GtfsRealtime", "TripUpdates fetch failed for $displayName's additional feed", e)
             null
         }
-        if (match != null) return match
+        if (match != null) return bridged(match)
     }
     return null
 }

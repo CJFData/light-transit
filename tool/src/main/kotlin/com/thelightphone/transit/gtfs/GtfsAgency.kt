@@ -457,11 +457,7 @@ enum class GtfsAgency(
         null,
         timeZoneId = "America/Denver",
     ),
-    /** Its own agency.txt declares `America/Chicago`, but Winter Park, CO is unambiguously
-     * Mountain time -- taken at face value this would shift every schedule time by 1 hour against
-     * reality, so `America/Denver` is used instead as a deliberate, verified override of an
-     * implausible vendor data-entry error, not a guess from the city name (per CJFData's explicit
-     * call, 2026-08-26). Worth re-checking if the upstream feed ever corrects this. */
+
     WINTER_PARK_TRANSIT(
         "winter_park_transit",
         "Winter Park Transit (No Live)",
@@ -559,9 +555,7 @@ enum class GtfsAgency(
         timeZoneId = "US/Pacific",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AC")),
     ),
-    /** Direct source was Trillium's caltrain-ca-us feed -- the exact URL Caltrain's own
-     * developer-resources page links to. Switched to 511 for stop_id parity with this agency's own
-     * realtime feed (see this group's own top-of-block comment). */
+
     CALTRAIN(
         "caltrain",
         "Caltrain",
@@ -572,20 +566,20 @@ enum class GtfsAgency(
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CT")),
     ),
     /** Transitland's own operator record already listed the 511 regional feed as VTA's only live
-     * source. Static now routes through 511 too, for stop_id parity (see this group's own
-     * top-of-block comment) -- direct source was gtfs.vta.org. */
+     * source. Static is sourced directly from VTA's own gtfs.vta.org (routed through the proxy for
+     * a trust-anchor fix, same as /ltc/static) rather than 511's own static -- see
+     * RegionalStopIdPrefixBridge's own doc for the stop_id renumbering that pairing needs bridging
+     * for. */
     VTA(
         "vta",
         "VTA",
-        "https://pico-transit-proxy.data-32b.workers.dev/511SFSC/static",
+        "https://pico-transit-proxy.data-32b.workers.dev/vta/static",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSC/tripupdates",
         "https://pico-transit-proxy.data-32b.workers.dev/511SFSC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SC")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SC"), RegionalStopIdPrefixBridge("6")),
     ),
 
-    /** Direct source was countyconnection.com, confirmed live. Switched to 511 for stop_id parity
-     * with this agency's own realtime feed (see this group's own top-of-block comment). */
     COUNTY_CONNECTION(
         "county_connection",
         "County Connection",
