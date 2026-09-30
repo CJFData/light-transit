@@ -44,7 +44,7 @@ enum class RegionalGroup(val id: String, val displayName: String, val members: L
      * of. */
     SF_BAY_AREA(
         "sf_bay_area",
-        "SF Bay Area",
+        "San Francisco Bay Area",
         listOf(
             GtfsAgency.BART,
             GtfsAgency.SFMTA_MUNI,
