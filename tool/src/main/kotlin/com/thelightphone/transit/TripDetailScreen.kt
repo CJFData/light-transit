@@ -388,15 +388,15 @@ class TripDetailViewModel(
 
                     // liveVehicleInfo (a richer source, e.g. CTA Bus Tracker) is preferred over the
                     // standard VehiclePositions match when present, same precedence Upcoming
-                    // Arrivals/MapScreen already give it. Its own current_stop_sequence is checked first,
-                    // then GPS-proximity against its own position -- both ahead of the standard feed's
-                    // equivalent fallback chain, which only runs at all when liveVehicleInfo is absent.
-                    // VehiclePositions' own current_stop_sequence is preferred when present; falls
-                    // back to GPS-proximity matching against the vehicle's raw position (see
-                    // matchCurrentStopByProximity), and only as a last resort to inferring it from
-                    // TripUpdates' own remaining stops (see GtfsRtTripUpdate.inferCurrentStopSequence)
-                    // -- RIPTA's feed needs one of these two fallbacks, since it never populates
-                    // current_stop_sequence itself.
+                    // Arrivals/MapScreen already give it. VehiclePositions' own current_stop_sequence is
+                    // preferred when present; falls back to shape-aware matching, then GPS-proximity
+                    // matching, and only as a last resort to inferring it from TripUpdates' own
+                    // remaining stops (see GtfsRtTripUpdate.inferCurrentStopSequence) -- same fallback
+                    // chain as HomeScreen's poll loop. The two geometric tiers are both gated by
+                    // shapeSource (i.e. TripShapeSource attachment, RIPTA today) rather than running for
+                    // any agency current_stop_sequence happens to be missing for -- see
+                    // matchCurrentStopByProximity's own doc for why this is an explicit per-agency
+                    // opt-in rather than an automatic fallback.
                     val anchorBefore = TripPositionAnchor.get(tripId)
                     suspend fun matchViaShape(lat: Double, lon: Double, bearing: Float?): Int? {
                         val source = shapeSource ?: return null
@@ -415,18 +415,22 @@ class TripDetailViewModel(
                         ?: liveVehicleInfo?.currentStopSequence
                         ?: liveVehicleInfo?.let { info -> matchViaShape(info.latitude, info.longitude, null) }
                         ?: liveVehicleInfo?.let { info ->
-                            matchCurrentStopByProximity(
-                                stops, stopLocations, info.latitude, info.longitude,
-                                anchorBefore, coldStartSequenceHint = tripUpdateInferredSequence,
-                            )
+                            shapeSource?.let {
+                                matchCurrentStopByProximity(
+                                    stops, stopLocations, info.latitude, info.longitude,
+                                    anchorBefore, coldStartSequenceHint = tripUpdateInferredSequence,
+                                )
+                            }
                         }?.stopSequence
                         ?: vehiclePosition?.currentStopSequence
                         ?: vehiclePosition?.position?.let { pos -> matchViaShape(pos.latitude.toDouble(), pos.longitude.toDouble(), pos.bearing) }
                         ?: vehiclePosition?.position?.let { pos ->
-                            matchCurrentStopByProximity(
-                                stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(),
-                                anchorBefore, coldStartSequenceHint = tripUpdateInferredSequence,
-                            )
+                            shapeSource?.let {
+                                matchCurrentStopByProximity(
+                                    stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(),
+                                    anchorBefore, coldStartSequenceHint = tripUpdateInferredSequence,
+                                )
+                            }
                         }?.stopSequence
                         ?: tripUpdateInferredSequence
                         ?: matchedStopFromFuzzy?.stopSequence

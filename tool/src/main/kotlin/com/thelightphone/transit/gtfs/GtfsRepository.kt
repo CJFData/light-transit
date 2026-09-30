@@ -27,7 +27,7 @@ data class RouteOption(
  * that's how riders colloquially refer to it.
  */
 enum class LineType(val gtfsRouteTypes: Set<Int>, val label: String, val emoji: String) {
-    SUBWAY(setOf(0, 1), "Subway", "🚇"),
+    SUBWAY(setOf(0, 1), "Subway/Light Rail", "🚇"),
     COMMUTER_RAIL(setOf(2), "Commuter Rail", "🚆"),
     BUS(setOf(3), "Bus", "🚌"),
     FERRY(setOf(4), "Ferry", "⛴️");
@@ -1483,6 +1483,19 @@ private const val PROXIMITY_ARRIVAL_RADIUS_METERS = 50
  * to reject a hint that's off by kilometers. */
 private const val COLD_START_HINT_SANITY_RADIUS_METERS = 500
 
+/** Guards [matchCurrentStopByProximity]'s *second* cold-start tier (nearest-of-all-remaining-stops,
+ * tried only when there's no usable [coldStartSequenceHint]). Its own constant rather than reusing
+ * [COLD_START_HINT_SANITY_RADIUS_METERS]: that one checks distance to one specific, externally-hinted
+ * stop; this one takes a minimum across every remaining stop on the trip, which is a looser signal by
+ * nature -- more candidates means a higher chance some sequentially-distant stop is coincidentally
+ * close by. Without a cap, a route that loops or backtracks near itself could match a stop late in the
+ * sequence to a GPS fix that's actually near the true, much-earlier position. Kept tighter than
+ * [COLD_START_HINT_SANITY_RADIUS_METERS] and looser than [PROXIMITY_ARRIVAL_RADIUS_METERS]: an
+ * unanchored first fix hasn't necessarily converged yet, so the arrival radius would reject too many
+ * legitimate cold starts. A rejected cold start returns null rather than guessing -- no anchor gets
+ * recorded on a null result, so the next poll just retries with fresh GPS. */
+private const val COLD_START_NEAREST_STOP_SANITY_RADIUS_METERS = 200
+
 /** See [GtfsRepository.getScheduledTripCandidates]'s own doc for why a trip this close to its own
  * end is excluded outright rather than just ranked normally. */
 private const val MIN_REMAINING_STOPS_FOR_CANDIDATE = 3
@@ -1513,8 +1526,13 @@ data class StopProximityMatch(
 
 /**
  * Infers which stop a vehicle currently occupies from its own raw GPS position, for agencies whose
- * VehiclePositions feed never populates current_stop_sequence. [stops] must be sorted ascending by
- * stop_sequence (as [GtfsRepository.getTripStops] already returns them); [lastMatchedStopSequence] is
+ * VehiclePositions feed never populates current_stop_sequence. Only ever invoked for an agency with a
+ * [TripShapeSource] attached (RIPTA today) -- the same gate [matchCurrentStopByShapeProjection] uses --
+ * rather than as an automatic fallback for any agency missing current_stop_sequence: GPS-geometry
+ * matching has real failure modes of its own (see this function's and [matchCurrentStopByShapeProjection]'s
+ * cold-start handling below), so an agency opts into it explicitly via that component instead of it
+ * silently applying wherever the ordinary feed data happens to be incomplete. [stops] must be
+ * sorted ascending by stop_sequence (as [GtfsRepository.getTripStops] already returns them); [lastMatchedStopSequence] is
  * whatever [StopProximityMatch.stopSequence] this function returned on the previous poll, or null for
  * the first poll of a trip.
  *
@@ -1543,7 +1561,10 @@ data class StopProximityMatch(
  *    moment it's stale.
  * 2. Otherwise, a one-time global nearest-of-all-stops search by straight-line distance -- a
  *    forward-only walk starting at [stops]' own first entry would instead get stuck near the start on
- *    a long route where the vehicle is actually far along it already.
+ *    a long route where the vehicle is actually far along it already. Only trusted if that nearest
+ *    stop is within [COLD_START_NEAREST_STOP_SANITY_RADIUS_METERS] of the vehicle (see that constant's
+ *    own doc for why it needs a tighter, separate check than tier 1's); returns null rather than
+ *    guessing when even the closest stop fails this check.
  *
  * Every later poll (an anchor already exists) uses the cheaper, sequence-safe walk below instead.
  */
@@ -1568,7 +1589,9 @@ fun matchCurrentStopByProximity(
         ?: coldStartSequenceHint
             ?.let { seq -> stops.indexOfFirst { it.stopSequence == seq } }
             ?.takeIf { it >= 0 && (distanceToIndex(it) ?: Double.MAX_VALUE) <= COLD_START_HINT_SANITY_RADIUS_METERS }
-        ?: (stops.indices.minByOrNull { distanceToIndex(it) ?: Double.MAX_VALUE } ?: 0)
+        ?: stops.indices.minByOrNull { distanceToIndex(it) ?: Double.MAX_VALUE }
+            ?.takeIf { (distanceToIndex(it) ?: Double.MAX_VALUE) <= COLD_START_NEAREST_STOP_SANITY_RADIUS_METERS }
+        ?: return null
     while (true) {
         val nextDistance = distanceToIndex(index + 1) ?: break
         if (nextDistance > PROXIMITY_ARRIVAL_RADIUS_METERS) break

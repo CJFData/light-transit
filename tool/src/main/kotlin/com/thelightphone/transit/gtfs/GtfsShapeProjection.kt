@@ -159,8 +159,10 @@ data class ShapeMatch(val stopSequence: Int, val distanceAlongShapeMeters: Doubl
  * [GtfsRtTripUpdate.inferCurrentStopSequence]-sourced hint [matchCurrentStopByProximity] validates,
  * here validated by projecting near that hinted stop's own precomputed shape position and requiring
  * [ShapeProjection.distanceFromShapeMeters] to be within [SHAPE_HINT_SANITY_RADIUS_METERS] before
- * trusting it -- and falls back to an unconstrained whole-shape search otherwise, mirroring
- * [matchCurrentStopByProximity]'s own two-tier cold-start fallback exactly.
+ * trusting it -- and falls back to an unconstrained whole-shape search otherwise, itself held to the
+ * same [SHAPE_HINT_SANITY_RADIUS_METERS] bound before being trusted, mirroring
+ * [matchCurrentStopByProximity]'s own two-tier cold-start fallback (each tier gated by its own
+ * plausibility check, never an unconditional guess).
  */
 fun matchCurrentStopByShapeProjection(
     stops: List<TripStopRow>,
@@ -190,6 +192,7 @@ fun matchCurrentStopByShapeProjection(
         }
         hintProjection?.takeIf { it.distanceFromShapeMeters <= SHAPE_HINT_SANITY_RADIUS_METERS }
             ?: projectOntoShape(vehicleLat, vehicleLon, shapePoints, vehicleBearing)
+                ?.takeIf { it.distanceFromShapeMeters <= SHAPE_HINT_SANITY_RADIUS_METERS }
     } ?: return null
 
     val matchedStopSequence = stops

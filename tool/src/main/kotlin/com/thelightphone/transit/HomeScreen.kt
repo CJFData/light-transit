@@ -679,25 +679,30 @@ class HomeScreenViewModel(
             // VehiclePositions' own current_stop_sequence is preferred when present; falls back to
             // shape-aware matching, then GPS-proximity matching, and only as a last resort to inferring
             // it from TripUpdates' own remaining stops -- same fallback chain as TripDetailScreen's poll
-            // loop, needed since RIPTA's feed never populates current_stop_sequence (see
-            // matchCurrentStopByProximity). Without this, RIPTA's progress bar never moves even though
-            // Trip Detail shows live movement for the same trip.
+            // loop. The two geometric tiers are both gated by shapeSource (i.e. TripShapeSource
+            // attachment, RIPTA today) rather than running for any agency current_stop_sequence happens
+            // to be missing for -- see matchCurrentStopByProximity's own doc for why this is an explicit
+            // per-agency opt-in rather than an automatic fallback.
             val currentSeq = matchedStopFromVehicle?.stopSequence
                 ?: liveVehicleInfo?.currentStopSequence
                 ?: liveVehicleInfo?.let { info -> matchViaShape(info.latitude, info.longitude, null) }
                 ?: liveVehicleInfo?.let { info ->
-                    matchCurrentStopByProximity(
-                        stops, stopLocations, info.latitude, info.longitude,
-                        TripPositionAnchor.get(trip.tripId), coldStartSequenceHint = tripUpdateInferredSequence,
-                    )
+                    shapeSource?.let {
+                        matchCurrentStopByProximity(
+                            stops, stopLocations, info.latitude, info.longitude,
+                            TripPositionAnchor.get(trip.tripId), coldStartSequenceHint = tripUpdateInferredSequence,
+                        )
+                    }
                 }?.stopSequence
                 ?: vehicle?.currentStopSequence
                 ?: vehicle?.position?.let { pos -> matchViaShape(pos.latitude.toDouble(), pos.longitude.toDouble(), pos.bearing) }
                 ?: vehicle?.position?.let { pos ->
-                    matchCurrentStopByProximity(
-                        stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(),
-                        TripPositionAnchor.get(trip.tripId), coldStartSequenceHint = tripUpdateInferredSequence,
-                    )
+                    shapeSource?.let {
+                        matchCurrentStopByProximity(
+                            stops, stopLocations, pos.latitude.toDouble(), pos.longitude.toDouble(),
+                            TripPositionAnchor.get(trip.tripId), coldStartSequenceHint = tripUpdateInferredSequence,
+                        )
+                    }
                 }?.stopSequence
                 ?: tripUpdateInferredSequence
                 ?: matchedStopFromFuzzy?.stopSequence
