@@ -120,6 +120,39 @@ docker run --rm \
 | `--git-ref`     | Branch, tag, or commit SHA to build.                                               |
 | `--tool-path`   | Relative path inside the dev's repo where their tool lives. Defaults to `tool`. Use `.` if the repo root *is* the tool dir. Validated to stay inside the repo. |
 | `--output-dir`  | Where to write artifacts inside the container. Bind-mount this from the host.      |
+| `--dev-repo`    | Optional. Path to an already checked-out dev repo; skips the clone. Requires `--git-ref` to be a 40-character commit SHA. See [Source modes](#source-modes). |
+
+### Source modes
+
+- **Clone (default)** — the builder fetches `--git-url` @ `--git-ref`
+  itself, so the container needs egress to the git host.
+- **Mounted (`--dev-repo`)** — a trusted preflight job clones and checks out
+  the exact SHA, then mounts it in. The builder verifies the checkout's HEAD
+  matches `--git-ref` and never clones, so it runs with `--network=none`.
+  Gradle processes untrusted dev source and docker can't revoke network
+  mid-run, so fetching in a separate step is the only way to build offline.
+  `--git-url` is still required; it's recorded in `recipe.json`.
+
+```sh
+docker run --rm \
+  --platform=linux/amd64 \
+  --network=none \
+  --read-only \
+  --tmpfs /tmp \
+  --tmpfs /home/builder \
+  --security-opt=no-new-privileges \
+  --cap-drop=ALL \
+  -v /path/to/checkout:/src:ro \
+  -v /var/run/lightbuilder/out/<build-id>:/out \
+  lightphone/light-builder:<tag> \
+  --git-url https://github.com/dev/their-tool \
+  --git-ref <40-char-commit-sha> \
+  --dev-repo /src \
+  --tool-path tool \
+  --output-dir /out
+```
+
+Mounting read-only (`:ro`) is recommended.
 
 ### Env
 
@@ -131,8 +164,7 @@ docker run --rm \
 
 `lightbuilder-egress` should be a docker network configured to permit HTTPS
 to `github.com` only — that's the only host the runtime touches, for the
-dev-repo clone. If the orchestrator clones outside the container and
-bind-mounts the working tree in, you can run with `--network=none`.
+dev-repo clone. In mounted mode (`--dev-repo`) run with `--network=none`.
 
 ### Bind-mount permissions
 
