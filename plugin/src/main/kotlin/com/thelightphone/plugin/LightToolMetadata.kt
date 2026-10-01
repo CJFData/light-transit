@@ -189,6 +189,11 @@ object LightToolPolicy {
 
     const val DETACHED_AUDIO: String = "detached-audio"
     const val TOOL_MANAGER_PROVIDER: String = "tool-manager-provider"
+    /**
+     * Allows a tool to access resources over plain HTTP, which Android blocks by
+     * default. Useful for tools that need to reach self-hosted servers on the
+     * user's own network.
+     */
     const val CLEARTEXT_HTTP: String = "cleartext-http"
 
     val ALLOWED_CAPABILITIES: Set<String> =
