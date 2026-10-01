@@ -31,7 +31,7 @@ def inspect_apk(apk: Path, apkanalyzer: Path) -> ApkMetadata:
 
 def verify_apk_signature(apk: Path, apksigner: Path) -> str:
     output = run_tool([str(apksigner), "verify", "--print-certs", str(apk)])
-    digests = re.findall(r"(?:Signer #\d+|V\d+(?:\.\d+)? Signer): certificate SHA-256 digest:\s*([0-9a-fA-F:]+)", output)
+    digests = re.findall(r"(?:Signer #\d+|V\d+(?:\.\d+)? Signer):? certificate SHA-256 digest:\s*([0-9a-fA-F:]+)", output)
     normalized: set[str] = {digest.replace(":", "").lower() for digest in digests}
     if len(normalized) != 1:
         raise SignerError("invalid_apk_signers", f"expected one APK signer, found {len(normalized)}")
@@ -41,7 +41,7 @@ def verify_apk_signature(apk: Path, apksigner: Path) -> str:
 def verify_source_stamp(apk: Path, apksigner: Path) -> str:
     output = run_tool([str(apksigner), "verify", "--print-certs", str(apk)])
     digests = re.findall(
-        r"Source Stamp Signer:\s*certificate SHA-256 digest:\s*([0-9a-fA-F:]+)",
+        r"Source Stamp Signer:?\s*certificate SHA-256 digest:\s*([0-9a-fA-F:]+)",
         output,
         flags=re.IGNORECASE,
     )
