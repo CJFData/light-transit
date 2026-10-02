@@ -123,7 +123,7 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
      * exactly what was on screen before rather than always bouncing back to [NearbyStopsMode.Locating]. */
     private var modeBeforeSearch: NearbyStopsMode? = null
 
-    /** The in-flight GPS poll; cancelled by [openSearch] so its result can't replace the address input. */
+    /** The running GPS poll. [openSearch] cancels it so a late result can't replace the address input. */
     private var locateJob: Job? = null
 
     /** Drives whether the Search Location screen offers "Current Location" at all -- mirrored from
@@ -228,7 +228,7 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     fun cancelSearch() {
         val restore = modeBeforeSearch
         modeBeforeSearch = null
-        // openSearch cancelled the poll, so a Locating snapshot needs a fresh one.
+        // openSearch cancelled the poll, so restoring Locating needs a new one.
         if (restore != null && restore !is NearbyStopsMode.Locating) {
             _mode.value = restore
         } else {

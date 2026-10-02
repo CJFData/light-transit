@@ -85,9 +85,9 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
 
     /**
      * Predicted arrival times (`prdtm`) for one or more stops, preferred over [vehiclesByRoute] for
-     * Upcoming Arrivals. `stst`/`stsd` resolve each prediction to a trip_id the same way `getvehicles`
-     * does. Returns the raw predicted instant, not a delay: `stst` is the trip's first-stop time, not
-     * this stop's, so there's no basis here to compute one.
+     * ETAs. Each prediction's `stst`/`stsd` resolve to a trip_id the same way as in [vehiclesByRoute].
+     * Returns the predicted time only, not a delay: `stst` is the trip's first-stop time, not this
+     * stop's scheduled time.
      */
     override suspend fun predictionsByStop(stopIds: Set<String>, repository: GtfsRepository, zoneId: ZoneId): Map<String, Long> {
         if (stopIds.isEmpty()) return emptyMap()
@@ -141,7 +141,7 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     }
 }
 
-/** `prdtm` is "yyyyMMdd HH:mm" agency-local time with no zone, so it's anchored to the agency's zone. */
+/** `prdtm` is "yyyyMMdd HH:mm" in agency-local time with no zone, so it's parsed in the agency's zone. */
 private fun parsePredictionTimestamp(raw: String, zoneId: ZoneId): Long? =
     runCatching {
         LocalDateTime.parse(raw, DateTimeFormatter.ofPattern("yyyyMMdd HH:mm")).atZone(zoneId).toEpochSecond()

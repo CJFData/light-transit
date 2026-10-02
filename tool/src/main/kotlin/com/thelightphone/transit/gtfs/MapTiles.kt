@@ -225,8 +225,8 @@ class MapTileClient {
         MapTiles(zoom, centerFracX, centerFracY, tiles)
     }
 
-    /** [children] (tiles at [zoom]) cut from their parent's 512px @2x tile at zoom - 1: one request
-     * per four tiles, with larger street labels. Each quadrant is a drop-in 256px tile. */
+    /** Cuts [children] (tiles at [zoom]) from their parent's 512px @2x tile at zoom - 1, so one request
+     * covers four tiles and street labels render larger. Each quadrant is a drop-in 256px tile. */
     private suspend fun fetchFromParentTile(
         parentX: Int,
         parentY: Int,

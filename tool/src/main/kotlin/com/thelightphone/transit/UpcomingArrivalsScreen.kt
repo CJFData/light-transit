@@ -232,7 +232,7 @@ class UpcomingArrivalsViewModel(
                 val feed = agency.fetchMergedTripUpdates(repository, "UpcomingArrivalsScreen")
 
                 // Agencies without GTFS-RT leave [feed] empty and supply live data through a [StopPredictionSource]
-                // (predicted times, preferred) or a [LiveVehicleSource] (positions). Both are fetched concurrently,
+                // (predicted times, preferred) or a [LiveVehicleSource] (positions only). Both are fetched concurrently,
                 // since neither depends on the other.
                 val stopPredictionSource = agency.component<StopPredictionSource>()
                 val liveVehicleSource = agency.component<LiveVehicleSource>()

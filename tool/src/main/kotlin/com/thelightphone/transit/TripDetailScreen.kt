@@ -300,8 +300,8 @@ class TripDetailViewModel(
                             }
                         }
 
-                    // Vehicle-id predictions give an authoritative next stop, avoiding GPS-proximity mistakes on
-                    // looping routes; falls back to the position chain below when unavailable.
+                    // Try vehicle-id predictions first for an authoritative next stop (GPS proximity can
+                    // misjudge looping routes); otherwise fall back to the position-based matching below.
                     val vehicleNextStop = stopPredictionSource?.let { source ->
                         liveVehicleInfo?.vehicleId?.let { vehicleId ->
                             try {

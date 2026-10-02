@@ -573,8 +573,8 @@ class HomeScreenViewModel(
             val vehicle = trip.agency.fetchVehiclePosition(trip.tripId, repository)
             val tripUpdate = trip.agency.fetchTripUpdate(trip.tripId, repository)
 
-            // Agencies without GTFS-RT can still locate this trip's vehicle through a live source, scoped to
-            // this trip's line type.
+            // Agencies without GTFS-RT can still locate this trip's vehicle through a live source that
+            // covers its line type.
             val liveVehicleSource = trip.agency.component<LiveVehicleSource>()
                 ?.takeIf { source -> trip.lineType != null && trip.lineType in source.coveredLineTypes }
             val stopPredictionSource = trip.agency.component<StopPredictionSource>()
@@ -602,7 +602,8 @@ class HomeScreenViewModel(
                         null
                     }
                 }
-            // Vehicle-id predictions first (authoritative next stop); falls back to the position chain below.
+            // Try vehicle-id predictions first for an authoritative next stop; otherwise fall back to the
+            // position-based matching below.
             val vehicleNextStop = stopPredictionSource?.let { source ->
                 liveVehicleInfo?.vehicleId?.let { vehicleId ->
                     try {

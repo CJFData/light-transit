@@ -663,12 +663,9 @@ class GtfsRepository(dbFile: File) {
     /**
      * Every (route_id, first-stop scheduled departure_time) pair active on [serviceDate], mapped to
      * the one real trip_id that matches -- null when 2+ trips share the same pair, same ambiguous-
-     * match fail-safe [tripIdForScheduledStart] itself already applies. Exists purely as a batched
-     * version of that same lookup: a [RealtimeTripIdBridge]-backed agency (NYC Subway) needs to
-     * resolve every entity in an entire live feed this way, not just one vehicle at a time the way
-     * CTA Bus Tracker does, so it builds the whole (route, start time) map in one stop_times pass
-     * per poll, with the per-pair ambiguity check done in memory afterward, rather than issuing
-     * one lookup per entity.
+     * match fail-safe [tripIdForScheduledStart] applies. A batched version of that lookup for
+     * resolving every entity in a live feed at once: one stop_times pass per poll instead of one
+     * lookup per entity.
      */
     fun scheduledStartTimesByRoute(serviceDate: LocalDate): Map<Pair<String, String>, String?> {
         val serviceDateGtfs = serviceDate.toGtfsDateString()
