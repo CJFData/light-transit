@@ -149,7 +149,7 @@ jobs:
           destination: integration
 
       # Test images for light-two's pipeline. dev-* tags never move latest or a
-      # version tag; light-two only pulls digests pinned in LIGHT_BUILDER_IMAGES.
+      # version tag; light-two pulls them only when LIGHT_BUILDER_SDK_GIT_REF is set.
       # Login happens after every tool build has finished.
       - run:
           name: push dev image
