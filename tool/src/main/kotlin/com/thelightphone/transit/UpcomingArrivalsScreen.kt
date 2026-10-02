@@ -231,17 +231,9 @@ class UpcomingArrivalsViewModel(
                 // staleness/offline) stays keyed off the agency's own primary feed only.
                 val feed = agency.fetchMergedTripUpdates(repository, "UpcomingArrivalsScreen")
 
-                // An agency with no standard GTFS-RT feed at all (e.g. CTA -- both realtimeTripUpdatesUrl
-                // and realtimeVehiclePositionsUrl null) leaves [feed] permanently empty; its live data
-                // comes through a [StopPredictionSource] (real predicted times, e.g. CTA Bus Tracker's
-                // getpredictions) or a [LiveVehicleSource] (raw positions only) instead, both of which
-                // until now were wired into MapScreen's vehicle markers only -- never into arrivals, so
-                // this screen was unconditionally offline for such an agency regardless of whether either
-                // source had real data. [StopPredictionSource] is checked first since it carries a real
-                // predicted time; [LiveVehicleSource] is the fallback when only a position is available.
-                // Fetched concurrently, not sequentially -- confirmed live these are two independent CTA
-                // network round-trips, and awaiting them one after another measurably slowed this screen's
-                // load for no benefit, since neither depends on the other's result.
+                // Agencies without GTFS-RT leave [feed] empty and supply live data through a [StopPredictionSource]
+                // (predicted times, preferred) or a [LiveVehicleSource] (positions). Both are fetched concurrently,
+                // since neither depends on the other.
                 val stopPredictionSource = agency.component<StopPredictionSource>()
                 val liveVehicleSource = agency.component<LiveVehicleSource>()
                 val fuzzyRunTrips = agency.component<FuzzyRunTrips>()

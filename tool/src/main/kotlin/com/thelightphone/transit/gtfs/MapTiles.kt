@@ -225,13 +225,8 @@ class MapTileClient {
         MapTiles(zoom, centerFracX, centerFracY, tiles)
     }
 
-    /** The requested [children] (tiles at [zoom]) cut from their shared parent's 512px @2x tile at
-     * zoom - 1. Each quadrant of the parent covers exactly one child's ground area, so a quadrant is
-     * a drop-in 256px tile for [MapTiles.screenOffset]. One request per four tiles cuts tile requests
-     * (and CARTO usage) roughly 4x versus fetching each tile at [zoom]; the parent zoom's cartography
-     * also draws street names twice as large, which reads better on this screen, at the cost of one
-     * zoom level less street detail. Returns cached quadrants without a request when every child is
-     * already cached; a failed parent fetch omits all four, same as a failed single tile would. */
+    /** [children] (tiles at [zoom]) cut from their parent's 512px @2x tile at zoom - 1: one request
+     * per four tiles, with larger street labels. Each quadrant is a drop-in 256px tile. */
     private suspend fun fetchFromParentTile(
         parentX: Int,
         parentY: Int,

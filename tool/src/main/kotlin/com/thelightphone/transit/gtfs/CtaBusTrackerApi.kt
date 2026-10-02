@@ -44,13 +44,8 @@ private val ctaBusJson = Json { ignoreUnknownKeys = true }
 object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     override val coveredLineTypes: Set<LineType> = setOf(LineType.BUS)
 
-    // Shared across every call (both vehiclesByRoute and predictionsByStop), never closed -- this is
-    // a singleton object living for the app's whole lifetime, so there's no owning screen to close it
-    // from. A fresh HttpClient(OkHttp) per call was paying full TLS/TCP handshake cost on every single
-    // poll instead of reusing a pooled connection -- confirmed live via on-device timing logs showing
-    // ~5-6s per call (vehiclesByRoute) that a direct curl from a dev machine did in well under 1s, the
-    // real cause behind Trip Detail's "takes 10 seconds to load/update" report (two such calls run
-    // sequentially there -- see predictionsByStop's own doc for why they can't run concurrently).
+    // Shared across calls and never closed (this object lives for the app's lifetime), so polls reuse
+    // pooled connections instead of a new TLS handshake each time.
     private val client = HttpClient(OkHttp)
 
     override suspend fun vehiclesByRoute(routeIds: Set<String>, repository: GtfsRepository): Map<String, LiveVehicleInfo> {
@@ -89,17 +84,10 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     }
 
     /**
-     * See [StopPredictionSource]'s own doc for why this is the preferred source for Upcoming
-     * Arrivals over [vehiclesByRoute] -- `getpredictions` hands back a real predicted arrival time
-     * (`prdtm`) per stop, not just a raw vehicle position, so an ETA computed from it can reflect an
-     * actual delay instead of just trusting the static schedule. `stpid` accepts multiple
-     * comma-delimited stop ids (verified live); `stst`/`stsd` on each prediction are the same
-     * scheduled-start fields `getvehicles` publishes, resolved to a trip_id the identical way.
-     *
-     * Returns the raw predicted instant only, NOT a diffed status -- `stst`/`stsd` here are the
-     * trip's own *first*-stop scheduled time (needed for the trip_id bridge), not the scheduled time
-     * at the specific stop being predicted for, so this has no correct basis to compute a delay
-     * itself. See [StopPredictionSource]'s own doc for why that distinction matters.
+     * Predicted arrival times (`prdtm`) for one or more stops, preferred over [vehiclesByRoute] for
+     * Upcoming Arrivals. `stst`/`stsd` resolve each prediction to a trip_id the same way `getvehicles`
+     * does. Returns the raw predicted instant, not a delay: `stst` is the trip's first-stop time, not
+     * this stop's, so there's no basis here to compute one.
      */
     override suspend fun predictionsByStop(stopIds: Set<String>, repository: GtfsRepository, zoneId: ZoneId): Map<String, Long> {
         if (stopIds.isEmpty()) return emptyMap()
@@ -129,14 +117,8 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     }
 
     /**
-     * See [StopPredictionSource.nextStopForVehicle]'s own doc for why this exists (fixes the
-     * looping-route failure mode GPS-proximity matching has). `getpredictions?vid=` returns the
-     * requested vehicle's entire remaining trip, one entry per upcoming stop, real-world confirmed
-     * to already come back correctly ordered (predictions are documented as always ascending by
-     * `prdtm`, verified live 2026-08-23 against a real CTA route-22 bus: 40+ stops, each with its
-     * own `stpid` and real predicted time) -- only the first entry (the vehicle's immediate next
-     * stop) is used here; no trip_id resolution needed, since the caller already knows which trip
-     * this vehicle is on.
+     * `getpredictions?vid=` returns the vehicle's remaining stops in ascending `prdtm` order; the first
+     * is its next stop. No trip_id resolution needed, since the caller already knows the trip.
      */
     override suspend fun nextStopForVehicle(vehicleId: String, repository: GtfsRepository, zoneId: ZoneId): VehicleNextStop? {
         try {
@@ -159,9 +141,7 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     }
 }
 
-/** `prdtm` is "yyyyMMdd HH:mm" in the agency's own local time (confirmed live against CTA's real
- * feed), no timezone info of its own -- same "must anchor to the agency's zone, not the device's"
- * rule as every other GTFS time value in this codebase. */
+/** `prdtm` is "yyyyMMdd HH:mm" agency-local time with no zone, so it's anchored to the agency's zone. */
 private fun parsePredictionTimestamp(raw: String, zoneId: ZoneId): Long? =
     runCatching {
         LocalDateTime.parse(raw, DateTimeFormatter.ofPattern("yyyyMMdd HH:mm")).atZone(zoneId).toEpochSecond()

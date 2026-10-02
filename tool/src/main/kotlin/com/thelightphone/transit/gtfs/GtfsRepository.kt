@@ -644,16 +644,15 @@ class GtfsRepository(dbFile: File) {
     fun tripIdForScheduledStart(routeId: String, startTime: String, serviceDate: LocalDate): String? {
         val serviceDateGtfs = serviceDate.toGtfsDateString()
         val dayColumn = serviceDate.dayOfWeek.toGtfsColumnName()
+        // Scoped to this route's trips first, so it never scans all of stop_times.
         val tripIds = db.rawQuery(
             """
             SELECT t.trip_id
             FROM trips t
-            JOIN (
-                SELECT trip_id, departure_time, MIN(stop_sequence) AS first_seq
-                FROM stop_times
-                GROUP BY trip_id
-            ) first ON first.trip_id = t.trip_id
-            WHERE t.route_id = ? AND first.departure_time = ?
+            JOIN stop_times st ON st.trip_id = t.trip_id
+            WHERE t.route_id = ?
+              AND st.stop_sequence = (SELECT MIN(stop_sequence) FROM stop_times WHERE trip_id = t.trip_id)
+              AND st.departure_time = ?
               AND ${activeTodayClause(dayColumn)}
             """.trimIndent(),
             arrayOf(routeId, startTime, serviceDateGtfs, serviceDateGtfs, serviceDateGtfs),
@@ -667,10 +666,9 @@ class GtfsRepository(dbFile: File) {
      * match fail-safe [tripIdForScheduledStart] itself already applies. Exists purely as a batched
      * version of that same lookup: a [RealtimeTripIdBridge]-backed agency (NYC Subway) needs to
      * resolve every entity in an entire live feed this way, not just one vehicle at a time the way
-     * CTA Bus Tracker does, and calling [tripIdForScheduledStart] once per entity re-ran its own
-     * expensive stop_times-wide subquery once per entity -- confirmed live this session that doing
-     * so made NYC Subway's live feeds take unacceptably long to load. This runs that same subquery
-     * once per poll instead, with the per-pair ambiguity check done in memory afterward.
+     * CTA Bus Tracker does, so it builds the whole (route, start time) map in one stop_times pass
+     * per poll, with the per-pair ambiguity check done in memory afterward, rather than issuing
+     * one lookup per entity.
      */
     fun scheduledStartTimesByRoute(serviceDate: LocalDate): Map<Pair<String, String>, String?> {
         val serviceDateGtfs = serviceDate.toGtfsDateString()

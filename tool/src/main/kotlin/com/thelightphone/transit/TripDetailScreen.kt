@@ -278,12 +278,7 @@ class TripDetailViewModel(
                 val gtfsZip = dbFile.parentFile?.let { File(it, "gtfs.zip") }
 
                 while (isActive) {
-                    // Recomputed every poll, not hoisted above the loop -- confirmed live
-                    // 2026-08-24: a screen left open across midnight kept comparing real live
-                    // times against yesterday's date, producing a nonsense "Early by 1400+ minutes"
-                    // (the ~24h gap between the two). This poll loop can run for as long as the
-                    // rider keeps this screen open, unlike a one-shot load, so the service day
-                    // itself has to be treated as something that can change mid-session.
+                    // Recomputed every poll so a screen left open past midnight uses the new service day.
                     val today = todayForGtfs(agency.zoneId)
                     val vehiclePosition = agency.fetchVehiclePosition(tripId, repository)
                     // Fetched unconditionally now (not just once a matched stop is already in hand)
@@ -305,15 +300,8 @@ class TripDetailViewModel(
                             }
                         }
 
-                    // A source that can be queried directly by its own vehicle id (e.g. CTA Bus
-                    // Tracker's getpredictions?vid=) gives an authoritative next stop + real predicted
-                    // time in one call, immune to the geometric ambiguity GPS-proximity matching has on
-                    // looping/backtracking routes -- see StopPredictionSource.nextStopForVehicle's own
-                    // doc (confirmed live 2026-08-23: a CTA route that loops back through downtown made
-                    // a later stop briefly closer in straight-line distance than the true current one,
-                    // causing an incorrect forward jump). Tried first; falls through to the
-                    // position-based chain below only when unsupported or this vehicle currently has no
-                    // predictions (e.g. near a short-turn).
+                    // Vehicle-id predictions give an authoritative next stop, avoiding GPS-proximity mistakes on
+                    // looping routes; falls back to the position chain below when unavailable.
                     val vehicleNextStop = stopPredictionSource?.let { source ->
                         liveVehicleInfo?.vehicleId?.let { vehicleId ->
                             try {

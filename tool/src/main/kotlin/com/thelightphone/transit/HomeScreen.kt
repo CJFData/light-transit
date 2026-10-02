@@ -573,12 +573,8 @@ class HomeScreenViewModel(
             val vehicle = trip.agency.fetchVehiclePosition(trip.tripId, repository)
             val tripUpdate = trip.agency.fetchTripUpdate(trip.tripId, repository)
 
-            // A richer live source (e.g. CTA Bus Tracker's RunAssociatedTripSource) can locate this
-            // trip's vehicle even when the agency has no standard GTFS-RT feed at all -- same
-            // architecture gap Upcoming Arrivals/Map/Trip Detail had before being wired up; this was
-            // the one screen still missed, confirmed live: Trip Detail showed a moving CTA vehicle
-            // while this progress bar stayed frozen at its starting position the whole trip. Scoped to
-            // this trip's own LineType, same coveredLineTypes rule every other live-source caller uses.
+            // Agencies without GTFS-RT can still locate this trip's vehicle through a live source, scoped to
+            // this trip's line type.
             val liveVehicleSource = trip.agency.component<LiveVehicleSource>()
                 ?.takeIf { source -> trip.lineType != null && trip.lineType in source.coveredLineTypes }
             val stopPredictionSource = trip.agency.component<StopPredictionSource>()
@@ -606,9 +602,7 @@ class HomeScreenViewModel(
                         null
                     }
                 }
-            // Authoritative next stop, immune to GPS-proximity's looping-route ambiguity -- see
-            // StopPredictionSource.nextStopForVehicle's own doc. Tried first; falls through to the
-            // existing position-based chain when unsupported or this vehicle has no predictions right now.
+            // Vehicle-id predictions first (authoritative next stop); falls back to the position chain below.
             val vehicleNextStop = stopPredictionSource?.let { source ->
                 liveVehicleInfo?.vehicleId?.let { vehicleId ->
                     try {
