@@ -69,6 +69,7 @@ jobs:
             docker build \
               -f builder/Dockerfile \
               --platform=linux/amd64 \
+              --add-host maven-proxy=127.0.0.1 \
               --build-arg "SDK_GIT_URL=https://github.com/lightphone/light-sdk" \
               --build-arg "SDK_GIT_REF=${CIRCLE_SHA1}" \
               --secret id=github_token,env=GH_PACKAGES_TOKEN \
@@ -100,7 +101,61 @@ jobs:
               "thelightphone/light-sdk-builder:${SDK_VERSION}" \
               --format '{{index .RepoDigests 0}}'
 
+  verify-light-builder:
+    machine:
+      image: ubuntu-2204:current
+    resource_class: xlarge
+    steps:
+      - checkout
+
+      - run:
+          name: builder unit tests
+          command: |
+            set -euo pipefail
+            python3 -m venv /tmp/venv
+            /tmp/venv/bin/pip install -q pytest
+            cd builder && /tmp/venv/bin/python -m pytest -q
+
+      - run:
+          name: plugin unit tests
+          command: |
+            set -euo pipefail
+            docker run --rm -v "$PWD:/src" -w /src/plugin eclipse-temurin:17-jdk-noble \
+              ../gradlew test --no-daemon
+
+      - run:
+          name: build light-builder image (not pushed)
+          no_output_timeout: 60m
+          command: |
+            set -euo pipefail
+            docker build \
+              -f builder/Dockerfile \
+              --platform=linux/amd64 \
+              --add-host maven-proxy=127.0.0.1 \
+              --build-arg "SDK_GIT_URL=https://github.com/lightphone/light-sdk" \
+              --build-arg "SDK_GIT_REF=${CIRCLE_SHA1}" \
+              -t light-sdk-builder:verify \
+              builder/
+
+      - run:
+          name: build sample tool and fixtures behind the Maven proxy
+          no_output_timeout: 60m
+          command: |
+            set -euo pipefail
+            builder/tests/integration.sh light-sdk-builder:verify /tmp/light-builder-integration
+
+      - store_artifacts:
+          path: /tmp/light-builder-integration
+          destination: integration
+
 workflows:
+  verify-light-builder:
+    jobs:
+      - verify-light-builder:
+          filters:
+            branches:
+              only: feat/build-maven-proxy
+
   build-light-builder:
     jobs:
       - build-and-push-light-builder:

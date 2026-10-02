@@ -10,6 +10,9 @@
 #                  tool directory.>
 #   --dev-repo    <optional; path to an already checked-out dev repo, see
 #                  "Source modes" below>
+#   --abi-filters <comma-separated ABIs to package native libraries for;
+#                  defaults to arm64-v8a, the ABI Light devices run. Pass ""
+#                  to keep every ABI.>
 #
 # Source modes:
 #   clone (default)  We fetch --git-url @ --git-ref ourselves, so the
@@ -51,6 +54,7 @@ usage() {
     cat <<'USAGE' >&2
 usage: build-apk.sh --git-url URL --git-ref REF --output-dir DIR
                     [--tool-path PATH] [--dev-repo CHECKED_OUT_REPO]
+                    [--abi-filters ABIS]
 USAGE
     exit 64
 }
@@ -60,6 +64,7 @@ GIT_REF=""
 MOUNTED_DEV_REPO=""
 OUTPUT_DIR=""
 TOOL_PATH="tool"
+ABI_FILTERS="arm64-v8a"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -68,6 +73,7 @@ while [[ $# -gt 0 ]]; do
         --dev-repo) MOUNTED_DEV_REPO="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
         --tool-path) TOOL_PATH="$2"; shift 2 ;;
+        --abi-filters) ABI_FILTERS="$2"; shift 2 ;;
         -h|--help) usage ;;
         *) echo "unknown flag: $1" >&2; usage ;;
     esac
@@ -189,6 +195,9 @@ GRADLE_ARGS=(
     "--stacktrace"
     "-DlightSdk.unsigned=true"
 )
+if [[ -n "$ABI_FILTERS" ]]; then
+    GRADLE_ARGS+=("-DlightSdk.abiFilters=$ABI_FILTERS")
+fi
 # With LIGHT_MAVEN_PROXY set, dependencies missing from the warmed cache come
 # from the build-time Maven proxy, the only host the container can reach (see
 # bin/local-build.sh). Without it, the build is strictly offline.
