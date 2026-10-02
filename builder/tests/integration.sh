@@ -49,30 +49,6 @@ fixture_repo() {
     echo "$repo"
 }
 
-check_native() {
-    python3 - "$1/build/tool-unsigned.apk" "$1/native-libraries.json" <<'PY'
-import hashlib, json, sys, zipfile
-
-apk, inventory = sys.argv[1], json.load(open(sys.argv[2]))
-approved = inventory["libraries"]
-with zipfile.ZipFile(apk) as archive:
-    names = archive.namelist()
-    if len(names) != len(set(names)):
-        sys.exit("duplicate APK entries")
-    libs = [n for n in names if n.startswith("lib/")]
-    unapproved = [
-        n for n in libs
-        if hashlib.sha256(archive.read(n)).hexdigest() not in approved.get(n, [])
-    ]
-abis = sorted({n.split("/")[1] for n in libs})
-print(f"   {len(libs)} native libraries, ABIs {abis}, unapproved {unapproved}")
-if unapproved:
-    sys.exit("unapproved native libraries")
-if abis not in ([], ["arm64-v8a"]):
-    sys.exit(f"unexpected ABIs: {abis}")
-PY
-}
-
 for name in "${FIXTURES[@]}"; do
     echo "== $name"
     out="$WORKDIR/out/$name"
@@ -81,7 +57,7 @@ for name in "${FIXTURES[@]}"; do
         || { tail -50 "$WORKDIR/$name.log"; echo "$name: build failed" >&2; exit 1; }
     requests="$(grep -cE ' (GET|HEAD) ' "$out/proxy-access.log" || true)"
     echo "   proxy requests: $requests"
-    check_native "$out"
+    python3 "$BUILDER/tests/check_native.py" "$out/build/tool-unsigned.apk" "$out/native-libraries.json"
 done
 
 echo "all fixtures passed"
