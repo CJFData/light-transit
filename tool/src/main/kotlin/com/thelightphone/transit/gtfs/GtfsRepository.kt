@@ -192,16 +192,9 @@ class GtfsRepository(dbFile: File) {
         }
 
     /**
-     * `AND EXISTS (... trips ...)` -- routes.txt itself isn't trustworthy alone for which routes
-     * are actually real here: confirmed live for every `NYC_BUS_*` agency, MTA republishes the
-     * exact same citywide 306-route routes.txt catalog in all 5 NYCT division zips purely so
-     * foreign keys resolve, so e.g. Staten Island's own routes table also lists Brooklyn's B1/B11/
-     * etc. even though it has zero real trips for them. Without this filter, a rider could pick one
-     * of those from "Choose Route" and land on a real dead end at the direction step
-     * ([DirectionSelectionState.NoTrips], since [routeHasTrips] would also be false for it) --
-     * confirmed this session as the actual cause of a "no directions" report that turned out to be
-     * specific to MTA bus routes. A no-op for every other agency, whose own routes.txt already only
-     * lists routes it actually operates.
+     * `AND EXISTS (... trips ...)`: only routes with at least one trip are listed. Some agencies'
+     * routes.txt lists routes they don't run (e.g. a catalog shared across several feeds), which
+     * would otherwise lead to a dead end at direction selection.
      */
     fun getRoutes(lineType: LineType): List<RouteOption> {
         val placeholders = lineType.gtfsRouteTypes.joinToString(",") { "?" }
@@ -367,10 +360,9 @@ class GtfsRepository(dbFile: File) {
         val yesterday = today.minusDays(1)
         val yesterdayGtfs = yesterday.toGtfsDateString()
         val yesterdayDayColumn = yesterday.dayOfWeek.toGtfsColumnName()
-        // Same reasoning as getStops's own directionClause -- Android's rawQuery(sql, String[])
-        // throws IllegalArgumentException on a null array element (confirmed live: CTA's trips have
-        // no trip_headsign at all, so this is null on every real call for it), so a null value
-        // needs its own no-bind-arg clause rather than trying to pass null through "IS ?"/"= ?".
+        // Same reasoning as getStops's directionClause: rawQuery(sql, String[]) throws on a null array
+        // element, and headsign can be null (some agencies publish no trip_headsign), so null gets its
+        // own no-bind-arg clause.
         val variantClause = when {
             headsign != null -> "t.trip_headsign = ?"
             // A trip's own real last stop stands in for headsign -- see getDirections's own doc.
@@ -499,13 +491,9 @@ class GtfsRepository(dbFile: File) {
     fun getDeparturesForVariant(routeId: String, directionId: Int, headsign: String?, lastStopId: String?, stopId: String, today: LocalDate): List<Departure> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
-        // Same reasoning as getStops's own directionClause -- Android's rawQuery(sql, String[])
-        // throws IllegalArgumentException on a null array element (confirmed live: CTA's trips have
-        // no trip_headsign at all), so a null value needs its own no-bind-arg clause rather than
-        // trying to pass null through "IS ?"/"IS NOT ?". [lastStopId] (see [DirectionOption]'s own
-        // doc) plays [headsign]'s exact same role here, including in this "reaches at least as far"
-        // containment check -- a shorter-running trip's own real last stop is a fine substitute for
-        // "which variant is this" the same way its headsign would be.
+        // Same null handling as getStops's directionClause. [lastStopId] (see [DirectionOption]) plays
+        // the same role as [headsign], including in the "reaches at least as far" check: a shorter
+        // trip's last stop identifies its variant just as a headsign would.
         val variantClause = when {
             headsign != null -> "t.trip_headsign = ?"
             lastStopId != null -> """
@@ -775,14 +763,9 @@ class GtfsRepository(dbFile: File) {
         }
 
     /**
-     * The real static lat/lon of [tripId]'s own stop at [stopSequence] -- a coarse map-marker
-     * fallback for an agency whose live VehiclePosition never carries real GPS coordinates at all,
-     * only [GtfsRtVehiclePosition.currentStopSequence]/[GtfsRtVehiclePosition.currentStatus] --
-     * confirmed live for NYC Subway: 93 of 93 sampled VehiclePosition entities had neither field 2
-     * (position) present, since NYCT tracks trains via underground track circuits, not GPS. Not a
-     * guess -- it's the agency's own real coordinate for the exact stop the vehicle's own
-     * current_stop_sequence already points to, just coarser than a real GPS fix would be between
-     * stops. Null if this trip has no stop at that exact sequence.
+     * The static lat/lon of [tripId]'s stop at [stopSequence]: a coarse map-marker fallback for
+     * agencies whose VehiclePositions carry only current_stop_sequence/current_status, with no GPS
+     * coordinates. Null if the trip has no stop at that sequence.
      */
     fun getStopLocationForTripSequence(tripId: String, stopSequence: Int): Pair<Double, Double>? =
         db.rawQuery(
@@ -1465,10 +1448,8 @@ internal fun platformLabelFromStopDesc(stopDesc: String?): String? {
 
 private const val EARTH_RADIUS_METERS = 6_371_000.0
 
-/** ~165ft, kept a round metric value -- see [matchCurrentStopByProximity]'s own doc for why this
- * replaced a relative "is the next stop closer than the current one" comparison. Expanded from 10
- * meters (2026-09-12) after the tighter radius was found to miss stops within a single 10-second
- * poll interval. */
+/** ~165 ft, wide enough that a vehicle can't pass a stop between 10-second polls without
+ * matching it. See [matchCurrentStopByProximity]. */
 private const val PROXIMITY_ARRIVAL_RADIUS_METERS = 50
 
 /** See [matchCurrentStopByProximity]'s own doc -- a looser plausibility check than
