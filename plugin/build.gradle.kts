@@ -36,6 +36,14 @@ tasks.test {
     useJUnitPlatform()
 }
 
+tasks.processResources {
+    val sdkVersion = version.toString()
+    inputs.property("sdkVersion", sdkVersion)
+    filesMatching("**/sdk-version.txt") {
+        expand("sdkVersion" to sdkVersion)
+    }
+}
+
 gradlePlugin {
     plugins {
         create("lightSdk") {
