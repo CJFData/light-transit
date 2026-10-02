@@ -5,13 +5,10 @@ import kotlinx.coroutines.CancellationException
 import java.time.ZoneId
 
 /**
- * See [FuzzyRunTrips]'s own doc for why MBTA Green Line needs ordinal closest-matching -- its own
- * live feed marks ~96% of currently-running vehicles as GTFS-RT `schedule_relationship: ADDED`
- * (confirmed live), meaning they were never in the static schedule at all. Unlike CTA Train Tracker
- * ([CtaTrainTrackerSource]), this needs no separate API or worker route: ADDED trips already arrive
- * in the same standard TripUpdates feed [GtfsAgency.fetchMergedTripUpdates] fetches for every agency,
- * each one already carrying its own full ordered `stop_time_update` list with real predicted times --
- * no second "follow this trip" call needed the way CTA's run numbers require.
+ * [FuzzyRunTrips] for MBTA Green Line, whose live feed marks most running vehicles as GTFS-RT
+ * `ADDED` trips that were never in the static schedule. Unlike [CtaTrainTrackerSource], it needs
+ * no separate API: ADDED trips arrive in the standard TripUpdates feed with full predicted
+ * `stop_time_update` lists.
  */
 object MbtaGreenLineFuzzyRunSource : FuzzyRunTrips {
     override val routeIds: Set<String> = setOf("Green-B", "Green-C", "Green-D", "Green-E")

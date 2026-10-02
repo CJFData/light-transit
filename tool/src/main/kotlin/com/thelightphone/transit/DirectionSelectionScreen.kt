@@ -54,14 +54,9 @@ sealed class DirectionSelectionState {
  * routing detail, not part of the destination riders actually look for. */
 private val viaClauseRegex = Regex(""" via .*""", RegexOption.IGNORE_CASE)
 
-/** A directionName is only worth showing if it's actually a word -- CTA's non-standard trips.txt
- * "direction" column (see [TripDirectionColumn]) is usually a real cardinal ("North"/"South"), but
- * confirmed live on several routes (Pink, CTA's own Green Line, Orange) to just be the bare digit
- * string of whichever direction_id it happens to match, e.g. "0" -- CTA's own data quality gap, not
- * something introduced by ingestion. A bare digit reads as a copy-paste artifact, not a real
- * direction, so it's treated the same as no directionName at all and falls through to "Direction
- * $directionId" -- which for a route like that is no worse (and no better) than what CTA itself
- * published, just honestly labeled as a fallback instead of dressed up as a real name. */
+/** Only shows a directionName if it's a real word. Some feeds put a bare digit (the direction_id
+ * itself) in their direction column, which looks like a glitch, so we treat it as missing and fall
+ * back to "Direction $directionId". */
 private fun String?.asRealDirectionName(): String? = this?.takeIf { it.isNotBlank() && it.toIntOrNull() == null }
 
 /** Prefers the feed's own curated direction/destination (directions.txt -- see [DirectionOption]'s
@@ -84,16 +79,11 @@ fun DirectionOption.displayLabel(): String {
         ?: "Direction $directionId"
 }
 
-/** The picker row's own text (and the label carried onward to every downstream screen once a
- * direction is chosen) -- always headsign-first, unlike [displayLabel]. Several distinct headsign
- * variants can share one direction_id (see [GtfsRepository.getDirections]'s own doc for real
- * examples), so they also share the same directions.txt-curated directionName/destination; if this
- * preferred directionName the way [displayLabel] does, every variant within a group would render
- * as identical text, defeating the point of keeping them separately selectable. [lastStopName] (see
- * [DirectionOption]'s own doc) plays headsign's exact same role for an agency with no real headsign
- * at all -- confirmed live on CTA Route 124: "Toward Clinton & Quincy" westbound, "Toward Navy Pier
- * Terminal" eastbound. Falls back to the directionName/destination text only when a row has neither
- * a headsign nor a derived last-stop name. */
+/** The picker row's text, also carried to downstream screens once chosen. Always headsign-first,
+ * unlike [displayLabel]: several headsign variants can share one direction_id and its
+ * directions.txt name, and preferring that name would make them render identically.
+ * [lastStopName] (see [DirectionOption]) stands in for a missing headsign. Falls back to the
+ * directionName/destination only when a row has neither. */
 fun DirectionOption.rowLabel(): String =
     (headsign?.takeIf { it.isNotBlank() }?.replace(viaClauseRegex, "")?.trim() ?: lastStopName?.takeIf { it.isNotBlank() })
         ?.let { "Toward $it" }
@@ -103,14 +93,9 @@ fun DirectionOption.rowLabel(): String =
         ?: "Direction $directionId"
 
 /**
- * [rowLabel] with per-group disambiguation: two variants within the same direction_id group can
- * have genuinely different headsigns that collide into identical text once [rowLabel]'s own
- * via-clause stripping is applied -- confirmed live on RIPTA route 9 direction 1, whose "Pascoag"
- * and "Pascoag via Citizens Bank" trips (two real, differently-stopping patterns) both stripped
- * down to "Toward Pascoag", rendering as an apparent duplicate. Falls back to "Toward " plus the
- * full, un-stripped headsign for just the rows that collide, so a rider never sees two
- * identical-looking taps that actually lead to different stop lists; a row whose stripped label is
- * already unique within its own group is untouched.
+ * [rowLabel], disambiguated within each direction_id group: two different headsigns can collapse
+ * to the same text once [rowLabel] strips "via" clauses. Only the colliding rows fall back to
+ * "Toward " plus the full headsign, so two identical-looking rows never lead to different stops.
  */
 fun List<DirectionOption>.disambiguatedRowLabels(): Map<DirectionOption, String> {
     val counts = groupingBy { it.rowLabel() }.eachCount()

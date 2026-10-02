@@ -179,14 +179,11 @@ object CtaTrainTrackerSource : FuzzyRunTrips {
         return propagatedTripUpdate(train, tripId, repository, todayForGtfs(zoneId), zoneId)
     }
 
-    /** Shared by [matchedTripUpdates] (ranked match) and [tripUpdateForRun] (direct, rider-selected
-     * lookup) -- see this object's own doc on why a single-stop update alone isn't enough. Falls
-     * back to that original single-stop shape (real time at [CtattTrain.nextStpId] only, no
-     * propagation) whenever [tripId]'s own static schedule doesn't have a row at that exact stop_id
-     * to anchor a delay against -- confirmed live this can happen on a short-turn/interlined trip
-     * whose actual stop_times don't cover every physical stop the live train reports. Null only when
-     * this train's own position data is incomplete (no next stop reported yet, or its predicted time
-     * didn't parse) -- that case can't even build the fallback. */
+    /** Shared by [matchedTripUpdates] (ranked match) and [tripUpdateForRun] (rider-selected run); see
+     * this object's doc on why a single-stop update isn't enough. Falls back to a single-stop update at
+     * [CtattTrain.nextStpId] when [tripId]'s schedule has no row at that stop (e.g. short-turn or
+     * interlined trips). Null only when the train's position data is incomplete (no next stop yet,
+     * or an unparseable predicted time). */
     private fun propagatedTripUpdate(
         train: CtattTrain,
         tripId: String,

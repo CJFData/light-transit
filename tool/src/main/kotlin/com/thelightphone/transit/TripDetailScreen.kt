@@ -204,18 +204,11 @@ class TripDetailViewModel(
         pollJob?.cancel()
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                // See TripDetailPreferences's own doc -- widens the fetched range back to the
-                // trip's very first stop so a vehicle still approaching from before the boarding
-                // stop has a row to actually match against (see TripDetailState.Loaded's own doc
-                // on liveAtStopSequence: it stays non-null even when no row in `stops` matches it,
-                // which is exactly the gap this toggle closes). A direct one-shot .first() read,
-                // not a collected StateFlow -- Settings isn't shown at the same time as this
-                // screen, so no need to react live, same reasoning as every other one-shot Settings
-                // read in this app (see DepartureListScreen's own includeLongerTripsEnabledFlow
-                // usage). Confirmed live this session: reading a MutableStateFlow instead, updated
-                // by an init{}-launched collector, raced this coroutine's own startup -- the poll
-                // loop could read the flow's initial `false` before that collector's first emission
-                // landed, silently skipping the widened range on some trips but not others.
+                // See TripDetailPreferences: widens the fetched range back to the trip's first stop so a vehicle
+                // still approaching the boarding stop has a row to match (see TripDetailState.Loaded's
+                // liveAtStopSequence). Read once with .first() rather than collected: Settings isn't visible at
+                // the same time, and a collector started in init{} could deliver its first value after this
+                // poll loop had already read the default.
                 val showEarlierStops = tripDetailPreferences.showStopsBeforeBoardingEnabledFlow.first()
                 val stops = repository.getTripStops(tripId, if (showEarlierStops) 0 else fromStopSequence)
                 val tripLineType = repository.getRouteTypeForTrip(tripId)?.let { LineType.forGtfsRouteType(it) }

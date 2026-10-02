@@ -229,10 +229,9 @@ data class ActiveTripStatus(
     /** The boarded trip's own agency timezone -- [etaEpochSeconds] must be rendered against this,
      * not the rider's device zone, same reasoning as every other GTFS time display in the app. */
     val zoneId: ZoneId,
-    /** True only when the fields above came from a [FuzzyRunTrips] source (CTA 'L' trains, MBTA
-     * Green Line) -- an approximate rank-matched pairing, never a certain one (see
-     * [FuzzyRunTrips]'s own doc). [headingSubtitle] must mark this distinctly so a rider never
-     * mistakes an approximation for a confirmed live position while boarded. */
+    /** True only when the fields above came from a [FuzzyRunTrips] source: an approximate
+     * rank-matched pairing, never a certain one. [headingSubtitle] must mark this distinctly so a
+     * rider never mistakes it for a confirmed live position while boarded. */
     val isClosestMatch: Boolean = false,
 )
 
@@ -383,13 +382,9 @@ class HomeScreenViewModel(
     init {
         viewModelScope.launch {
             boardedTripPreferences.boardedTripFlow.collect { newTrip ->
-                // TripPositionAnchor is shared with TripDetailViewModel (see its own doc) and must
-                // only be wiped when the boarded trip's own identity actually changes -- not on
-                // every re-emission of the same trip's record, e.g. picking/clearing the alight
-                // stop on Trip Detail also rewrites this same DataStore entry and re-emits it.
-                // Resetting on every emission discarded an already-advancing anchor mid-ride,
-                // confirmed live on RIPTA as the cause of this progress bar looking permanently
-                // frozen after the alight stop was set.
+                // TripPositionAnchor is shared with TripDetailViewModel (see its doc) and must only be reset
+                // when the boarded trip itself changes, not on every re-emission of the same trip's record
+                // (e.g. setting the alight stop rewrites it), which would discard an advancing anchor mid-ride.
                 if (newTrip?.tripId != boardedTrip.value?.tripId) {
                     TripPositionAnchor.clear()
                 }
@@ -648,14 +643,9 @@ class HomeScreenViewModel(
             // Shared by both the shape and point-radius tiers below -- computed once rather than per
             // tier, since either (or both, across successive polls) may need it.
             val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
-            // Path-aware alternative to matchCurrentStopByProximity, tried first when this agency has
-            // one -- see matchCurrentStopByShapeProjection's own doc for why point-radius matching
-            // alone wasn't enough (RIPTA confirmed live: a real GPS cadence of ~30-60s let a vehicle
-            // advance many stops between two distinct position reports, stalling the point-radius walk
-            // for 7+ minutes since it needs a sample within PROXIMITY_ARRIVAL_RADIUS_METERS of *each*
-            // intervening stop). A trip whose agency has no TripShapeSource (every agency but RIPTA
-            // today) pays nothing here -- shapeSource is null, matchViaShape returns null immediately,
-            // and the existing point-radius tier right below it runs exactly as before.
+            // Path-aware alternative to matchCurrentStopByProximity, tried first when this agency has a
+            // TripShapeSource (see matchCurrentStopByShapeProjection for why). Without one, matchViaShape
+            // returns null immediately and the point-radius tier below runs as before.
             val shapeSource = trip.agency.component<TripShapeSource>()
             suspend fun matchViaShape(lat: Double, lon: Double, bearing: Float?): Int? {
                 val source = shapeSource ?: return null
@@ -860,18 +850,12 @@ class HomeScreenViewModel(
         }
     }
 
-    /** Recomputes [feedAttribution] across [selectedAgency] plus every
-     * [AgencyPreferences.additionalDownloadsFlow] extra that's actually a region-mate of the
-     * primary (see [RegionalGroup.forAgency]) -- [additionalDownloads] itself is one flat,
-     * ungrouped preference (see that field's own doc), so a rider who toggled on NYC extras while
-     * NYC Subway was primary and *later* switches primary to an unrelated, ungrouped agency (e.g.
-     * a plain Colorado one) would otherwise still see those stale NYC credits leak into that
-     * unrelated agency's own attribution line -- confirmed live this session. An ungrouped primary
-     * (no [RegionalGroup] at all) therefore only ever credits itself, regardless of what's sitting
-     * in [additionalDownloads]. Deduplicated by [FeedAttribution.name] (a [LinkedHashMap] keeps
-     * first-seen order stable -- [selectedAgency]'s own credits always lead, extras follow) so two
-     * schedules sharing a real-world publisher (e.g. NYC Subway and a NYC bus borough both crediting
-     * "MTA New York City Transit") only ever show once. */
+    /** Recomputes [feedAttribution] from [selectedAgency] plus any
+     * [AgencyPreferences.additionalDownloadsFlow] extras in the primary's region (see
+     * [RegionalGroup.forAgency]). [additionalDownloads] is one flat preference, so without the region
+     * check, extras from a previous region would leak into an unrelated primary's attribution; an
+     * ungrouped primary only credits itself. Deduplicated by [FeedAttribution.name], keeping
+     * first-seen order ([selectedAgency]'s credits first), so a shared publisher shows once. */
     private fun refreshFeedAttribution() {
         val primary = selectedAgency.value ?: return
         viewModelScope.launch(Dispatchers.IO) {

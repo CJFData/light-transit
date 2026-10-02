@@ -18,35 +18,19 @@ private const val MBTA_V3_VEHICLES_URL = "https://gtfs.picotransit.com/mbta/v3/v
 private val mbtaV3Json = Json { ignoreUnknownKeys = true }
 
 /**
- * MBTA's V3 API (https://api-v3.mbta.com) -- one of two current [LiveVehicleSource] implementations
- * (the other is [RunAssociatedTripSource], CTA's Bus Tracker). Commuter rail track assignments aren't
- * in GTFS-RT at all: MBTA's dispatch system doesn't decide (or publish) a trip's track until
- * roughly 10-15 minutes before departure, so most of the time a Vehicle's `stop` relationship
- * still points at its station's generic per-route placeholder platform (e.g. South Station's
- * "NEC-2287", whose own `platform_code` is null) rather than a real numbered track (e.g.
- * "NEC-2287-01", `platform_code` "1"). A trip with no assignment yet is the common case, not
- * missing data -- [vehiclesByRoute]'s [LiveVehicleInfo.assignedStopId] is simply null for it.
+ * MBTA's V3 API (https://api-v3.mbta.com), used for commuter rail. Track assignments aren't in
+ * GTFS-RT: MBTA assigns a track only shortly before departure, so until then a Vehicle's `stop`
+ * points at the station's generic placeholder platform (whose `platform_code` is null) and
+ * [LiveVehicleInfo.assignedStopId] is null. That's the common case, not missing data.
  *
- * The same `/vehicles` request also carries the vehicle's own live position/status -- more current
- * and (for commuter rail specifically) more reliable than GTFS-RT's separately-published
- * VehiclePositions.pb, so callers use this as commuter rail's preferred position source, falling
- * back to GTFS-RT only when a trip is missing here. Position and status/sequence are always read
- * from the same source for a given vehicle, never mixed between GTFS-RT and V3, so "is it arrived"
- * can't disagree with itself across two feeds with different update cadences.
+ * The same `/vehicles` response also gives each train's position and status, which we prefer over
+ * GTFS-RT VehiclePositions for commuter rail. Both always come from the same source for a given
+ * vehicle, so they can't disagree. Subway and Silver Line platforms are already fixed in GTFS, so
+ * this is only used for commuter rail. Requests filter by route, since `/vehicles` can't filter by
+ * stop.
  *
- * Deliberately scoped to commuter rail only -- subway and Silver Line platforms are static/fixed
- * and already fully resolved via GTFS's own parent_station/child stop_id structure. Filters by
- * route rather than trip or stop -- the API doesn't support filtering `/vehicles` by stop at all --
- * so a caller can discover a trip it has no prior schedule snapshot for, not just ones it already
- * knew to ask about.
- *
- * Requests are authenticated -- the worker injects `MBTA_API_KEY` on every call, raising the rate
- * limit to 1000/min (verified live via the API's own x-ratelimit-limit header), comfortably above
- * this app's one batched call per poll cycle. Streaming is available now that a key is registered
- * but not yet implemented -- still a plain GET poll.
- *
- * JSON:API responses are decoded by hand for just the fields read here, same approach
- * GtfsRealtime.kt takes for GTFS-RT's protobuf feeds, rather than pulling in a full client.
+ * The worker injects `MBTA_API_KEY` on every call for a higher rate limit. JSON:API responses are
+ * decoded by hand for just the fields used here, like GtfsRealtime.kt does for protobuf.
  */
 object MbtaV3VehicleSource : LiveVehicleSource {
     override val coveredLineTypes: Set<LineType> = setOf(LineType.COMMUTER_RAIL)

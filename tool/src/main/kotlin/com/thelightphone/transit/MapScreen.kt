@@ -569,14 +569,8 @@ class MapViewModel(
             }
         }
 
-        // An agency with no standard GTFS-RT VehiclePositions feed at all (e.g. CTA -- both
-        // realtimeVehiclePositionsUrl and realtimeTripUpdatesUrl null) can still have a LiveVehicleSource
-        // (e.g. RunAssociatedTripSource, backed by CTA Bus Tracker's getvehicles) -- checked here, before
-        // either early-return below, so such an agency isn't forced to NOT_SUPPORTED/UNAVAILABLE just
-        // because the standard feed doesn't exist or didn't fetch. Confirmed live: CTA buses have real
-        // getvehicles position data (route 22/36/62 all reporting), but never reached this far because the
-        // realtimeVehiclePositionsUrl==null check below used to return NOT_SUPPORTED unconditionally --
-        // the same class of gap Upcoming Arrivals had before StopPredictionSource was wired in.
+        // Checked before either early return below, so an agency with no standard GTFS-RT
+        // VehiclePositions feed can still show vehicles through a LiveVehicleSource.
         val liveVehicleSource = agency.component<LiveVehicleSource>()
 
         if (agency.realtimeVehiclePositionsUrl == null && liveVehicleSource == null) {
@@ -707,11 +701,9 @@ class MapViewModel(
                     val vehicle = vehiclePositionsByTripId[arrival.tripId] ?: return@mapNotNull null
                     val gpsPosition = vehicle.position
                     currentSeq = vehicle.currentStopSequence
-                    // No real GPS on this entity (see GtfsRepository.getStopLocationForTripSequence's
-                    // own doc -- confirmed live for NYC Subway, tracked underground via track circuits,
-                    // not GPS) -- fall back to this vehicle's own current stop's real coordinates
-                    // instead of dropping the marker entirely. Still null (dropped) if there's no GPS
-                    // AND no resolvable current stop.
+                    // No GPS on this entity (some feeds report only the current stop; see
+                    // GtfsRepository.getStopLocationForTripSequence): fall back to the current stop's coordinates.
+                    // Dropped only if there's neither.
                     val stopFallback = if (gpsPosition == null) {
                         currentSeq?.let { seq -> repository.getStopLocationForTripSequence(arrival.tripId, seq) }
                     } else {

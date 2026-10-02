@@ -35,19 +35,10 @@ private const val MAX_REDIRECTS = 5
 private const val MAX_ENTRY_READ_ATTEMPTS = 3
 
 /**
- * Shared across every [GtfsIngestor] instance in the process, not one per instance -- confirmed on
- * real hardware that a per-instance `Mutex()` doesn't actually prevent two concurrent ingests of the
- * same agency: if something upstream ends up constructing more than one [GtfsIngestor] (e.g. a
- * ViewModel getting recreated while a previous instance's ingest is still in flight, or a rider
- * re-tapping an agency faster than the app can settle), each instance's own private Mutex only
- * serializes calls made through *that* instance, not against a sibling instance's calls to the same
- * on-disk `gtfs.zip`/`transit.db.tmp` paths. That gap produced a real, reproduced failure: one
- * ingest's `downloadZip` truncating and rewriting `gtfs.zip` while another ingest's `parseAndLoad`
- * was still reading it, surfacing as `ZipException`s (`ZIP_Read: error reading zip file`, or even
- * `error in opening zip file` on a brand-new [ZipFile] handle) that looked at first like a corrupt
- * download or a stale OS-reclaimed handle, but reproduced instantly whenever two ingest attempts
- * genuinely overlapped. A single process-wide mutex makes that impossible regardless of how many
- * [GtfsIngestor] instances exist.
+ * One lock for the whole app, not one per instance. More than one [GtfsIngestor] can exist at once
+ * (say, a ViewModel recreated while an ingest is still running), and separate locks wouldn't stop
+ * two of them writing the same agency's `gtfs.zip`/`transit.db.tmp` together, which corrupts the
+ * zip while it's being read.
  */
 private val ingestMutex = Mutex()
 
@@ -507,18 +498,10 @@ private fun loadStops(db: SQLiteDatabase, reader: BufferedReader, idPrefix: Stri
 }
 
 /**
- * Zero-pads each "HH:MM:SS" segment to at least 2 digits -- GTFS's spec technically requires this,
- * but not every real-world feed complies (confirmed on Petaluma Transit's stop_times.txt: some rows
- * use "6:30:00" instead of "06:30:00" for single-digit hours). Every departure/arrival-time
- * comparison in this app (ORDER BY, >=) is a plain SQL string comparison, which only sorts
- * correctly when every value is the same zero-padded width -- an un-padded "6:30:00" sorts AFTER
- * "17:40:00" as a string (since '6' > '1'), silently shoving morning departures to the bottom of
- * the list. Normalizing once here, at ingestion, keeps every downstream query correct without
- * having to special-case string comparisons anywhere else. Null/blank passes through unchanged --
- * GTFS-Flex rows can legitimately have no time at all (see stop_times.txt's own
- * start_pickup_dropoff_window/end_pickup_dropoff_window columns, not read here) -- as does any
- * value that doesn't look like 3 colon-separated segments, rather than crashing ingestion on
- * unexpected real-world formatting.
+ * Zero-pads each "HH:MM:SS" segment to 2 digits. GTFS requires this but not every feed complies,
+ * and every time comparison in this app (ORDER BY, >=) is a string comparison, where "6:30:00"
+ * would sort after "17:40:00". Null/blank values (legitimate in GTFS-Flex rows) and values that
+ * aren't 3 colon-separated segments pass through unchanged.
  */
 private fun normalizeGtfsTime(raw: String?): String? {
     if (raw.isNullOrBlank()) return raw
@@ -634,15 +617,10 @@ private fun loadCalendarDates(db: SQLiteDatabase, reader: BufferedReader, idPref
     }
 }
 
-/** directions.txt is an optional GTFS extension, absent for most agencies -- when empty, this
- * table stays empty and GtfsRepository.getDirections falls back to a headsign-derived label.
- * INSERT OR IGNORE, not a plain INSERT: (route_id, direction_id) is supposed to be a
- * guaranteed-unique key per the spec, but isn't always in practice -- confirmed live in WestCat's
- * own real feed, where route 2676's direction_id 0 appears twice with two different `direction`
- * values ("North", then "Loop"). A plain INSERT threw on that second row and aborted the whole
- * ingest (this agency's own "won't download" bug); OR IGNORE just keeps whichever row came first
- * and drops the rest, same fail-open precedent [loadTrips]'s own synthesized-directions insert
- * already uses for the identical primary key. */
+/** directions.txt is an optional GTFS extension; when absent this table stays empty and
+ * GtfsRepository.getDirections falls back to headsign-derived labels. INSERT OR IGNORE because
+ * (route_id, direction_id) isn't always unique in real feeds, and a duplicate would otherwise
+ * abort the whole ingest. The first row wins, same as [loadTrips]'s synthesized-directions insert. */
 private fun loadDirections(db: SQLiteDatabase, reader: BufferedReader, idPrefix: String) {
     val stmt = db.compileStatement(
         "INSERT OR IGNORE INTO directions (route_id, direction_id, direction, direction_destination) VALUES (?, ?, ?, ?)"

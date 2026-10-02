@@ -1,17 +1,10 @@
 package com.thelightphone.transit.gtfs
 
 /**
- * Bustang (CDOT's intercity coach service) publishes its own static GTFS feed, re-hosted at this
- * URL by RTD Denver alongside RTD's own -- merged into RTD's on-device database via
- * [MultiGtfsFeed] (see [GtfsAgency.RTD]) rather than being its own separate agency entry, so a
- * rider gets both services' schedules from a single "RTD Denver" selection.
- *
- * Its own GTFS-RT TripUpdates/VehiclePositions feeds live on RTD's open-data host under a
- * "cdot/Bustang_" prefixed path, distinct from RTD's own "rtd/" feeds -- verified live and
- * hand-decoded byte-for-byte, field-by-field, via a raw wire-format Python decode script, same
- * approach used for every other agency here. Every field on the wire already matches
- * GtfsRealtime.kt's existing schema, with nothing undeclared -- no schema changes were needed for
- * this one.
+ * Bustang (CDOT's intercity coach) publishes its own static GTFS, re-hosted by RTD Denver, and is
+ * merged into RTD's database via [MultiGtfsFeed] (see [GtfsAgency.RTD]) so one "RTD Denver"
+ * selection covers both. Its GTFS-RT feeds live on RTD's open-data host under a "cdot/Bustang_"
+ * path, separate from RTD's own, and decode with the existing schema.
  */
 val BustangSecondaryFeed = MultiGtfsFeed(
     name = "Bustang",

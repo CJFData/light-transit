@@ -91,11 +91,8 @@ data class ArrivalRow(
      * actual multi-platform grouped station (e.g. "Track 1", "Ashmont/Braintree") -- see
      * GtfsRepository.getScheduledArrivals(stopIds: List<String>, ...). Null for a plain stop. */
     val platformLabel: String?,
-    /** The agency's own timezone, not the device's -- [etaDisplay] must render [etaEpochSeconds]
-     * (an absolute instant) back into a clock time in the agency's own zone, the same "GTFS time
-     * math must use the agency's zone, not the device's" rule as everywhere else in this codebase.
-     * Confirmed live: an Eastern-zone phone showed CTA (Central) arrivals an hour ahead before this
-     * was threaded through. */
+    /** The agency's timezone, not the device's: [etaDisplay] renders [etaEpochSeconds] as a clock
+     * time in the agency's zone, like all GTFS time math in this codebase. */
     val zoneId: ZoneId,
 )
 
@@ -126,10 +123,9 @@ sealed class UpcomingArrivalsState {
     object Loading : UpcomingArrivalsState()
 
     /**
-     * [isOffline] is true when there's no live feed connection at all this session -- either the
-     * agency has no [GtfsAgency.realtimeTripUpdatesUrl] (RIPTA) or the fetch itself failed -- as
-     * opposed to a feed that connected fine but simply has no update for one particular trip,
-     * which is shown per-row with no badge rather than as a screen-wide state.
+     * [isOffline] is true when there's no live feed at all (no [GtfsAgency.realtimeTripUpdatesUrl],
+     * or the fetch failed), as opposed to a feed with no update for one trip, which is shown per row
+     * without a badge.
      */
     data class Loaded(
         val arrivals: List<ArrivalRow>,
@@ -163,10 +159,8 @@ class UpcomingArrivalsViewModel(
      * quick lookup resolves, without waiting on the network-bound arrivals fetch below. */
     val isStation = MutableStateFlow(false)
 
-    /** Unlike every other screen's own load job (see e.g. MapStationViewModel's identical field),
-     * this one was never tracked/cancelled -- confirmed live as a real bug: a stray previous job
-     * kept running past a screen hide/re-show, eventually hitting an already-closed [repository]
-     * from [onCleared] (`attempt to re-open an already-closed object`), not just wasted work. */
+    /** Tracked so a previous load job is cancelled on hide/re-show, like other screens' load jobs;
+     * an untracked one could outlive [onCleared] and hit the closed [repository]. */
     private var loadJob: Job? = null
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -198,13 +192,8 @@ class UpcomingArrivalsViewModel(
                 var scheduled = repository.getScheduledArrivals(stopIds, currentGtfsTimeOfDay(agency.zoneId), today)
 
                 while (isActive) {
-                    // Re-snapshotted if (and only if) the service day itself rolled over while this
-                    // screen stayed open -- confirmed live 2026-08-24: a stale `today` here produced
-                    // a nonsense "Early by 1400+ minutes" (the ~24h gap between a real live time and
-                    // a schedule conversion still anchored to yesterday). A date swap alone isn't
-                    // enough either -- calendar.txt can run a different set of trips from one day to
-                    // the next (e.g. weekday vs weekend), so `scheduled` itself has to be re-fetched,
-                    // not just re-stamped with the new date.
+                    // Re-snapshotted when the service day rolls over while this screen is open. The schedule itself
+                    // is re-fetched, not just re-dated, since calendar.txt can run different trips on different days.
                     val currentDay = todayForGtfs(agency.zoneId)
                     if (currentDay != today) {
                         today = currentDay
@@ -294,28 +283,19 @@ class UpcomingArrivalsViewModel(
                     // station's live predictions are per-platform, same as its static schedule.
                     val rtStopUpdate = feed.byTripId[arrival.tripId]
                         ?.updateFor(arrival.stopId, arrival.stopSequence)
-                    // computeArrivalEta never returns null just because rtStopUpdate is null -- it
-                    // falls back to a valid isLive=false ArrivalEta at the scheduled time (see its own
-                    // doc). So a StopPredictionSource/LiveVehicleSource match has to be checked BEFORE
-                    // calling it, not as an Elvis fallback after -- that fallback is never reached, since
-                    // the first branch always "succeeds" already. Confirmed live: this exact bug was why
-                    // 22 real RunAssociatedTripSource matches (verified in logs) never once appeared as
-                    // live. Priority: a real GTFS-RT match first, then a real predicted time from
-                    // StopPredictionSource, then a LiveVehicleSource-confirmed "live, trust the schedule",
-                    // then a FuzzyRunTrips closest-match (never certain -- see FuzzyRunTrips's own doc --
-                    // so it's below every source that resolves to this exact trip_id with confidence),
-                    // then plain schedule-only.
+                    // computeArrivalEta never returns null (it falls back to a schedule-only time), so the other
+                    // live sources have to be checked before calling it, not after. In order of preference: a
+                    // GTFS-RT match, a predicted time from a StopPredictionSource, a LiveVehicleSource confirming the
+                    // trip is running (so we trust the schedule), a FuzzyRunTrips closest match, and finally the
+                    // plain schedule.
                     val fuzzyStopUpdate = fuzzyMatchesByTripId[arrival.tripId]?.updateFor(arrival.stopId, arrival.stopSequence)
                     var isClosestMatch = false
                     val eta = when {
                         rtStopUpdate != null -> computeArrivalEta(arrival.departureTime, today, rtStopUpdate, agency.zoneId) ?: return@mapNotNull null
                         arrival.tripId in stopPredictions ->
-                            // Diffed against arrival.departureTime -- the real scheduled time AT THIS
-                            // SPECIFIC STOP -- via the same synthetic-GtfsRtStopTimeUpdate pattern a real
-                            // TripUpdates match already uses above, not stopPredictions' own trip-origin
-                            // time (StopPredictionSource has no correct basis to diff against that; see
-                            // its own doc). Confirmed live: comparing against the trip's origin time
-                            // instead produced nonsense "67 minutes late" statuses.
+                            // Diffed against arrival.departureTime, the scheduled time at this stop, via the same synthetic
+                            // GtfsRtStopTimeUpdate pattern as a TripUpdates match. Never against the trip's origin time,
+                            // which StopPredictionSource has no basis to diff against (see its doc).
                             computeArrivalEta(
                                 arrival.departureTime, today,
                                 GtfsRtStopTimeUpdate(departure = GtfsRtStopTimeEvent(time = stopPredictions.getValue(arrival.tripId))),
@@ -337,14 +317,9 @@ class UpcomingArrivalsViewModel(
                             // a fabricated one would be.
                             val fuzzyEta = computeArrivalEta(arrival.departureTime, today, fuzzyStopUpdate, agency.zoneId)
                                 ?: return@mapNotNull null
-                            // isLive && status == null uniquely means "there was a live update, but its
-                            // own diff against this trip_id's schedule was implausible" (see
-                            // ARRIVAL_STATUS_IMPLAUSIBLE_THRESHOLD_SECONDS's own doc) -- a genuine match
-                            // always gets a real status. Confirmed live 2026-08-24: an implausible match
-                            // (an ordinal mismatch during an overnight service gap) showed a borrowed live
-                            // time here that then contradicted this exact trip_id's own real schedule on
-                            // Trip Detail one tap later. Falling back to schedule-only here keeps the list
-                            // row and Trip Detail always agreeing about what a given trip_id's own time is.
+                            // A live result with no status means the update didn't plausibly fit this trip's schedule (see
+                            // ARRIVAL_STATUS_IMPLAUSIBLE_THRESHOLD_SECONDS). Showing the schedule instead keeps this row and
+                            // Trip Detail agreeing on the trip's time.
                             if (fuzzyEta.isLive && fuzzyEta.status != null) {
                                 isClosestMatch = true
                                 fuzzyEta

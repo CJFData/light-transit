@@ -67,17 +67,11 @@ sealed class SelectRunState {
 }
 
 /**
- * Lets a rider explicitly pick which live run they're actually on, by tapping its own real vehicle
- * marker directly on this trip's own stop list -- see
- * [FuzzyRunTrips.liveRunOptions]/[FuzzyRunTrips.tripUpdateForRun]'s own docs for why this exists at
- * all: an automatic closest-match, even a sticky one, is still a guess, and boarding is the one
- * place in the app a wrong guess actively misleads a rider mid-journey. Only ever reachable from
- * Trip Detail while [tripId] is the boarded trip on a route [FuzzyRunTrips] actually covers -- see
- * TripDetailScreen's own Select Run row for that gating.
- *
- * [liveRunOptionsForTrip] already scopes the live pool to this exact trip's own direction and path
- * (see its own doc) -- confirmed live 2026-08-23 that without it, a rider boarding a northbound trip
- * saw southbound runs mixed in with no way to tell them apart.
+ * Lets a rider pick which live run they're on by tapping its vehicle marker on this trip's stop
+ * list. An automatic closest match is still a guess, and boarding is where a wrong guess misleads a
+ * rider mid-journey. Only reachable from Trip Detail while [tripId] is the boarded trip on a
+ * route [FuzzyRunTrips] covers. [liveRunOptionsForTrip] limits the options to runs on this
+ * trip's own direction and path.
  */
 class SelectRunViewModel(
     private val dbFile: File,
@@ -135,13 +129,9 @@ class SelectRunViewModel(
         }
     }
 
-    /** Launched on [HomeVisibility.scope], not [viewModelScope] -- the tap that calls this always
-     * immediately calls `goBack()` right after (see Content()'s own row), which clears this
-     * ViewModel and cancels viewModelScope before a write launched there would actually reach
-     * DataStore. Confirmed live 2026-08-23: the pin silently never persisted with viewModelScope
-     * here, even though goBack() itself ran and returned to Trip Detail successfully -- same
-     * "must outlive this exact screen" reasoning BackToHomeFooter's own pop-loop already uses
-     * [HomeVisibility.scope] for. */
+    /** Launched on [HomeVisibility.scope], not [viewModelScope]: the tap that calls this immediately
+     * calls `goBack()`, which clears this ViewModel and would cancel a viewModelScope write before it
+     * reached DataStore. */
     fun selectRun(runId: String) {
         HomeVisibility.scope.launch { boardedFuzzyRunPreferences.selectRun(tripId, runId) }
     }

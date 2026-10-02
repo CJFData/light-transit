@@ -5,14 +5,10 @@ import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sqrt
 
-/** Matches [PROXIMITY_ARRIVAL_RADIUS_METERS]'s own steady-state window sizing reasoning (10s polls,
- * ordinary city-bus speed), but sized much larger -- this is the window a stuck steady-state walk
- * needs to self-correct across, e.g. several minutes of coarse GPS updates or missed polling, not
- * just one interval. Confirmed live 2026-09-13 (see [[project_pico_transit_proximity_stall_bug]]) that
- * RIPTA's real GPS cadence (~30-60s) let a vehicle advance many stops between two distinct position
- * reports; too small a window would just reproduce that same stall in a milder form. Too large risks
- * matching across a genuine loop back near the route's own start -- 3km is a practical middle ground
- * for a typical urban route, not derived from a hard guarantee. */
+/** How far ahead a stalled position walk can look to catch up. It's much larger than
+ * [PROXIMITY_ARRIVAL_RADIUS_METERS] because a vehicle can pass several stops between infrequent
+ * GPS updates or missed polls. Too large and it could match across a route that loops back near
+ * its start, so 3km is a practical middle ground for city routes. */
 private const val FORWARD_SEARCH_WINDOW_METERS = 3_000.0
 
 /** How close a cold-start hint's own windowed match must be to the shape before it's trusted --

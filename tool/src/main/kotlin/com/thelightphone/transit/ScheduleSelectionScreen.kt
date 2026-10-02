@@ -113,10 +113,8 @@ class ScheduleSelectionViewModel(
         if (agency !in additionalDownloads.value) startIngest(agency)
     }
 
-    // See HomeScreenViewModel's own identical agencyIngestJob -- the zip download + SQLite parse is
-    // real, sustained CPU/IO work; running it on viewModelScope's default Main dispatcher blocked
-    // the UI thread long enough to trigger a real ANR ("Pico Transit isn't responding"), confirmed
-    // live this session navigating while an ingest this triggered was still running.
+    // Runs off the main thread, like HomeScreenViewModel's agencyIngestJob. Downloading and parsing
+    // a schedule takes a while and would freeze the UI otherwise.
     private fun startIngest(agency: GtfsAgency) {
         viewModelScope.launch(Dispatchers.IO) {
             try {

@@ -185,20 +185,11 @@ data class GtfsRtTripDescriptor(
     @ProtoNumber(1001) val nyctTripDescriptorUnused: String? = null,
 )
 
-/** Field 5 (schedule_relationship) is RTD-specific -- present on every one of its live stop time
- * updates -- and declared unused for the same undeclared-field-faults-decode reason as
- * [GtfsRtTripDescriptor]'s doc comment. Field 1005 is the MTA commuter railroads' (LIRR, Metro-
- * North) own nyct_stop_time_update extension (scheduled_track/actual_track) -- hand-verified live
- * against LIRR's real feed: a short nested message whose sub-fields decode as valid UTF-8 track
- * labels (e.g. "203", "4", "2A"), so String is a safe unused-field type here, same reasoning as
- * [GtfsRtTripUpdate]'s own vendor-bundle fields. Field 1001 (NYC Subway's own
- * nyct_stop_time_update extension -- a different field number than LIRR/Metro-North's 1005 above,
- * since NYCT subway and NYCT commuter-rail systems each picked their own extension numbers) is
- * NYC Subway-specific, declared unused for the same reason. Field 7 is also NYC Subway-specific --
- * hand-verified live against a real crash report: unlike the standard spec's `stop_time_properties`
- * (a nested message, which is what a first guess here assumed), NYC Subway's own feed sends field 7
- * as a plain varint, so [Int] rather than [String] is the safe unused-field type -- an undeclared
- * OR wrongly-typed field both fault this hand-rolled decoder the same way, not just a missing one. */
+/** Fields we don't use but have to declare, since this decoder fails on any field it doesn't
+ * recognize or reads as the wrong type. Field 5 is schedule_relationship, which RTD sends. Field
+ * 1005 is LIRR/Metro-North's track-label extension, safe to read as a String. Field 1001 is NYC
+ * Subway's own extension. Field 7 is a plain number in NYC Subway's feed rather than the spec's
+ * nested `stop_time_properties`, so it's an [Int]. */
 @Serializable
 data class GtfsRtStopTimeUpdate(
     @ProtoNumber(1) val stopSequence: Int? = null,
@@ -481,10 +472,8 @@ private suspend fun <T> GtfsAgency.fetchMerged(
         }
     }
     val bridge = components.filterIsInstance<RealtimeTripIdBridge>().firstOrNull()
-    // Computed once per poll, not once per entity -- see scheduledStartTimesByRoute's own doc for
-    // why a per-entity repository.tripIdForScheduledStart call each re-ran an expensive query
-    // (confirmed live: made NYC Subway's own feeds, which have thousands of entities across their
-    // (now server-side merged) feeds, take unacceptably long to load).
+    // Computed once per poll, not per entity: a per-entity lookup is too slow for feeds with
+    // thousands of entities (see scheduledStartTimesByRoute).
     val scheduleMap = if (bridge != null) repository.scheduledStartTimesByRoute(todayForGtfs(zoneId)) else null
     // Resolves and aliases every entity's raw trip_id to its real static trip_id before it's put in
     // the map, so every downstream consumer still sees a plain real-trip_id-keyed entity -- applied
@@ -571,13 +560,9 @@ suspend fun GtfsAgency.fetchMergedVehiclePositions(repository: GtfsRepository, l
 /** Default +/- window (seconds) within which a live prediction still counts as "On time". */
 const val ARRIVAL_STATUS_TOLERANCE_SECONDS = 90L
 
-/** Beyond this +/- diff, a Late/Early status stops being a plausible real-world delay and starts
- * meaning "this live prediction was diffed against the wrong scheduled trip" -- confirmed live
- * 2026-08-24: MBTA's ordinal [FuzzyRunTrips] matching (rank-based, not nearest-time) paired a real
- * live Green Line D vehicle against the nearest scheduled candidate by rank, which during an
- * overnight service gap (no Green-D trip scheduled between ~1 AM and 5:21 AM) was hours away,
- * producing a technically-accurate but nonsensical "Early by 291m". See [computeArrivalEta]'s own
- * doc for why the ETA itself stays correct regardless -- only the status label is capped. */
+/** Beyond this +/- diff, a Late/Early status means the prediction was matched to the wrong
+ * scheduled trip (e.g. an ordinal fuzzy-run match across an overnight service gap), not a real
+ * delay. Only the status label is capped; see [computeArrivalEta] for why the ETA stays correct. */
 const val ARRIVAL_STATUS_IMPLAUSIBLE_THRESHOLD_SECONDS = 90 * 60L
 
 /** How stale (seconds) a feed's header timestamp can be before it's flagged to the user. */
