@@ -102,13 +102,15 @@ Rosetta for x86_64/amd64 emulation"** is enabled. With Colima, use
 then completes in about 40 minutes. QEMU emulation with 8 GB runs out of
 memory during the warm-up.
 
-## Running a build locally
+## Running a build
 
-`bin/local-build.sh` runs a build the way CI does: proxy, isolated build
+`bin/build.sh` is the host-side driver CI uses (it extracts the script from
+the pinned image) and the way to build locally: proxy, isolated build
 network, build, then the trusted native-library inventory.
+`bin/build-apk.sh` is the entrypoint inside the build container.
 
 ```sh
-builder/bin/local-build.sh \
+builder/bin/build.sh \
   --image lightphone/light-builder:<tag> \
   --dev-repo /path/to/checkout \
   --output-dir ~/light-build-out
@@ -160,7 +162,7 @@ which allowlisted AARs were served, and fetches them directly from upstream
 over verified HTTPS, so a compromised proxy cannot approve its own bytes. The
 plugin never strips `.so` files, so packaged bytes match the AAR's.
 
-## Running a build
+## Running the container directly
 
 ```sh
 docker run --rm \

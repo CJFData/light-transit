@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end builder check: builds the sample tool and the fixtures in
-# tests/fixtures/ through bin/local-build.sh, then checks every packaged
+# tests/fixtures/ through bin/build.sh, then checks every packaged
 # native library is approved by the build's native-libraries.json.
 #
 # usage: tests/integration.sh IMAGE WORKDIR [FIXTURE...]
@@ -76,7 +76,7 @@ PY
 for name in "${FIXTURES[@]}"; do
     echo "== $name"
     out="$WORKDIR/out/$name"
-    "$BUILDER/bin/local-build.sh" --image "$IMAGE" --dev-repo "$(fixture_repo "$name")" \
+    "$BUILDER/bin/build.sh" --image "$IMAGE" --dev-repo "$(fixture_repo "$name")" \
         --output-dir "$out" > "$WORKDIR/$name.log" 2>&1 \
         || { tail -50 "$WORKDIR/$name.log"; echo "$name: build failed" >&2; exit 1; }
     requests="$(grep -cE ' (GET|HEAD) ' "$out/proxy-access.log" || true)"

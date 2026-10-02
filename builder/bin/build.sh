@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Host-side driver: builds a tool the way CI does, behind the build-time Maven
-# proxy.
+# Host-side build driver, used by CI and for local runs: builds a tool behind
+# the build-time Maven proxy. bin/build-apk.sh is the entrypoint inside the
+# build container; this script sets up the containers around it. CI extracts
+# it from the pinned image, so CI and local runs share one implementation.
 #
 #   build container ──(internal network)──> proxy container ──> Google /
 #                                                               Central /
@@ -15,7 +17,7 @@
 # dev code) turns the proxy log into the native-library inventory the signing
 # service checks the APK against (see lightbuilder/native.py).
 #
-# usage: local-build.sh --image IMAGE --dev-repo PATH --output-dir DIR
+# usage: build.sh --image IMAGE --dev-repo PATH --output-dir DIR
 #                       [--tool-path PATH] [--git-url URL] [--abi-filters ABIS]
 #
 # --dev-repo must be a git checkout; its HEAD is the commit that gets built.
@@ -30,7 +32,7 @@ set -Eeuo pipefail
 
 usage() {
     cat <<'USAGE' >&2
-usage: local-build.sh --image IMAGE --dev-repo PATH --output-dir DIR
+usage: build.sh --image IMAGE --dev-repo PATH --output-dir DIR
                       [--tool-path PATH] [--git-url URL] [--abi-filters ABIS]
 USAGE
     exit 64

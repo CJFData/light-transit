@@ -5,7 +5,7 @@
 #
 # The image bakes in a pinned commit of the Light SDK, a pre-warmed Gradle
 # dependency cache and the build-time Maven proxy. At runtime the build
-# container reaches only that proxy (see bin/local-build.sh), which serves
+# container reaches only that proxy (see bin/build.sh), which serves
 # dependencies missing from the cache from Google, Maven Central, the Gradle
 # Plugin Portal and JitPack (com.github.lightphone only). The image digest
 # describes the toolchain, the SDK source and the proxy configuration.
@@ -25,7 +25,7 @@
 #     --build-arg SDK_GIT_REF=<tag-or-commit> \
 #     -t lightphone/light-builder:<tag> builder/
 #
-# Runtime: see bin/local-build.sh, which CI mirrors. Without LIGHT_MAVEN_PROXY
+# Runtime: see bin/build.sh, which CI runs too. Without LIGHT_MAVEN_PROXY
 # the build runs strictly --offline against the warmed cache.
 
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708

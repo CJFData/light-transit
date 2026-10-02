@@ -200,7 +200,7 @@ if [[ -n "$ABI_FILTERS" ]]; then
 fi
 # With LIGHT_MAVEN_PROXY set, dependencies missing from the warmed cache come
 # from the build-time Maven proxy, the only host the container can reach (see
-# bin/local-build.sh). Without it, the build is strictly offline.
+# bin/build.sh). Without it, the build is strictly offline.
 if [[ -n "${LIGHT_MAVEN_PROXY:-}" ]]; then
     GRADLE_ARGS+=("--init-script" "$LIGHT_BUILDER_HOME/proxy/init.gradle.kts")
 else
