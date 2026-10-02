@@ -185,11 +185,18 @@ export SOURCE_DATE_EPOCH="$DEV_COMMIT_EPOCH"
 GRADLE_ARGS=(
     ":tool:assembleRelease"
     "--no-daemon"
-    "--offline"
     "--no-build-cache"
     "--stacktrace"
     "-DlightSdk.unsigned=true"
 )
+# With LIGHT_MAVEN_PROXY set, dependencies missing from the warmed cache come
+# from the build-time Maven proxy, the only host the container can reach (see
+# bin/local-build.sh). Without it, the build is strictly offline.
+if [[ -n "${LIGHT_MAVEN_PROXY:-}" ]]; then
+    GRADLE_ARGS+=("--init-script" "$LIGHT_BUILDER_HOME/proxy/init.gradle.kts")
+else
+    GRADLE_ARGS+=("--offline")
+fi
 echo ">> running gradle ${GRADLE_ARGS[*]}"
 (cd "$WORKSPACE" && ./gradlew "${GRADLE_ARGS[@]}") 2>&1 | tee -a "$OUTPUT_DIR/build.log"
 

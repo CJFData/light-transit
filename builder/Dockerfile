@@ -90,7 +90,9 @@ RUN git clone --no-tags "${SDK_GIT_URL}" /opt/light-sdk; \
 # build of this SDK commit, and runtime can run --offline.
 FROM --platform=linux/amd64 sdk AS warm
 
-RUN cd /opt/light-sdk; \
+# An incomplete cache cannot support offline builds; fail the image build too.
+RUN set -eu; \
+    cd /opt/light-sdk; \
     ./gradlew :tool:assembleRelease --no-daemon --stacktrace; \
     # Drop build outputs but keep the populated dep cache.
     find /opt/light-sdk -path '*/build' -type d -prune -exec rm -rf {} +
@@ -105,10 +107,16 @@ ENV LIGHT_SDK_HOME=/opt/light-sdk \
     LIGHT_SDK_GIT_REF=${SDK_GIT_REF} \
     PYTHONPATH=/opt/light-builder
 
+# nginx runs the build-time Maven proxy from this same image (see
+# proxy/nginx.conf), so one digest pins both.
+RUN apt-get update && apt-get install -y --no-install-recommends nginx \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY lightbuilder /opt/light-builder/lightbuilder
 COPY bin /opt/light-builder/bin
+COPY proxy /opt/light-builder/proxy
 
-RUN chmod +x /opt/light-builder/bin/build-apk.sh
+RUN chmod +x /opt/light-builder/bin/build-apk.sh /opt/light-builder/bin/maven-proxy.sh
 
 RUN useradd --create-home --shell /bin/bash builder \
     && chown -R builder:builder /opt/light-sdk /opt/gradle-cache /opt/light-builder
