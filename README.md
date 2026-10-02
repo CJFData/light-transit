@@ -1,64 +1,50 @@
-# 🚌 Pico Transit-Public Transit for the Light Phone III
+# 🚌 Pico Transit: Public Transit for the Light Phone III
 
-Pico Transit is a friendly little companion for getting around on public transit. Real schedules, real-time arrivals, live connections at any stop, and a live map that shows exactly where your ride actually is — no ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
+Pico Transit is a friendly little companion for getting around on public transit: real schedules, live arrivals, connections at any stop, and a live map showing where your ride actually is. No ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-Right now Pico Transit tracks real-time arrivals for **MBTA**, **RIPTA**, **RTD Denver** (plus Bustang, the state's intercity coach service), **LTC Ontario** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, all 5 NYC bus boroughs plus MTA Bus Company, **Nashville's WeGo Public Transit**, and around 50 SF Bay Area operators (BART, Muni, AC Transit, Caltrain, VTA, and dozens more via 511.org's regional feed, buses/subway/rail/ferry alike) — **110 feeds in total**, the rest (about 40 across Colorado, 9 across the Puget Sound region, plus Metra, Pace, and LA Metro) with static schedules only, no live tracking yet. More hopefully hopping aboard down the road. It's built on the [Light SDK](../) for the Light Phone III, so it stays just as calm and un-distracting as the rest of your Light experience.
+It covers **110 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, and the SF Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more). The rest have schedules only for now: about 40 Colorado agencies, 9 in the Puget Sound region, Metra, Pace, and LA Metro.
 
-Pico Transit can be used alongside the light phone's directions tool for more context on your commutes, or standalone, covering buses, commuter rail, subway systems, ferries, and transit stations.
+Use it on its own or alongside the Light Phone's Directions tool. It's built on the [Light SDK](https://github.com/lightphone/light-sdk), so it stays as calm and un-distracting as the rest of your Light experience.
 
 ## 🔄 Recent updates
 
-- 🌲 **9 Puget Sound agencies** — static schedules for King County Metro, Sound Transit, Pierce Transit, Community Transit, Kitsap Transit, Intercity Transit, Everett Transit, Washington State Ferries, and the Seattle Center Monorail. Not yet integrated with live tracking, so these are schedule-only for now.
-- 🐛 **Fixed live vehicle tracking drifting or freezing on agencies with gappier feeds** (confirmed live on RIPTA) — when a live feed gives raw GPS but never says which stop a bus is at directly, Pico Transit has to work that out itself; that could pick the wrong stop off a stale signal, let the home screen and Trip Detail disagree with each other about where the bus was, or freeze in place for several minutes once real GPS updates came in more slowly than stops passed by. Home and Trip Detail now share one tracked position and validate that signal against real GPS before trusting it — a fix for any agency in this situation, not just RIPTA. RIPTA specifically also gets a beta feature on top: matching a vehicle's actual GPS against its route's real path instead of just checking distance to each stop one at a time, catching up correctly even when several stops pass between updates.
-- 🎶 **Nashville's WeGo Public Transit, live** — added in honor of Dolly Parton ("And I Will Always Love You"), Music City's own agency joins with full live tracking from day one: real-time arrivals and vehicles right on the map, not just a static schedule.
-- 🚌 **NYC Bus, live** — all 5 boroughs (Bronx, Brooklyn, Manhattan, Queens, Staten Island) plus MTA Bus Company, each its own selectable schedule, all sharing MTA's one combined live feed so real buses show up on the map and in Trip Detail regardless of which borough you picked. Also fixed along the way: "Choose Route" was listing every one of NYC's 306 citywide bus routes for every borough (MTA republishes the same route catalog in all 5 division feeds) — now scoped to only the routes that borough actually runs.
-- 🚇 **NYC Subway, genuinely live** — not an approximation: subway trip_ids pack their own scheduled start time in MTA's encoding, which Pico Transit now decodes and matches back to the real scheduled trip, the same certainty LIRR/Metro-North already had. Fixed along the way: that decoding was only ever being applied to 7 of the 8 line-group feeds, so A/C/E trains never showed live data at all until now. Also faster — all 8 feeds are now merged into one request server-side, instead of the app fetching all 8 itself on every poll.
-- 🏔️ **~40 more Colorado agencies** — static schedules for the rest of the state's transit systems listed alongside RTD Denver and Bustang, from Vail Transit to Durango Transit to a handful of GTFS-Flex demand-response services. Not yet integrated with live tracking, so these are schedule-only for now.
-- 🚉 **Merge feed stations** — for any agency that merges a second real GTFS feed into its own, a physically co-located station now shows up once instead of once per feed. RTD Denver's Union Station and Bustang's own gates there are the clearest example — LA Metro's own bus/rail split gets the same treatment.
+**v0.4.0**
+- 🗺️ **Easier-to-read maps**: street names are drawn larger, and each map loads with about a quarter as many tile requests.
+- 🚌 **CTA bus trips load much faster**: matching live buses to their scheduled trips no longer scans the whole schedule for every bus.
+- 🔍 **Explore search stays put**: typing an address is no longer interrupted when the background location lookup finishes.
+- 🔒 **A new home for live data**: the proxy moved to `gtfs.picotransit.com` and now only accepts the kinds of requests the app actually makes.
 
-  ![alt text](docs/screenshots/union_station.png)
-  ![alt text](docs/screenshots/unionstation_arrivals.png)
-- 🗂️ **Multiple schedules at once, by region** — three regions now group their agencies together for downloading: **New York City** (NYC Subway, LIRR, Metro-North, and all 6 NYC bus divisions), **Denver** (RTD + Bustang), and the **SF Bay Area** (all 40+ 511-integrated agencies). Pick your primary agency as always; once it's part of one of these regions, Settings' new "Additional Schedules" row lets you toggle on any other schedule in that same region to browse alongside it — tap-and-hold one there to make it your new primary instead, or just board a trip from it directly. The home screen's Schedule button now offers a quick "Choose Schedule" picker whenever more than one of a region's schedules is downloaded, skipping straight to the usual route list when there's only one. Pico Transit's overall agency list keeps growing (see the intro above), so expect these three regions' own rosters — and hopefully new regions entirely — to keep growing too.
-- 🚉 **Stations list opens straight to arrivals now** — tapping a station in the Stations list used to always open its platform map; now it jumps straight to that station's live upcoming arrivals instead (the map's still one tap away from there). Tap-and-hold does the opposite, opening the platform map. On by default, and scoped to the Stations list only — nothing else changes. The Map screen's own top bar now also reminds you what double-tap and tap-and-hold do there, but only for whichever of those two gestures you actually have on in Settings.
-- 🚋 **Select Run, for CTA 'L' trains and MBTA Green Line** — both show up on Trip Detail as a "Closest match," Pico Transit's own best guess at which live vehicle is yours. Select Run lets you confirm or correct that guess yourself: open it to see the whole trip's stop list with each live vehicle shown right on its current stop and tap the one you're on, or use the quick Next/Previous stepper next to "Select Run" to nudge the pick one vehicle at a time. Both are optional in Settings (on by default; the stepper is a nested toggle under it, off by default).
-- 🐛 **Fixed a "running 1400+ minutes early" bug on trips that cross midnight** — a trip that starts before midnight and is still running into the early morning uses GTFS's own "transit day" convention (hour values past 24:00, staying on the service day it started on) — several shared schedule queries only ever checked whether a trip's service was active *today*, missing that case entirely. Fixed by also checking yesterday's service for a trip still plausibly in progress.
-- 🧭 **Fixed routes showing more "directions" than they actually have** — MBTA's Franklin/Foxboro Line, for example, was showing 4 separate directions instead of 2, because every distinct destination sign (a short-turn train to Readville, one continuing to South Station) counted as its own direction. Directions are now grouped by GTFS's real `direction_id` (never more than 2), with a proper Inbound/Outbound header wherever an agency publishes that data (MBTA does, via `directions.txt`) — every real destination stays individually pickable, none get hidden or merged away.
-- 🚏 **No more "phantom stops" on short-turn trips** — picking "Toward Readville" on that same Franklin/Foxboro Line used to still list every stop all the way to South Station, since a short-turn train and the full-length one share a direction. The stop list is now scoped to exactly what the picked destination actually reaches, and also skips any stop with no departures left today, so tapping in never dead-ends on an empty screen.
-- ⏱️ **Departures now match the direction you picked** — by default, a stop shared by a short-turn trip and a longer one (e.g. Readville vs. South Station) shows both, since either gets you at least as far as the shorter one promises — but never the other way around, so picking the longer destination never shows you a train that stops short of it. A new Settings toggle ("Include longer trips in departures") switches to an exact match only, for anyone who'd rather not see the extra trips at all.
-- 🚍 **Bustang live tracking** — Bustang, Colorado's statewide intercity coach service, now merges right into RTD Denver: its own routes and stops show up alongside RTD's own in schedules and connections, and its live vehicles now track on the map too, not just its static timetable.
-- ⛴️ **Ferries now have their own icon** — SF Bay Ferry, Golden Gate Ferry, Angel Island Tiburon Ferry, and Treasure Island Ferry show up on the map with a proper ferry icon instead of being lumped in with buses, matching dark/light map theming like every other mode.
-- 🐛 **Fixed a stuck home screen progress bar** — This was noticed in agencies that never populate `current_stop_sequence` in their live vehicle feed left the home screen's trip progress bar frozen in place, even though the same trip's own Trip Detail screen showed it moving. The home screen now falls back to the same GPS-proximity and TripUpdate-based matching Trip Detail already used.
-- 👋 **A real onboarding step, and a clock on the home screen** — first launch (or picking "Transit Agency" again in Settings) now opens a dedicated welcome screen to choose your agency, instead of the home screen doubling as an always-visible picker. Once an agency's picked, the home screen shows a ticking clock in that agency's own timezone, its name, and a loading indicator while its schedule downloads — and the clock stays put once a trip's boarded too, right alongside your live ETA and progress bar.
-- 🔍 **Searching a much longer agency list** — with the SF Bay Area rollout the picker jumped from a handful of agencies to over 50, so search now kicks in automatically once the list passes 10 entries: an inline live-filter keyboard docks right into the picker, same pattern used everywhere else in the app.
-- 🔍 **Comment and documentation audit** — every code comment across the tool module got reviewed for accuracy against current source and rewritten in plainer, more durable language — less session-specific narration and dated verification detail, more of what a future reader actually needs to know. Caught (and fixed) several comments that had quietly drifted from what the code actually does.
+**Earlier**
+- 🌲 **9 Puget Sound agencies**: King County Metro, Sound Transit, Pierce Transit, Community Transit, Kitsap Transit, Intercity Transit, Everett Transit, Washington State Ferries, and the Seattle Center Monorail (schedules only for now).
+- 🐛 **Steadier live tracking** on feeds with infrequent GPS updates. RIPTA also follows each vehicle along its real route path, so it catches up even when several stops pass between updates.
+- 🎶 **Nashville's WeGo, live**: added in honor of Dolly Parton, with full live tracking from day one.
 
-## 🔭 Upcoming developments
+The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
-- 📍 **Real GPS for Explore, waiting on LightOS's production rollout** — Explore now ranks stops by your actual GPS location instead of a typed address, with a pinned Search to look up a different spot and a Recenter button to jump back to your own. It's built and working, but marked **(Testing)** in Settings: LightOS itself doesn't yet trust non-Light-signed builds for these particular location calls in production, so real GPS ranking only works once Light ships that trust — address search stays available as a fallback in the meantime.
-- 🚏 **More agencies coming soon** — thanks to community support, Pico Transit's agency list keeps growing beyond where it started.
-- ⚠️ **Service alerts** — surfacing GTFS-RT's Alerts feed (detours, delays, service changes) isn't wired in yet; today Pico Transit only reads TripUpdates and VehiclePositions. Planned so riders get a heads-up on disruptions, not just a vehicle that's simply running late.
-- 🗺️ **Trip shape maps** — Pico Transit can now read a trip's actual route path, not just its stops (currently RIPTA only); drawing that real path on the map is next, so you can see where the road or rails actually go between stops instead of a straight line connecting them.
+## 🔭 Coming up
+
+- 📍 **Real GPS for Explore**: built and working, but marked **(Testing)** until LightOS trusts non-Light-signed builds for location. Address search works in the meantime.
+- ⚠️ **Service alerts**: detours and service changes from GTFS-RT's Alerts feed.
+- 🗺️ **Route shapes on the map**: drawing the real path between stops instead of straight lines (RIPTA's shapes are already read).
+- 🌲 **Live tracking for Puget Sound**, once an API key is in place.
+- 🚏 **More agencies**, with help from the community.
 
 ## 🗺️ What can it do?
 
-- 🏠 **Pick your agency** — MBTA, RIPTA, RTD Denver, LTC Ontario, STM Montréal, and dozens more (see the full list above) — and Pico Transit downloads their schedule right onto your phone. First launch (or switching agencies later from Settings) opens this as its own welcome screen; once picked, the home screen shows a ticking clock, your agency's name, and a loading indicator until its schedule is ready.
-  
+- 🏠 **Pick your agency** from the welcome screen and Pico Transit downloads its schedule to your phone. The home screen then shows a clock in the agency's timezone and its name.
+
   ![alt text](docs/screenshots/Screenshot_20260810_171500.png)
   ![alt text](docs/screenshots/Screenshot_20260810_171800.png)
 
-- 🗂️ **Multiple schedules at once, by region** — New York City, Denver, and the SF Bay Area each group their own agencies together for downloading. Once your primary agency belongs to one, Settings' "Additional Schedules" row lets you turn on any other schedule in that same region to browse alongside it — tap-and-hold one there to make it your new primary instead. The home screen's Schedule button opens a quick "Choose Schedule" picker whenever more than one of a region's schedules is downloaded.
+- 🗂️ **Multiple schedules by region**: New York City, Denver, the SF Bay Area, and Puget Sound group their agencies together. Turn on more schedules from the same region in Settings → "Additional Schedules", and tap and hold one there to make it your primary.
 
   ![alt text](docs/screenshots/NYCtransit.png)
 
-- ⚙️ **Settings** — switch agencies any time (reopens the same welcome picker), light/dark map tiles, and on/off toggles (tap-and-hold a stop to jump to its arrivals — the same gesture also jumps from a Station map's own name to the main map centered on it; double-tap a station to zoom into its platforms; track tapped-open stops' own vehicles on the map; the home screen's trip progress bar; the home screen's daily message; "See Everything," a map mode covered below; and "Only download over Wi-Fi," on by default, so a schedule refresh never surprises you with cellular data usage). A "Clear schedule cache" action frees up space by deleting every agency's downloaded schedule, then re-downloads your current one right away.
-  
-  ![alt text](docs/screenshots/Screenshot_20260810_172700.png)
-  ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
+- 📅 **Schedules**: browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, then pick a route, direction, and stop to see today's departures. Tap the Departures header to see tomorrow's instead.
 
-- 📅 **Schedules** — browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, pick a route, a direction, and a stop, and see every departure today. New: tap the header on the Departures screen to plan ahead with tomorrow's schedule instead.
   ![alt text](docs/screenshots/Screenshot_20260801_204325.png)
 
-  Routes for each agency Pico Transit currently supports:
+  Routes for each supported agency:
 
   ![alt text](docs/screenshots/Screenshot_20260817_013000.png)
   ![alt text](docs/screenshots/Screenshot_20260817_012800.png)
@@ -66,107 +52,103 @@ Pico Transit can be used alongside the light phone's directions tool for more co
   ![alt text](docs/screenshots/Screenshot_20260817_013600.png)
   ![alt text](docs/screenshots/Screenshot_20260817_013800.png)
 
-- 🔗 **Connections** — tap any stop along a trip to see what else comes through there next, across every platform of a station, not just the one your trip happened to use. Great for planning a transfer on the fly.
-  
+- 🔗 **Connections**: tap any stop along a trip to see what comes through there next, across every platform of a station. Handy for planning a transfer on the fly.
+
   ![alt text](docs/screenshots/Screenshot_20260801_211241.png)
-  
-- 📍 **Explore/Leave now** — opens straight onto the closest stops to your real GPS location, nearest first (marked **(Testing)** — see Upcoming developments below). A pinned Search stays one tap away to look up a different address or landmark instead, and Recenter jumps right back to your own location.
-  
-   ![alt text](docs/screenshots/explore_nearby_stops.png)
-   ![alt text](docs/screenshots/Screenshot_20260801_214943.png)
-  
-- ⏱️ **Live ETAs** — real-time predictions with On Time / Late / Early badges, whenever the agency's live feed is playing along nicely.
-  
-   ![alt text](docs/screenshots/Screenshot_20260810_172200.png)
 
+- 📍 **Explore**: the closest stops to you, nearest first (**Testing**, see above). Search for a different address or landmark any time, and Recenter to come back to your own location.
 
-- 🗺️ **Map** — your stop, pinned on a live map, with nearby stops you can tap to reveal their names. Live vehicles show up right where they actually are, with a matching icon for their mode (subway/light rail, commuter rail, bus, ferry). "See Everything" (Settings, on by default) plots every live vehicle in view, not just ones relevant to your stop, labeled with just its route until you tap it; narrow it down by tapping a stop ("Filter by stop" — tags each vehicle TO/FROM/AT that stop) or by mode (Bus/Subway/Commuter Rail), or turn it off in Settings to fall back to just your stop's own vehicles.
-  
+  ![alt text](docs/screenshots/explore_nearby_stops.png)
+  ![alt text](docs/screenshots/Screenshot_20260801_214943.png)
+
+- ⏱️ **Live ETAs** with On Time / Late / Early badges, whenever the agency's live feed is playing along nicely.
+
+  ![alt text](docs/screenshots/Screenshot_20260810_172200.png)
+
+- 🗺️ **Map**: your stop and the stops around it, with live vehicles shown by mode (subway/light rail, commuter rail, bus, ferry). "See everything" shows every live vehicle in view; filter it by stop or by mode.
+
   ![alt text](docs/screenshots/Screenshot_20260801_200838.png)
   ![alt text](docs/screenshots/Screenshot_20260801_204556.png)
 
-- 👆 **Gestures** — tap and hold a stop or station's name — on the Map, in Schedules while picking where to board, or in the Stations list — to jump straight to its live upcoming arrivals instead of whatever a plain tap would open there. On the Map itself, double-tap a multi-platform station to zoom into a view of just its own platforms, then double-tap its name again to zoom back out to the main map and see what else is nearby. On Trip Detail, tap and hold works a little differently depending on whether that trip's boarded: not boarded, a plain tap opens a stop's connections and tap-and-hold jumps to its live arrivals instead; boarded, a plain tap sets (or clears) that stop as where you're getting off, and tap-and-hold still opens its connections.
+- 👆 **Gestures**: tap and hold a stop or station name to jump to its live arrivals. On the map, double-tap a station to zoom into its platforms, and double-tap its name to zoom back out. On Trip Detail, a tap opens a stop's connections and tap-and-hold opens its arrivals; once you've boarded, a tap sets where you're getting off.
 
-- 🚉 **Stations** — browse every real multi-platform station an agency has, and open a zoomed-in map of just that station's own real platforms and gates (elevators, entrances, and escalators are filtered out). For MBTA commuter rail, once a specific track is assigned — usually 10-15 minutes before departure — its vehicle shows up right on that track's own platform.
-  
+- 🚉 **Stations**: one entry per real station, with a map of just its platforms and gates. MBTA commuter rail trains show up on their track once one is assigned, usually 10-15 minutes before departure.
+
   ![alt text](docs/screenshots/Screenshot_20260801_204530.png)
 
-- ▶️ **Board a trip** — from any Trip Detail screen, tap Play to make it your current trip. Keep track of which stop you're closest to from the vehicle icon.Tap a stop along the way to mark where you're getting off — reach it, and Pico Transit throws a little "You've reached your stop! 🎉" celebration and jumps you to that stop's upcoming arrivals, whether you were looking at the trip or just sitting on the home screen.
-  
+- ▶️ **Board a trip**: tap Play on Trip Detail, then tap the stop where you're getting off. When you arrive, Pico Transit celebrates with "You've reached your stop! 🎉" and shows that stop's upcoming arrivals.
 
-   ![alt text](docs/screenshots/Screenshot_20260810_172300.png)
-   ![alt text](docs/screenshots/Screenshot_20260801_212442.png)
+  ![alt text](docs/screenshots/Screenshot_20260810_172300.png)
+  ![alt text](docs/screenshots/Screenshot_20260801_212442.png)
 
-- 👀 **Show earlier stops** — turn this on in Settings and a boarded trip's stop list also shows the stops before where you got on, greyed out, so you can watch the vehicle's live position (and status) approach your stop instead of only seeing it after it arrives.
+- 👀 **Show earlier stops** (Settings): a boarded trip also lists the stops before yours, greyed out, so you can watch your vehicle approach.
 
   ![alt text](docs/screenshots/pre-arrival.png)
 
-- 🚋 **Select Run, for CTA 'L' trains and MBTA Green Line** — these two don't have a reliable trip_id to track live, so Pico Transit's "Closest match" is its own best guess at which live vehicle is yours. Select Run lets you confirm or correct that guess directly: open it to see the whole trip's stop list with each live vehicle shown right on its current stop, and tap the one you're actually on.
+- 🚋 **Select Run**, for CTA 'L' trains and MBTA Green Line: their live feeds can't be matched to a scheduled trip for certain, so Pico Transit shows a "Closest match". Select Run lets you confirm or correct it by tapping the vehicle you're actually on.
 
   ![alt text](docs/screenshots/fuzzy_runs.png)
 
-- 🚦 **Home screen trip status** — while a trip is boarded, the home screen swaps its usual heading for your route, live ETA, and stops remaining, plus an optional progress bar with a little vehicle marker crawling from your boarding stop toward your alight stop — the clock stays put through all of it, right above your route.
+- 🚦 **Home screen trip status**: while you're on a trip, the home screen shows your route, live ETA, stops remaining, and an optional progress bar.
 
-![alt text](docs/screenshots/Screenshot_20260810_172500.png)  ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
-![alt text](docs/screenshots/Screenshot_20260817_233823.png)  ![alt text](docs/screenshots/Screenshot_20260820_003442.png)
+  ![alt text](docs/screenshots/Screenshot_20260810_172500.png)  ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
+  ![alt text](docs/screenshots/Screenshot_20260817_233823.png)  ![alt text](docs/screenshots/Screenshot_20260820_003442.png)
 
-- ↩️ **Jump back anytime** — a Play icon shows up in the corner of every screen while a trip's boarded, one tap from wherever you are back to its live tracking; a plain circle in the footer does the same for the home screen itself.
-  
-   ![alt text](docs/screenshots/Screenshot_20260801_212013.png)
+- ↩️ **Jump back anytime**: a Play icon in the corner takes you back to your trip from any screen, and the footer circle takes you home.
 
-- ℹ️ **About** — a full legend of every icon and mode Pico Transit uses, reachable right from the home screen.
-  
-   ![alt text](docs/screenshots/Screenshot_20260810_171900.png)
+  ![alt text](docs/screenshots/Screenshot_20260801_212013.png)
+
+- ⚙️ **Settings**: switch agencies, pick a light or dark map, choose gestures, turn Select Run options on or off, manage location, download only over Wi-Fi (on by default), or clear the schedule cache.
+
+  ![alt text](docs/screenshots/Screenshot_20260810_172700.png)
+  ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
+
+- ℹ️ **About**: a legend of every icon Pico Transit uses.
+
+  ![alt text](docs/screenshots/Screenshot_20260810_171900.png)
 
 ## 🛠️ Building & running it
 
-Pico Transit lives inside the [light-sdk](../) monorepo — check the [root README](../README.md) first for one-time setup (GitHub token, Android Studio, etc). Once that's done:
+Pico Transit lives in `tool/` inside this fork of the [light-sdk](https://github.com/lightphone/light-sdk) monorepo. Follow the SDK's own setup first (GitHub token, Android Studio, and so on), then:
 
-1. Open the whole `light-sdk` project in Android Studio.
-2. Run the `:tool` module on an emulator, or better yet, [the LightOS emulator](../docs/system_app) — that's this app! 🎉
-3. Tap an agency, grab a coffee ☕ while it downloads the schedule, and you're off.
+1. Open the project in Android Studio.
+2. Run the `:tool` module on an emulator, or on [the LightOS emulator](docs/system_app). [`tool/lighttool.toml`](tool/lighttool.toml) targets a real phone (`com.lightos`) by default; switch `serverPackage` to the commented-out emulator line when running there.
+3. Pick an agency, grab a coffee ☕ while the schedule downloads, and you're off.
 
 ## 📱 Getting it onto a *real* Light Phone III
 
-Light's official "build it, sign it, share it" pipeline for community tools isn't quite ready yet — vetting is expected around August/September 2026, with the full sharing platform following in October. So for now, sideloading via ADB is the way, and Light's own docs say that's totally fine for the adventurous! 🤠
+Until Pico Transit is available through Light's Tool Library, install it with ADB, since LightOS can't install third-party APKs on the phone itself yet:
 
-1. In [`lighttool.toml`](./lighttool.toml), point `serverPackage` at the real LightOS package instead of the emulator:
-   ```toml
-   serverPackage = "com.lightos"
-   ```
-2. Build a debug APK:
+1. Download the latest APK from [Releases](https://github.com/CJFData/light-transit/releases), or build one with `./gradlew :tool:assembleDebug`.
+2. Turn on Developer Options and USB debugging on your Light Phone III, plug it in, and run:
    ```bash
-   ./gradlew :tool:assembleDebug
+   adb install -r pico-transit-<version>-pre.apk
    ```
-3. Turn on Developer Options + USB debugging on your Light Phone III (same as any Android device), plug it in, then:
-   ```bash
-   adb install -r tool/build/outputs/apk/debug/tool-debug.apk
-   ```
-4. On the phone, allow "Any tools" in LightOS's tool settings — it'll warn you this one isn't Light-vetted yet, which is expected for a homemade build like this. 🚧
+3. On the phone, allow "Any tools" in LightOS's tool settings. It'll warn you the tool isn't Light-vetted yet, which is expected for now. 🚧
 
-That's it — happy transit-ing! 🚏🚌🚆
+That's it, happy transit-ing! 🚏🚌🚆
 
-## 🧪 A couple of nerdy notes
+## 🧪 A few nerdy notes
 
-- **Every realtime/static feed request goes through `pico-transit-proxy`**, a small Cloudflare Worker (its own separate repo, not part of this codebase) — a fixed allowlist of routes to fixed upstream URLs, never taking a target from the incoming request. It's what makes the HTTP→HTTPS redirects below possible, keeps every agency's API keys as worker-side secrets that never ship in the app itself, and is the one place the 511 regional-feed sharing described below actually happens.
-- **RIPTA's and LTC's live feeds are HTTP-only at the origin** (no HTTPS). Both now resolve through the proxy's redirect to HTTPS, so the app itself never connects over cleartext, and the `:netconfig` module's cleartext exception is no longer needed.
-- **No device GPS is used anywhere** — the SDK doesn't expose it to tools yet. Nearby-stop and location search are powered by Nominatim (OpenStreetMap) and IP-based geolocation instead. Be kind to their free APIs! 🙏
-- **Stations are deduplicated using GTFS's `parent_station`** — a big station with several platforms (subway entrances, commuter rail tracks, etc.) shows up as one marker/entry, not one per platform, while still resolving to the right platform's `stop_id` under the hood for schedule lookups. Only real platforms and boarding areas count as "member platforms" for this — GTFS also links entrances, elevators, and escalator nodes to the same parent station, and those are filtered out so a big hub's map isn't cluttered with dozens of non-boardable points.
-- **Boarding a trip is a saved reference, not a background tracker** — Pico Transit never polls a live feed while the app itself isn't open. "You've reached your stop" detection only runs while Trip Detail or the home screen is actually visible and polling, the same way every other bit of live tracking in the app works.
-- **Commuter rail track assignments come from MBTA's V3 API, not GTFS-RT** — GTFS-RT never publishes which specific track a commuter rail trip will use, and MBTA's own dispatch system usually doesn't decide until 10-15 minutes before departure. Pico Transit polls the V3 API (`api-v3.mbta.com`) for this and for commuter rail's own live vehicle positions, falling back to the standard GTFS-RT feed if a trip has no V3 match yet. CTA's own Bus Tracker API is wired the same way for buses, matching a live vehicle back to a scheduled trip by its route + scheduled departure time rather than a GTFS-RT trip_id.
-- **CTA's 'L' trains and MBTA's Green Line have no reliable bridge from their live feed back to a real scheduled trip_id** — Train Tracker identifies a train by run number, and most currently-running Green Line vehicles are synthetic GTFS-RT "ADDED" trips with no static trip underneath at all (confirmed live: ~96% of a given sample). Both are handled the same way: `FuzzyRunTrips` ranks live runs against scheduled trips ordinally (soonest live paired with soonest scheduled, and so on) to find the closest real trip to attach to, surfaced everywhere as "Closest match" rather than a certain live ETA. It's necessarily an approximation, so Select Run (see above) exists for a rider to confirm or correct the guess directly. Live ETAs (Upcoming Arrivals) and boarded-trip tracking (Trip Detail, the home screen progress bar) both work fully off this "Closest match" today — what's not there yet is plotting these live vehicles on the map itself, since a live run with no confirmed trip has no fixed position to anchor a marker to.
-- **CARTO's map tiles now require an API key** — like every other agency key in this app, it's a worker-side secret injected server-side by `pico-transit-proxy`, never shipped in the app. The app never talks to CARTO directly.
-- **NYC Subway's realtime is split across 8 separate MTA feeds by line group, not one combined feed** — unlike LIRR/Metro-North's single URL. `pico-transit-proxy` fetches and merges all 8 server-side into one combined response, cached and shared across every rider, so the app itself sees a single realtime URL like any other agency — fetching all 8 itself on every poll used to add enough real network latency that a rider could see a train reach its next stop before Trip Detail even finished loading. NYC Subway's own live trip_id isn't its real static trip_id, though — it packs a scheduled start time in MTA's own encoding (e.g. `119000_L..S` decodes to `20:00:30`, verified against the real static schedule) instead. `NycSubwayTripIdBridge` decodes it and bridges to the real trip_id the same way CTA Bus Tracker's own scheduled-start fields already do, via `GtfsRepository.tripIdForScheduledStart` — so every live NYC Subway trip resolves to a certain, real match, not an approximation.
-- **~50 SF Bay Area agencies share one upstream realtime fetch, not 50** — 511.org publishes one combined feed per region covering every agency it integrates, with each agency's own trips distinguished by a code prefix (e.g. `BA:1965572` for a BART trip_id). The proxy worker fetches and caches that one shared feed per cache window, then filters and re-prefixes it server-side into each agency's own slice on request — so plugging in dozens more agencies from the same aggregator never multiplies the number of live requests being made.
+- **Live data goes through `pico-transit-proxy`**, a small Cloudflare Worker at `gtfs.picotransit.com` (in its own repo). It only fetches a fixed list of upstream URLs, keeps every API key server-side, caches responses so riders share upstream requests, and accepts only the kinds of requests the app makes.
+- **HTTP-only feeds** (RIPTA, LTC) reach the app over HTTPS through the proxy, so the app never uses cleartext.
+- **Explore's GPS** uses the Light SDK's location APIs. Address search uses Nominatim (OpenStreetMap), so please be kind to their free API! 🙏
+- **Stations are grouped by GTFS `parent_station`**, so a big hub shows up once. Entrances, elevators, and escalators are left out of its platform map.
+- **Boarding is a saved reference, not a background tracker.** Live feeds are only polled while Trip Detail or the home screen is on screen.
+- **Agency APIs fill gaps in GTFS-RT**: MBTA's V3 API provides commuter rail tracks and positions, and CTA's Bus Tracker is matched to scheduled trips by route and scheduled start time.
+- **"Closest match"** pairs live CTA 'L' runs and MBTA Green Line trips with the nearest scheduled trip in order, since neither can be matched exactly. These aren't plotted on the map yet.
+- **NYC Subway's 8 line-group feeds** are merged by the proxy into one, and their trip IDs are decoded back to real scheduled trips.
+- **The SF Bay Area shares one upstream feed**: 511.org publishes one regional feed, which the proxy fetches once and slices per agency.
+- **Map tiles** come from CARTO through the proxy. Each 512px tile is cut into four, which keeps requests down and makes street names easier to read.
 
 ## 🙌 Credits
 
 Thanks to [Jose Briones](https://github.com/jbriones95) for his continued support integrating RTD Denver and Colorado transit into Pico Transit.
 
-Thanks to [Guy Dupont](https://github.com/dupontgu) on the Light team for adding `LightConnectivity` to `light-sdk`, the network-state API that made the "Only download over Wi-Fi" setting possible — and, more broadly, to the whole Light Phone team for all the work that's gone into making this SDK a genuine pleasure to build on, and the LightOS developer community such a positive, supported, and all-around amazing place to be.
+Thanks to [Guy Dupont](https://github.com/dupontgu) on the Light team for adding `LightConnectivity` to `light-sdk`, the network-state API that made the "Only download over Wi-Fi" setting possible, and to the whole Light Phone team for making this SDK a genuine pleasure to build on and the LightOS developer community such a positive, supportive place to be.
 
-Thanks to Claude (Anthropic) for extensive collaboration throughout Pico Transit's development — including learning Kotlin from scratch, implementing the "Only download over Wi-Fi" setting, and working through a pass on the codebase's comments and documentation together.
+Thanks to Claude (Anthropic) for extensive collaboration throughout Pico Transit's development, including learning Kotlin from scratch, implementing the "Only download over Wi-Fi" setting, and working through the codebase's comments and documentation together.
 
 ## 📄 License
 
-The [`tool/`](tool/) directory (Pico Transit itself) is licensed separately from the rest of the monorepo — see [`LICENSE-TRANSIT`](LICENSE-TRANSIT) (MIT, © Christian Ferreira / CJFData). The rest of `light-sdk` remains under its own [`LICENSE`](LICENSE) (MIT, © The Light Phone).
+The [`tool/`](tool/) directory (Pico Transit itself) is licensed separately from the rest of the monorepo: see [`LICENSE-TRANSIT`](LICENSE-TRANSIT) (MIT, © Christian Ferreira / CJFData). The rest of `light-sdk` remains under its own [`LICENSE`](LICENSE) (MIT, © The Light Phone).
