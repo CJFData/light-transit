@@ -59,21 +59,21 @@ private val SCHEDULE_ICON_LEGEND = listOf(
 private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.ELLIPSES, "About (this screen)"),
     IconLegendEntry(LightIcons.SETTINGS, "Settings"),
-    IconLegendEntry(LightIcons.LIST, "Schedule -- browse today's static route schedule"),
-    IconLegendEntry(LightIcons.DIRECTIONS_PEDESTRIAN, "Explore -- find nearby stops and live upcoming arrivals"),
-    IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Station -- browse a transit authority's multi-platform stations"),
-    IconLegendEntry(LightIcons.PLAY, "Play/Board -- on a Trip Detail screen, boards that trip. Everywhere else, shown once a trip's boarded, to jump back to its live tracking"),
-    IconLegendEntry(LightIcons.STOP, "Stop/Alight -- Trip Detail's header, shown in place of Play while that trip is the one you've boarded; taps end tracking"),
-    IconLegendEntry(LightIcons.DELETE, "Trip switch warning -- Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; boarding this one ends tracking of that one"),
-    IconLegendEntry(LightIcons.CIRCLE, "Home -- every other screen's own footer button; jumps back to HomeScreen"),
+    IconLegendEntry(LightIcons.LIST, "Schedule: browse today's static route schedule"),
+    IconLegendEntry(LightIcons.DIRECTIONS_PEDESTRIAN, "Explore: find nearby stops and live upcoming arrivals"),
+    IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Station: browse a transit authority's multi-platform stations"),
+    IconLegendEntry(LightIcons.PLAY, "Play/Board: on a Trip Detail screen, boards that trip. Everywhere else, shown once a trip's boarded, to jump back to its live tracking"),
+    IconLegendEntry(LightIcons.STOP, "Stop/Alight: Trip Detail's header, shown in place of Play while that trip is the one you've boarded; taps end tracking"),
+    IconLegendEntry(LightIcons.DELETE, "Trip switch warning: Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; pressing play will board the currently viewed trip and end tracking of the previously boarded trip"),
+    IconLegendEntry(LightIcons.CIRCLE, "Home: every other screen's own footer button; jumps back to the Pico Transit HomeScreen"),
 )
 
 /** Settings screen's own on/off toggles -- every one of them renders as one of these two icons
  * next to their label, per SettingsScreen's own ToggleRow. See SettingsScreen.kt for the current
  * list of toggles. */
 private val TOGGLE_ICON_LEGEND = listOf(
-    IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "Setting is on -- tap the row to turn it off"),
-    IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Setting is off -- tap the row to turn it on"),
+    IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "Setting is on: tap the row to turn it off"),
+    IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Setting is off: tap the row to turn it on"),
 )
 
 class InfoScreenViewModel : LightViewModel<Unit>()
@@ -190,14 +190,14 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                     LightText(
-                        text = "Some agencies belong to a region -- New York City, Denver, and the SF " +
-                            "Bay Area today -- and can be downloaded together instead of one at a " +
-                            "time. Picking an agency that belongs to one from the \"Transit Agency\" " +
-                            "picker (onboarding, or Settings) first shows that region's own member " +
-                            "list to choose your primary from. Once your primary is regionalized, " +
-                            "Settings' \"Additional Schedules\" row lets you turn on any other schedule " +
-                            "in that same region to browse alongside it -- tap and hold one there to " +
-                            "make it your new primary instead. HomeScreen's Schedule button opens a " +
+                        text = "Some agencies belong to a region: New York City, Denver, and the San Francisco " +
+                            "Bay Area today. Regionalized feeds can be downloaded together instead of one at a " +
+                            "time for simpler cross-agency travel. Picking an agency that belongs to one from the \"Transit Agency\" " +
+                            "picker (first time, or Settings) first shows that region's own member " +
+                            "list to choose your primary feed. If your primary is regionalized, " +
+                            "Settings' \"Additional Schedules\" will be available to turn on any other schedule " +
+                            "in that same region to browse alongside it. Tap and hold another agency in the region there to " +
+                            "make it your new primary feed instead. HomeScreen's Schedule button opens a " +
                             "\"Choose Schedule\" picker first whenever more than one of a region's " +
                             "schedules is downloaded, going straight to the route list when there's " +
                             "only one.",
@@ -259,7 +259,7 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     LightText(
                         text = "\"Only download over Wi-Fi\" (on by default) waits for Wi-Fi before " +
                             "downloading or updating a schedule, so a large agency's schedule never " +
-                            "becomes a surprise cellular cost -- your last-downloaded schedule keeps " +
+                            "becomes a surprise cellular cost. Your last-downloaded schedule keeps " +
                             "working meanwhile. \"Merge feed stations\" (on by default) folds a " +
                             "MultiGtfsFeed secondary's own stops into the same physical station as its " +
                             "parent agency's, e.g. Bustang's gates at RTD Denver's Union Station, " +
@@ -315,7 +315,7 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         modifier = Modifier.padding(top = 24.dp),
                     )
                     LightText(
-                        text = "If Pico Transit helps you catch your bus, consider buying me a " +
+                        text = "If Pico Transit helps you catch your bus, train, or ferry, consider buying me a " +
                             "coffee ☕ -- buymeacoffee.com/cjfdata",
                         variant = LightTextVariant.Detail,
                         lighten = true,
