@@ -55,6 +55,7 @@ import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -122,6 +123,11 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
      * exactly what was on screen before rather than always bouncing back to [NearbyStopsMode.Locating]. */
     private var modeBeforeSearch: NearbyStopsMode? = null
 
+    /** The in-flight GPS poll, if any. [openSearch] cancels it: the poll ends by writing [_mode]
+     * (a stop list or "Couldn't find your location"), which would otherwise replace the address
+     * input -- closing the keyboard mid-typing -- whenever it finishes. */
+    private var locateJob: Job? = null
+
     /** Drives whether the Search Location screen offers "Current Location" at all -- mirrored from
      * [LocationPreferences] into a plain [StateFlow] the Composable can collect, same pattern
      * [SettingsViewModel] already uses for its own preference-backed fields. */
@@ -145,9 +151,7 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
             _mode.value !is NearbyStopsMode.NeedsPermission &&
             _mode.value !is NearbyStopsMode.LocationOff
         ) return
-        viewModelScope.launch(Dispatchers.IO) {
-            locateFromGps()
-        }
+        retryLocation()
     }
 
     private suspend fun locateFromGps() {
@@ -201,7 +205,8 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     }
 
     fun retryLocation() {
-        viewModelScope.launch(Dispatchers.IO) { locateFromGps() }
+        locateJob?.cancel()
+        locateJob = viewModelScope.launch(Dispatchers.IO) { locateFromGps() }
     }
 
     /** Switches the ranking anchor back to GPS -- called from the Search Location screen's own
@@ -217,6 +222,7 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     }
 
     fun openSearch() {
+        locateJob?.cancel()
         modeBeforeSearch = _mode.value
         _mode.value = NearbyStopsMode.Input()
     }
@@ -224,7 +230,9 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     fun cancelSearch() {
         val restore = modeBeforeSearch
         modeBeforeSearch = null
-        if (restore != null) {
+        // A Locating snapshot has no poll behind it anymore (openSearch cancelled it), so restoring
+        // it as-is would leave the screen stuck on Locating -- start a fresh poll instead.
+        if (restore != null && restore !is NearbyStopsMode.Locating) {
             _mode.value = restore
         } else {
             retryLocation()

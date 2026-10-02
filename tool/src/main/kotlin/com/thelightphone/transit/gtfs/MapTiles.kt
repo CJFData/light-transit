@@ -145,7 +145,7 @@ data class MapTiles(
 }
 
 /**
- * A small in-process LRU of decoded tile bitmaps, keyed by "z/x/y", shared by every [MapTileClient]
+ * A small in-process LRU of decoded tile bitmaps, keyed by "style/z/x/y", shared by every [MapTileClient]
  * instance and screen visit this session -- revisiting the Map screen for the same or a nearby stop
  * reuses tiles already downloaded. Capacity is a tile count, not a byte budget, since every raster
  * tile is the same 256x256 size.
@@ -194,7 +194,7 @@ class MapTileClient {
      * Every tile needed to cover a [targetRadiusMeters] circle around (lat, lon) at [zoom], fetched
      * concurrently. Individual tile failures are logged and simply omitted from the result -- never
      * fail the whole map for one bad tile. [darkMode] selects Dark Matter over the default Voyager
-     * style; both are cached independently (see [fetchTile]) so switching styles never serves a
+     * style; both are cached independently (see [fetchFromParentTile]) so switching styles never serves a
      * stale tile from the other one.
      */
     suspend fun fetchTilesAround(
@@ -218,32 +218,63 @@ class MapTileClient {
             }
         }
         val tiles = tileCoords
-            .map { (tileX, tileY) -> async { fetchTile(tileX, tileY, zoom, darkMode)?.let { FetchedTile(tileX, tileY, it) } } }
-            .mapNotNull { it.await() }
+            .groupBy { (tileX, tileY) -> Math.floorDiv(tileX, 2) to Math.floorDiv(tileY, 2) }
+            .map { (parent, children) -> async { fetchFromParentTile(parent.first, parent.second, children, zoom, darkMode) } }
+            .flatMap { it.await() }
 
         MapTiles(zoom, centerFracX, centerFracY, tiles)
     }
 
-    private suspend fun fetchTile(x: Int, y: Int, zoom: Int, darkMode: Boolean): Bitmap? {
+    /** The requested [children] (tiles at [zoom]) cut from their shared parent's 512px @2x tile at
+     * zoom - 1. Each quadrant of the parent covers exactly one child's ground area, so a quadrant is
+     * a drop-in 256px tile for [MapTiles.screenOffset]. One request per four tiles cuts tile requests
+     * (and CARTO usage) roughly 4x versus fetching each tile at [zoom]; the parent zoom's cartography
+     * also draws street names twice as large, which reads better on this screen, at the cost of one
+     * zoom level less street detail. Returns cached quadrants without a request when every child is
+     * already cached; a failed parent fetch omits all four, same as a failed single tile would. */
+    private suspend fun fetchFromParentTile(
+        parentX: Int,
+        parentY: Int,
+        children: List<Pair<Int, Int>>,
+        zoom: Int,
+        darkMode: Boolean,
+    ): List<FetchedTile> {
         val style = if (darkMode) "dark" else "voyager"
-        val key = "$style/$zoom/$x/$y"
-        TileCache.get(key)?.let { return it }
+        fun keyFor(tileX: Int, tileY: Int) = "$style/$zoom/$tileX/$tileY"
+
+        val cached = children.mapNotNull { (tileX, tileY) -> TileCache.get(keyFor(tileX, tileY))?.let { FetchedTile(tileX, tileY, it) } }
+        if (cached.size == children.size) return cached
 
         val baseUrl = if (darkMode) DARK_BASE_URL else VOYAGER_BASE_URL
-        return try {
-            val response = client.get("$baseUrl/$zoom/$x/$y.png") {
+        val parent = fetchBitmap("$baseUrl/${zoom - 1}/$parentX/$parentY@2x.png", "$style@2x/${zoom - 1}/$parentX/$parentY")
+            ?: return emptyList()
+        val half = parent.width / 2
+        return children.map { (tileX, tileY) ->
+            val quadrant = Bitmap.createBitmap(parent, (tileX - parentX * 2) * half, (tileY - parentY * 2) * half, half, half)
+            val tile = if (half == TILE_SIZE.toInt()) quadrant else Bitmap.createScaledBitmap(quadrant, TILE_SIZE.toInt(), TILE_SIZE.toInt(), true)
+            TileCache.put(keyFor(tileX, tileY), tile)
+            FetchedTile(tileX, tileY, tile)
+        }
+    }
+
+    /** One tile image decoded, or null on any failure ([label] identifies it in the log). */
+    private suspend fun fetchBitmap(url: String, label: String): Bitmap? =
+        try {
+            val response = client.get(url) {
                 header("User-Agent", USER_AGENT)
             }
-            if (!response.status.isSuccess()) return null
-            val bytes: ByteArray = response.body()
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.also { TileCache.put(key, it) }
+            if (!response.status.isSuccess()) {
+                null
+            } else {
+                val bytes: ByteArray = response.body()
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e("MapTileClient", "Tile fetch failed for $key", e)
+            Log.e("MapTileClient", "Tile fetch failed for $label", e)
             null
         }
-    }
 
     fun close() {
         client.close()
