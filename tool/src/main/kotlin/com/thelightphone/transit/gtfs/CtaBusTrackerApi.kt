@@ -14,8 +14,8 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private const val CTA_BUS_VEHICLES_URL = "https://pico-transit-proxy.data-32b.workers.dev/cta/bus/vehicles"
-private const val CTA_BUS_PREDICTIONS_URL = "https://pico-transit-proxy.data-32b.workers.dev/cta/bus/predictions"
+private const val CTA_BUS_VEHICLES_URL = "https://gtfs.picotransit.com/cta/bus/vehicles"
+private const val CTA_BUS_PREDICTIONS_URL = "https://gtfs.picotransit.com/cta/bus/predictions"
 
 private val ctaBusJson = Json { ignoreUnknownKeys = true }
 

@@ -181,8 +181,8 @@ class MapTileClient {
     private val client = HttpClient(OkHttp)
 
     companion object {
-        private const val VOYAGER_BASE_URL = "https://pico-transit-proxy.data-32b.workers.dev/carto/voyager"
-        private const val DARK_BASE_URL = "https://pico-transit-proxy.data-32b.workers.dev/carto/dark"
+        private const val VOYAGER_BASE_URL = "https://gtfs.picotransit.com/carto/voyager"
+        private const val DARK_BASE_URL = "https://gtfs.picotransit.com/carto/dark"
         private const val USER_AGENT = "LightTransitTool/1.0 (+https://github.com/lightphone)"
         // Fetched area is this much larger than the target radius, so the real device canvas (whose
         // exact size isn't known yet when tiles are requested) ends up comfortably inside the

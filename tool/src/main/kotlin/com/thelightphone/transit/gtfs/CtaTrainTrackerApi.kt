@@ -14,7 +14,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private const val CTA_TRAIN_POSITIONS_URL = "https://pico-transit-proxy.data-32b.workers.dev/cta/train/positions"
+private const val CTA_TRAIN_POSITIONS_URL = "https://gtfs.picotransit.com/cta/train/positions"
 
 // Same width as MapScreen's own SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS -- a live train's own real
 // predicted time can legitimately trail its closest scheduled candidate's static time by a few

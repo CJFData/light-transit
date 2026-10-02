@@ -16,8 +16,8 @@ package com.thelightphone.transit.gtfs
 val BustangSecondaryFeed = MultiGtfsFeed(
     name = "Bustang",
     feedUrl = "https://www.rtd-denver.com/files/gtfs/bustang-co-us.zip",
-    realtimeTripUpdatesUrl = "https://pico-transit-proxy.data-32b.workers.dev/bustang/tripupdates",
-    realtimeVehiclePositionsUrl = "https://pico-transit-proxy.data-32b.workers.dev/bustang/vehiclepositions",
+    realtimeTripUpdatesUrl = "https://gtfs.picotransit.com/bustang/tripupdates",
+    realtimeVehiclePositionsUrl = "https://gtfs.picotransit.com/bustang/vehiclepositions",
 )
 
 /**
