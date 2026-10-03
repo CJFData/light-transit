@@ -17,6 +17,7 @@ versionCode = 1                                # monotonically-increasing intege
 versionName = "1.0.0"                          # ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$
 permissions  = ["android.permission.CAMERA"]   # allowlisted permissions only
 capabilities = []                              # allowlisted SDK features
+serverPackage = "com.lightos"                  # LightOS package your tool connects to
 orientation  = "portrait"                      # optional; omit for no orientation lock
 ```
 
@@ -63,6 +64,17 @@ capabilities = ["cleartext-http"]
 the norm for self-hosted servers on a home network (a NAS, a printer, a
 personal sync server at a `192.168.x` address). Declaring it here keeps the
 opt-out reviewable in `lighttool.toml` rather than hidden in a manifest.
+
+### `serverPackage` — the LightOS package your tool connects to
+Your tool finds LightOS by this package name. On a Light Phone it's `com.lightos`, and the build fails on anything else. Light's release builds use the value as-is, so a tool built against another package would not connect to LightOS on a phone.
+
+To run your tool on the [LightOS emulator](../system_app/README.md#9-building-your-tool-for-the-emulator), set `serverPackage = "com.thelightphone.sdk.emulator"` and opt in on the command line:
+
+```bash
+./gradlew :tool:installDebug -DlightSdk.allowAltServerPackage=true
+```
+
+Switch back to `com.lightos` before you submit your tool.
 
 ### `orientation` — optional screen orientation lock
 Set to `"portrait"` to keep the tool in portrait orientation. Omit this field to
