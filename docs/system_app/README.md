@@ -144,16 +144,16 @@ run:
 
 #### 9. Building your tool for the emulator
 
-Your tool finds LightOS through `serverPackage` in `lighttool.toml`. On a Light Phone that's `com.lightos`, which is what the template and examples ship with. To talk to the emulator app instead, set:
+To connect your tool to the emulator, set `serverPackage` in `tool/lighttool.toml`:
 
 ```toml
 serverPackage = "com.thelightphone.sdk.emulator"
 ```
 
-The build refuses any `serverPackage` other than `com.lightos` unless you opt in, so pass `-DlightSdk.allowAltServerPackage=true` when building for the emulator:
+Then build with `-DlightSdk.allowAltServerPackage=true`:
 
 ```bash
 ./gradlew :tool:installDebug -DlightSdk.allowAltServerPackage=true
 ```
 
-> Light's release builds don't pass this flag, so switch back to `com.lightos` before you submit your tool.
+Before you submit your tool, set `serverPackage` back to `com.lightos`.
