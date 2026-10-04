@@ -11,8 +11,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.protobuf.ProtoBuf
 
-/** Normalization and matching, against real alerts feeds (MBTA, RTD, King County Metro) saved as
- * fixtures, plus small hand-built alerts for each matching rule. */
+/** Normalization and matching, against real alerts feeds (MBTA, RTD, King County Metro, and Muni's
+ * slice of 511's regional feed) saved as fixtures, plus small hand-built alerts for each matching
+ * rule. */
 class AlertsTest {
 
     private fun feed(name: String): GtfsRtAlertFeedMessage {
@@ -187,5 +188,24 @@ class AlertsTest {
         now += 120
         assertEquals(78, store.alertsFor("kcm", "u", enabled = true).size)
         assertTrue(AlertsStore(fetch = { error("offline") }).alertsFor("kcm", "u", enabled = true).isEmpty())
+    }
+
+    @Test
+    fun regionalSliceKeepsOnlyItsAgencyWithPrefixesStripped() {
+        val alerts = normalizeAlerts(feed("sf511_muni_alerts.pb"), "sfmta_muni")
+        assertEquals(23, alerts.size)
+        val selectors = alerts.flatMap { it.selectors }
+        assertTrue(selectors.all { it.agencyId == "SF" })
+        assertFalse(selectors.any { it.routeId?.contains(':') == true || it.stopId?.contains(':') == true })
+        assertTrue(alerts.any { isAgencyWide(it, 70) }, "The feed has a Muni-wide alert naming only the agency")
+    }
+
+    @Test
+    fun stopIdBridgeRewritesOnlyStopsItRecognizes() {
+        val bridge = RegionalStopIdPrefixBridge("6")
+        val bridged = listOf(alert(selectors = arrayOf(sel(stop = "60123"), sel(stop = "14658"), sel(route = "22"))))
+            .bridgeStopIds(bridge::bridgeStopId)
+            .single()
+        assertEquals(listOf("123", "14658", null), bridged.selectors.map { it.stopId })
     }
 }

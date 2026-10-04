@@ -29,7 +29,6 @@ The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 ## 🔭 Coming up
 
 - 📍 **Real GPS for Explore**: built and working, but marked **(Testing)** until LightOS trusts non-Light-signed builds for location. Address search works in the meantime.
-- ⚠️ **Service alerts**: detours and service changes from GTFS-RT's Alerts feed.
 - 🗺️ **Route shapes on the map**: drawing the real path between stops instead of straight lines (RIPTA's shapes are already read).
 - 🚏 **More agencies**, with help from the community.
 
@@ -41,7 +40,7 @@ Everything Pico Transit covers, and what each agency publishes live.
 
 | Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
 |---|:-:|:-:|:-:|:-:|
-| MBTA¹ | ✓ | ✓ | ✓ | 🔜 |
+| MBTA¹ | ✓ | ✓ | ✓ | ✓ |
 | RIPTA | ✓ | ✓ | ✓ | — |
 | LTC Ontario | ✓ | ✓ | ✓ | — |
 | STM Montréal | ✓ | ✓ | ✓ | — |
@@ -72,7 +71,7 @@ Everything Pico Transit covers, and what each agency publishes live.
 
 | Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
 |---|:-:|:-:|:-:|:-:|
-| RTD Denver² | ✓ | ✓ | ✓ | 🔜 |
+| RTD Denver² | ✓ | ✓ | ✓ | ✓ |
 | Bustang | ✓ | ✓ | ✓ | — |
 | All Points Transit | ✓ | — | — | — |
 | Avon Transit | ✓ | — | — | — |
@@ -120,46 +119,46 @@ Everything Pico Transit covers, and what each agency publishes live.
 
 | Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
 |---|:-:|:-:|:-:|:-:|
-| BART | ✓ | ✓ | —⁴ | — |
-| SFMTA Muni | ✓ | ✓ | ✓ | — |
-| AC Transit | ✓ | ✓ | ✓ | — |
-| Caltrain | ✓ | ✓ | ✓ | — |
-| VTA | ✓ | ✓ | ✓ | — |
-| County Connection | ✓ | ✓ | ✓ | — |
-| ACE | ✓ | ✓ | ✓ | — |
-| Santa Cruz METRO | ✓ | ✓ | ✓ | — |
-| Capitol Corridor | ✓ | ✓ | ✓ | — |
-| Emery Go-Round | ✓ | ✓ | ✓ | — |
-| Golden Gate Transit | ✓ | ✓ | ✓ | — |
-| Marin Transit | ✓ | ✓ | ✓ | — |
-| Mission Bay TMA | ✓ | ✓ | ✓ | — |
-| Mountain View Community Shuttle | ✓ | ✓ | ✓ | — |
-| MVgo | ✓ | ✓ | ✓ | — |
-| Petaluma Transit | ✓ | ✓ | ✓ | — |
-| Rio Vista Delta Breeze | ✓ | ✓ | ✓ | — |
-| SMART | ✓ | ✓ | ✓ | — |
-| SF Bay Ferry | ✓ | ✓ | ✓ | — |
-| San Leandro LINKS | ✓ | ✓ | ✓ | — |
-| SamTrans | ✓ | ✓ | ✓ | — |
-| Sonoma County Transit | ✓ | ✓ | ✓ | — |
-| Santa Rosa CityBus | ✓ | ✓ | ✓ | — |
-| SolTrans | ✓ | ✓ | ✓ | — |
-| WestCat | ✓ | ✓ | ✓ | — |
-| LAVTA Wheels | ✓ | ✓ | ✓ | — |
-| Tri Delta Transit | ✓ | ✓ | ✓ | — |
-| Angel Island Tiburon Ferry | ✓ | ✓ | ✓ | — |
-| Commute.org Shuttles | ✓ | ✓ | ✓ | — |
-| Dumbarton Express | ✓ | ✓ | ✓ | — |
-| Emery Express | ✓ | ✓ | ✓ | — |
-| FAST | ✓ | ✓ | ✓ | — |
-| Golden Gate Ferry | ✓ | ✓ | ✓ | — |
-| Presidio Go | ✓ | ✓ | ✓ | — |
-| SFO Airport | ✓ | ✓ | ✓ | — |
-| South San Francisco Shuttle | ✓ | ✓ | ✓ | — |
-| Treasure Island Ferry | ✓ | ✓ | ✓ | — |
-| Union City Transit | ✓ | ✓ | ✓ | — |
-| Vacaville City Coach | ✓ | ✓ | ✓ | — |
-| VINE Transit | ✓ | ✓ | ✓ | — |
+| BART | ✓ | ✓ | —⁴ | ✓ |
+| SFMTA Muni | ✓ | ✓ | ✓ | ✓ |
+| AC Transit | ✓ | ✓ | ✓ | ✓ |
+| Caltrain | ✓ | ✓ | ✓ | ✓ |
+| VTA | ✓ | ✓ | ✓ | ✓ |
+| County Connection | ✓ | ✓ | ✓ | ✓ |
+| ACE | ✓ | ✓ | ✓ | ✓ |
+| Santa Cruz METRO | ✓ | ✓ | ✓ | ✓ |
+| Capitol Corridor | ✓ | ✓ | ✓ | ✓ |
+| Emery Go-Round | ✓ | ✓ | ✓ | ✓ |
+| Golden Gate Transit | ✓ | ✓ | ✓ | ✓ |
+| Marin Transit | ✓ | ✓ | ✓ | ✓ |
+| Mission Bay TMA | ✓ | ✓ | ✓ | ✓ |
+| Mountain View Community Shuttle | ✓ | ✓ | ✓ | ✓ |
+| MVgo | ✓ | ✓ | ✓ | ✓ |
+| Petaluma Transit | ✓ | ✓ | ✓ | ✓ |
+| Rio Vista Delta Breeze | ✓ | ✓ | ✓ | ✓ |
+| SMART | ✓ | ✓ | ✓ | ✓ |
+| SF Bay Ferry | ✓ | ✓ | ✓ | ✓ |
+| San Leandro LINKS | ✓ | ✓ | ✓ | ✓ |
+| SamTrans | ✓ | ✓ | ✓ | ✓ |
+| Sonoma County Transit | ✓ | ✓ | ✓ | ✓ |
+| Santa Rosa CityBus | ✓ | ✓ | ✓ | ✓ |
+| SolTrans | ✓ | ✓ | ✓ | ✓ |
+| WestCat | ✓ | ✓ | ✓ | ✓ |
+| LAVTA Wheels | ✓ | ✓ | ✓ | ✓ |
+| Tri Delta Transit | ✓ | ✓ | ✓ | ✓ |
+| Angel Island Tiburon Ferry | ✓ | ✓ | ✓ | ✓ |
+| Commute.org Shuttles | ✓ | ✓ | ✓ | ✓ |
+| Dumbarton Express | ✓ | ✓ | ✓ | ✓ |
+| Emery Express | ✓ | ✓ | ✓ | ✓ |
+| FAST | ✓ | ✓ | ✓ | ✓ |
+| Golden Gate Ferry | ✓ | ✓ | ✓ | ✓ |
+| Presidio Go | ✓ | ✓ | ✓ | ✓ |
+| SFO Airport | ✓ | ✓ | ✓ | ✓ |
+| South San Francisco Shuttle | ✓ | ✓ | ✓ | ✓ |
+| Treasure Island Ferry | ✓ | ✓ | ✓ | ✓ |
+| Union City Transit | ✓ | ✓ | ✓ | ✓ |
+| Vacaville City Coach | ✓ | ✓ | ✓ | ✓ |
+| VINE Transit | ✓ | ✓ | ✓ | ✓ |
 
 **Nashville**
 
@@ -177,22 +176,22 @@ Everything Pico Transit covers, and what each agency publishes live.
 
 | Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
 |---|:-:|:-:|:-:|:-:|
-| King County Metro | ✓ | ✓ | ✓ | 🔜 |
-| Sound Transit | ✓ | ✓ | ✓ | 🔜 |
-| Pierce Transit | ✓ | ✓ | ✓ | 🔜 |
-| Community Transit | ✓ | ✓ | ✓ | 🔜 |
-| Kitsap Transit | ✓ | ✓ | ✓ | 🔜 |
-| Intercity Transit | ✓ | ✓ | ✓ | 🔜 |
-| Everett Transit | ✓ | ✓ | ✓ | 🔜 |
-| Washington State Ferries | ✓ | ✓ | ✓ | 🔜 |
-| Seattle Center Monorail | ✓ | ✓ | ✓ | 🔜 |
+| King County Metro | ✓ | ✓ | ✓ | ✓ |
+| Sound Transit | ✓ | ✓ | ✓ | ✓ |
+| Pierce Transit | ✓ | ✓ | ✓ | ✓ |
+| Community Transit | ✓ | ✓ | ✓ | ✓ |
+| Kitsap Transit | ✓ | ✓ | ✓ | ✓ |
+| Intercity Transit | ✓ | ✓ | ✓ | ✓ |
+| Everett Transit | ✓ | ✓ | ✓ | ✓ |
+| Washington State Ferries | ✓ | ✓ | ✓ | ✓ |
+| Seattle Center Monorail | ✓ | ✓ | ✓ | ✓ |
 
 ¹ MBTA Green Line trains are matched to the schedule as a "closest match", since most run as unscheduled added trips. Commuter rail positions and track numbers come from MBTA's V3 API.  
 ² RTD Denver includes Bustang's routes and live vehicles.  
 ³ CTA doesn't publish standard GTFS-RT. Buses use CTA Bus Tracker (predicted arrivals and positions, matched to scheduled trips). 'L' trains use Train Tracker as a "closest match" for live arrivals and boarded trips, and aren't drawn on the map yet.  
 ⁴ BART publishes no vehicle positions; arrivals come from trip updates.  
 ⁵ NYC Subway trains have no GPS, so they're shown at their current stop.  
-⁶ Service alerts are coming in a future update. 🔜 means the agency's alerts feed is connected and ready.
+⁶ Service alerts are optional. Turn them on in Settings → Service alerts.
 
 ## 🗺️ What can it do?
 
