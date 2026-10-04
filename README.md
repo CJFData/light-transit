@@ -6,6 +6,8 @@ It covers **132 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denv
 
 Use it on its own or alongside the Light Phone's Directions tool. It's built on the [Light SDK](https://github.com/lightphone/light-sdk), so it stays as calm and un-distracting as the rest of your Light experience.
 
+📦 **Download it** from the [Releases page](https://github.com/CJFData/light-transit/releases) (the APK is under each release's Assets), then see [Getting it onto a real Light Phone III](#-getting-it-onto-a-real-light-phone-iii) below.
+
 ## 🔄 Recent updates
 
 **v0.5.0**
@@ -234,84 +236,73 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
 - 🏠 **Pick your agency** from the welcome screen and Pico Transit downloads its schedule to your phone. The home screen then shows a clock in the agency's timezone and its name.
 
-  ![alt text](docs/screenshots/Screenshot_20260810_171500.png)
-  ![alt text](docs/screenshots/Screenshot_20260810_171800.png)
+  <img src="docs/screenshots/Screenshot_20260810_171500.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260810_171800.png" alt="Pico Transit screenshot" width="220">
 
 - 🗂️ **Multiple schedules by region**: New York City, Denver, the SF Bay Area, and Puget Sound group their agencies together. Turn on more schedules from the same region in Settings → "Additional Schedules", and tap and hold one there to make it your primary.
 
-  ![alt text](docs/screenshots/NYCtransit.png)
+  <img src="docs/screenshots/NYCtransit.png" alt="Pico Transit screenshot" width="220">
 
 - 📅 **Schedules**: browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, then pick a route, direction, and stop to see today's departures. Tap the Departures header to see tomorrow's instead.
 
-  ![alt text](docs/screenshots/Screenshot_20260801_204325.png)
+  <img src="docs/screenshots/Screenshot_20260801_204325.png" alt="Pico Transit screenshot" width="220">
 
   Routes for each supported agency:
 
-  ![alt text](docs/screenshots/Screenshot_20260817_013000.png)
-  ![alt text](docs/screenshots/Screenshot_20260817_012800.png)
-  ![alt text](docs/screenshots/Screenshot_20260817_013500.png)
-  ![alt text](docs/screenshots/Screenshot_20260817_013600.png)
-  ![alt text](docs/screenshots/Screenshot_20260817_013800.png)
+  <img src="docs/screenshots/Screenshot_20260817_013000.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260817_012800.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260817_013500.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260817_013600.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260817_013800.png" alt="Pico Transit screenshot" width="220">
 
 - 🔗 **Connections**: tap any stop along a trip to see what comes through there next, across every platform of a station. Handy for planning a transfer on the fly.
 
-  ![alt text](docs/screenshots/Screenshot_20260801_211241.png)
+  <img src="docs/screenshots/Screenshot_20260801_211241.png" alt="Pico Transit screenshot" width="220">
 
 - 📍 **Explore**: the closest stops to an address or landmark, nearest first. Finding stops near you with GPS is marked **Testing**, since it needs a LightOS update to work; once it does, Recenter brings you back to your own location.
 
-  ![alt text](docs/screenshots/explore_nearby_stops.png)
-  ![alt text](docs/screenshots/Screenshot_20260801_214943.png)
+  <img src="docs/screenshots/explore_nearby_stops.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_214943.png" alt="Pico Transit screenshot" width="220">
 
 - ⏱️ **Live ETAs** with On Time / Late / Early badges, whenever the agency's live feed is playing along nicely.
 
-  ![alt text](docs/screenshots/Screenshot_20260810_172200.png)
+  <img src="docs/screenshots/Screenshot_20260810_172200.png" alt="Pico Transit screenshot" width="220">
 
 - 🗺️ **Map**: your stop and the stops around it, with live vehicles shown by mode (subway/light rail, commuter rail, bus, ferry). "See everything" shows every live vehicle in view; filter it by stop or by mode.
 
-  ![alt text](docs/screenshots/Screenshot_20260801_200838.png)
-  ![alt text](docs/screenshots/Screenshot_20260801_204556.png)
+  <img src="docs/screenshots/Screenshot_20260801_200838.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_204556.png" alt="Pico Transit screenshot" width="220">
 
 - 👆 **Gestures**: tap and hold a stop or station name to jump to its live arrivals. On the map, double-tap a station to zoom into its platforms, and double-tap its name to zoom back out. On Trip Detail, a tap opens a stop's connections and tap-and-hold opens its arrivals; once you've boarded, a tap sets where you're getting off.
 
 - 🚉 **Stations**: one entry per real station, with a map of just its platforms and gates. MBTA commuter rail trains show up on their track once one is assigned, usually 10-15 minutes before departure.
 
-  ![alt text](docs/screenshots/Screenshot_20260801_204530.png)
+  <img src="docs/screenshots/Screenshot_20260801_204530.png" alt="Pico Transit screenshot" width="220">
 
 - ▶️ **Board a trip**: tap Play on Trip Detail, then tap the stop where you're getting off. When you arrive, Pico Transit celebrates with "You've reached your stop! 🎉" and shows that stop's upcoming arrivals.
 
-  ![alt text](docs/screenshots/Screenshot_20260810_172300.png)
-  ![alt text](docs/screenshots/Screenshot_20260801_212442.png)
+  <img src="docs/screenshots/Screenshot_20260810_172300.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_212442.png" alt="Pico Transit screenshot" width="220">
 
 - 👀 **Show earlier stops** (Settings): a boarded trip also lists the stops before yours, greyed out, so you can watch your vehicle approach.
 
-  ![alt text](docs/screenshots/pre-arrival.png)
+  <img src="docs/screenshots/pre-arrival.png" alt="Pico Transit screenshot" width="220">
 
 - 🚋 **Select Run**, for CTA 'L' trains and MBTA subway lines: when Pico Transit can't match a live train to a scheduled trip for certain, it shows a "Closest match". Select Run lets you confirm or correct it by tapping the vehicle you're actually on.
 
-  ![alt text](docs/screenshots/fuzzy_runs.png)
+  <img src="docs/screenshots/fuzzy_runs.png" alt="Pico Transit screenshot" width="220">
 
 - 🚦 **Home screen trip status**: while you're on a trip, the home screen shows your route, live ETA, stops remaining, and an optional progress bar.
 
-  ![alt text](docs/screenshots/Screenshot_20260810_172500.png)  ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
-  ![alt text](docs/screenshots/Screenshot_20260817_233823.png)  ![alt text](docs/screenshots/Screenshot_20260820_003442.png)
+  <img src="docs/screenshots/Screenshot_20260810_172500.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_212055.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260817_233823.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260820_003442.png" alt="Pico Transit screenshot" width="220">
 
 - ⚠️ **Service alerts** (optional, turn on in Settings): detours, closures, and other service changes, for agencies with an alerts feed. The home screen shows your trip's alerts while you're on one. An alert icon marks affected routes, stops, and trips, and tapping it opens the full alert: what it affects, how long it lasts, and the details. New alerts can also pop up as they come in.
 
-  ![Home screen showing an alert under the trip progress bar](docs/screenshots/alerts_home.png)  ![Route list with alert icons](docs/screenshots/alerts_routes.png)
-  ![Trip Detail with alert icons at the top and beside a stop](docs/screenshots/alerts_trip.png)  ![An open service alert](docs/screenshots/alerts_modal.png)
+  <img src="docs/screenshots/alerts_home.png" alt="Home screen showing an alert under the trip progress bar" width="220"> <img src="docs/screenshots/alerts_routes.png" alt="Route list with alert icons" width="220"> <img src="docs/screenshots/alerts_trip.png" alt="Trip Detail with alert icons at the top and beside a stop" width="220"> <img src="docs/screenshots/alerts_modal.png" alt="An open service alert" width="220">
 
 - ↩️ **Jump back anytime**: a Play icon in the corner takes you back to your trip from any screen, and the footer circle takes you home.
 
-  ![alt text](docs/screenshots/Screenshot_20260801_212013.png)
+  <img src="docs/screenshots/Screenshot_20260801_212013.png" alt="Pico Transit screenshot" width="220">
 
 - ⚙️ **Settings**: switch agencies, turn on service alerts (off by default) and choose where they show, pick a light or dark map, choose gestures, turn Select Run options on or off, manage location, download only over Wi-Fi (on by default), or clear the schedule cache.
 
-  ![alt text](docs/screenshots/Screenshot_20260810_172700.png)
-  ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
+  <img src="docs/screenshots/Screenshot_20260810_172700.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_215602.png" alt="Pico Transit screenshot" width="220">
 
 - ℹ️ **About**: a legend of every icon Pico Transit uses.
 
-  ![alt text](docs/screenshots/Screenshot_20260810_171900.png)
+  <img src="docs/screenshots/Screenshot_20260810_171900.png" alt="Pico Transit screenshot" width="220">
 
 ## 🛠️ Building & running it
 
@@ -325,12 +316,12 @@ Pico Transit lives in `tool/` inside this fork of the [light-sdk](https://github
 
 Until Pico Transit is available through Light's Tool Library, install it with ADB, since LightOS can't install third-party APKs on the phone itself yet:
 
-1. Download the latest APK from [Releases](https://github.com/CJFData/light-transit/releases), or build one with `./gradlew :tool:assembleDebug`.
+1. Download the latest APK from the [Releases page](https://github.com/CJFData/light-transit/releases): open the newest release and grab `pico-transit-v<version>.apk` under **Assets**. Or build one yourself with `./gradlew :tool:assembleRelease`.
 2. Turn on Developer Options and USB debugging on your Light Phone III, plug it in, and run:
    ```bash
-   adb install -r pico-transit-<version>.apk
+   adb install -r pico-transit-v<version>.apk
    ```
-3. On the phone, allow "Any tools" in LightOS's tool settings. It'll warn you the tool isn't Light-vetted yet, which is expected for now. 🚧
+3. On the phone, allow "Any tools" in LightOS's tool settings.
 
 That's it, happy transit-ing! 🚏🚌🚆
 
