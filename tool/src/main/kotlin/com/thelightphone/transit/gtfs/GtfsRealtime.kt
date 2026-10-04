@@ -215,6 +215,73 @@ data class GtfsRtStopTimeEvent(
 
 class GtfsRealtimeException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
+/** An alerts feed. Kept separate from [GtfsRtFeedMessage] so alerts embedded in trip feeds (NYC
+ * Subway sends some) stay undecoded there, and trip feeds behave the same whether alerts are on
+ * or off. */
+@Serializable
+data class GtfsRtAlertFeedMessage(
+    @ProtoNumber(1) val header: GtfsRtFeedHeader = GtfsRtFeedHeader(),
+    @ProtoNumber(2) val entity: List<GtfsRtAlertEntity> = emptyList(),
+)
+
+/** A FeedEntity read for its alert only; trip updates and vehicles in the same feed are skipped. */
+@Serializable
+class GtfsRtAlertEntity(
+    @ProtoNumber(1) val id: String = "",
+    @ProtoNumber(2) val isDeleted: Boolean? = null,
+    @ProtoNumber(3) val tripUpdateUnused: ByteArray? = null,
+    @ProtoNumber(4) val vehicleUnused: ByteArray? = null,
+    @ProtoNumber(5) val alert: GtfsRtAlert? = null,
+)
+
+/** GTFS-RT Alert. Every standard field is declared so none can fail the decode; only the core ones
+ * are used. */
+@Serializable
+class GtfsRtAlert(
+    @ProtoNumber(1) val activePeriod: List<GtfsRtTimeRange> = emptyList(),
+    @ProtoNumber(5) val informedEntity: List<GtfsRtEntitySelector> = emptyList(),
+    @ProtoNumber(6) val cause: Int? = null,
+    @ProtoNumber(7) val effect: Int? = null,
+    @ProtoNumber(8) val url: GtfsRtTranslatedString? = null,
+    @ProtoNumber(10) val headerText: GtfsRtTranslatedString? = null,
+    @ProtoNumber(11) val descriptionText: GtfsRtTranslatedString? = null,
+    @ProtoNumber(12) val ttsHeaderTextUnused: GtfsRtTranslatedString? = null,
+    @ProtoNumber(13) val ttsDescriptionTextUnused: GtfsRtTranslatedString? = null,
+    @ProtoNumber(14) val severityLevel: Int? = null,
+    @ProtoNumber(15) val imageUnused: ByteArray? = null,
+    @ProtoNumber(16) val imageAlternativeTextUnused: GtfsRtTranslatedString? = null,
+    @ProtoNumber(17) val causeDetailUnused: GtfsRtTranslatedString? = null,
+    @ProtoNumber(18) val effectDetailUnused: GtfsRtTranslatedString? = null,
+)
+
+/** Epoch seconds; either end may be missing. */
+@Serializable
+data class GtfsRtTimeRange(
+    @ProtoNumber(1) val start: Long? = null,
+    @ProtoNumber(2) val end: Long? = null,
+)
+
+@Serializable
+data class GtfsRtEntitySelector(
+    @ProtoNumber(1) val agencyId: String? = null,
+    @ProtoNumber(2) val routeId: String? = null,
+    @ProtoNumber(3) val routeType: Int? = null,
+    @ProtoNumber(4) val trip: GtfsRtTripDescriptor? = null,
+    @ProtoNumber(5) val stopId: String? = null,
+    @ProtoNumber(6) val directionId: Int? = null,
+)
+
+@Serializable
+data class GtfsRtTranslatedString(
+    @ProtoNumber(1) val translation: List<GtfsRtTranslation> = emptyList(),
+)
+
+@Serializable
+data class GtfsRtTranslation(
+    @ProtoNumber(1) val text: String = "",
+    @ProtoNumber(2) val language: String? = null,
+)
+
 /**
  * Fetches and decodes a GTFS-RT feed -- TripUpdates and VehiclePositions are separate published
  * feeds but both decode into this same FeedMessage/FeedEntity wrapper (each entity just populates
@@ -231,6 +298,19 @@ object GtfsRealtimeClient {
             if (status !in 200..299) throw GtfsRealtimeException("GTFS-RT fetch failed: HTTP $status")
             val bytes: ByteArray = response.body()
             return ProtoBuf.decodeFromByteArray(GtfsRtFeedMessage.serializer(), bytes)
+        } finally {
+            client.close()
+        }
+    }
+
+    suspend fun fetchAlertsFeed(url: String): GtfsRtAlertFeedMessage {
+        val client = HttpClient(OkHttp)
+        try {
+            val response = client.get(url)
+            val status = response.status.value
+            if (status !in 200..299) throw GtfsRealtimeException("GTFS-RT alerts fetch failed: HTTP $status")
+            val bytes: ByteArray = response.body()
+            return ProtoBuf.decodeFromByteArray(GtfsRtAlertFeedMessage.serializer(), bytes)
         } finally {
             client.close()
         }

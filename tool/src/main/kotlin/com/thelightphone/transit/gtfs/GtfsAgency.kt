@@ -31,8 +31,8 @@ enum class GtfsAgency(
     val feedUrl: String,
     val realtimeTripUpdatesUrl: String?,
     val realtimeVehiclePositionsUrl: String?,
-    /** This agency's GTFS-RT service alerts feed, or null if it doesn't publish one. */
-    val realtimeServiceAlertsUrl: String? = null,
+    /** This agency's GTFS-RT alerts feed, or null if it doesn't publish one. */
+    val realtimeAlertsUrl: String? = null,
     /** This agency's own IANA timezone, exactly as declared in its GTFS feed's agency.txt
      * `agency_timezone` column (verified against each agency's real feed, not assumed) -- every
      * GTFS scheduled time is only meaningful relative to the agency's own clock, not the rider's
@@ -56,6 +56,7 @@ enum class GtfsAgency(
         "https://cdn.mbta.com/MBTA_GTFS.zip",
         "https://gtfs.picotransit.com/mbta/tripupdates",
         "https://gtfs.picotransit.com/mbta/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/mbta/alerts",
         timeZoneId = "America/New_York",
         // See MbtaGreenLineFuzzyRunSource's own doc -- Green Line's own live feed marks the vast
         // majority of its running vehicles as ADDED trips with no real static trip to match to;
@@ -79,6 +80,7 @@ enum class GtfsAgency(
         "https://www.rtd-denver.com/files/gtfs/google_transit.zip",
         "https://gtfs.picotransit.com/rtd/tripupdates",
         "https://gtfs.picotransit.com/rtd/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/rtd/alerts",
         timeZoneId = "America/Denver",
         components = listOf(BustangSecondaryFeed),
     ),
@@ -1058,7 +1060,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/kcm/static",
         "https://gtfs.picotransit.com/puget_sound/kcm/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/kcm/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/kcm/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/kcm/alerts",
         timeZoneId = "America/Los_Angeles",
         // Required by King County's Transit Data Terms of Use.
         components = listOf(
@@ -1071,7 +1073,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/pierce_transit/static",
         "https://gtfs.picotransit.com/puget_sound/pierce_transit/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/pierce_transit/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/pierce_transit/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/pierce_transit/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),
@@ -1081,7 +1083,7 @@ enum class GtfsAgency(
         "https://gtfs.sound.obaweb.org/prod/19_gtfs.zip",
         "https://gtfs.picotransit.com/puget_sound/intercity_transit/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/intercity_transit/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/intercity_transit/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/intercity_transit/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),
@@ -1091,7 +1093,7 @@ enum class GtfsAgency(
         "https://gtfs.sound.obaweb.org/prod/20_gtfs.zip",
         "https://gtfs.picotransit.com/puget_sound/kitsap_transit/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/kitsap_transit/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/kitsap_transit/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/kitsap_transit/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),
@@ -1101,7 +1103,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/community_transit/static",
         "https://gtfs.picotransit.com/puget_sound/community_transit/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/community_transit/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/community_transit/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/community_transit/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),
@@ -1111,7 +1113,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/sound_transit/static",
         "https://gtfs.picotransit.com/puget_sound/sound_transit/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/sound_transit/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/sound_transit/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/sound_transit/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),
@@ -1121,7 +1123,7 @@ enum class GtfsAgency(
         "https://gtfs.sound.obaweb.org/prod/95_gtfs.zip",
         "https://gtfs.picotransit.com/puget_sound/wa_state_ferries/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/wa_state_ferries/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/wa_state_ferries/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/wa_state_ferries/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),
@@ -1131,7 +1133,7 @@ enum class GtfsAgency(
         "https://gtfs.sound.obaweb.org/prod/96_gtfs.zip",
         "https://gtfs.picotransit.com/puget_sound/seattle_monorail/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/seattle_monorail/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/seattle_monorail/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/seattle_monorail/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),
@@ -1141,7 +1143,7 @@ enum class GtfsAgency(
         "https://gtfs.sound.obaweb.org/prod/97_gtfs.zip",
         "https://gtfs.picotransit.com/puget_sound/everett_transit/tripupdates",
         "https://gtfs.picotransit.com/puget_sound/everett_transit/vehiclepositions",
-        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/everett_transit/servicealerts",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/puget_sound/everett_transit/alerts",
         timeZoneId = "America/Los_Angeles",
         components = listOf(AttributionPartner("Sound Transit")),
     ),

@@ -942,6 +942,16 @@ class GtfsRepository(dbFile: File) {
         }
     }
 
+    /** Every stop's parent station, for matching alerts across a station and its platforms. */
+    fun getStopGraph(): StopGraph =
+        db.rawQuery("SELECT stop_id, parent_station FROM stops WHERE parent_station IS NOT NULL AND parent_station != ''", null)
+            .use { cursor -> StopGraph(cursor.mapRows { getString(0) to getString(1) }.toMap()) }
+
+    /** How many routes actually run, for deciding whether an alert covers most of the agency. */
+    fun countRoutesWithTrips(): Int =
+        db.rawQuery("SELECT COUNT(*) FROM routes r WHERE EXISTS (SELECT 1 FROM trips t WHERE t.route_id = r.route_id)", null)
+            .use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+
     /** stop_desc for every given stop_id, keyed by stop_id -- used to derive each platform's own
      * label within a station (see [platformLabelFromStopDesc]) for screens that already have
      * platform stop_ids in hand, rather than going through the unioned arrivals query that already
