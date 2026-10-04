@@ -39,7 +39,12 @@ class AlertPreferences(private val dataStore: DataStore<Preferences>) {
     suspend fun setOnHomeScreen(enabled: Boolean) = dataStore.edit { it[alertsOnHomeScreenKey] = enabled }
     suspend fun setInMenus(enabled: Boolean) = dataStore.edit { it[alertsInMenusKey] = enabled }
     suspend fun setBoardedOnly(enabled: Boolean) = dataStore.edit { it[alertsBoardedOnlyKey] = enabled }
-    suspend fun setPopUp(enabled: Boolean) = dataStore.edit { it[alertsPopUpKey] = enabled }
+    /** Turning pop-ups on clears the seen versions, so current alerts are recorded silently
+     * instead of all popping up at once. */
+    suspend fun setPopUp(enabled: Boolean) = dataStore.edit {
+        it[alertsPopUpKey] = enabled
+        if (enabled) it.remove(alertsSeenKey)
+    }
     suspend fun setSwipe(enabled: Boolean) = dataStore.edit { it[alertsSwipeKey] = enabled }
 
     suspend fun setSeen(seen: Map<String, String>) =

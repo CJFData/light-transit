@@ -6,16 +6,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** GTFS-RT Alert.Effect values that change service on a whole route or direction. */
-private val SERVICE_AFFECTING_EFFECTS = setOf(
-    1, // NO_SERVICE
-    2, // REDUCED_SERVICE
-    3, // SIGNIFICANT_DELAYS
-    4, // DETOUR
-    6, // MODIFIED_SERVICE
-    9, // STOP_MOVED
-)
-
 /** GTFS-RT Alert.Effect values about a station's facilities, which only ever badge stops. */
 private val FACILITY_EFFECTS = setOf(
     7, // OTHER_EFFECT
@@ -72,7 +62,6 @@ data class Alert(
             ?: periods.maxByOrNull { it.end ?: Long.MAX_VALUE }
 
     val isFacility: Boolean get() = effect in FACILITY_EFFECTS
-    val isServiceAffecting: Boolean get() = effect in SERVICE_AFFECTING_EFFECTS
 }
 
 /** Turns a decoded alerts feed into [Alert]s for [agencyId]. Deleted entities and entities with
@@ -90,7 +79,7 @@ fun normalizeAlerts(feed: GtfsRtAlertFeedMessage, agencyId: String): List<Alert>
         Alert(
             id = entity.id,
             agencyId = agencyId,
-            version = alertVersion(header, description, periods, selectors),
+            version = alertVersion(header, periods),
             header = header,
             description = description,
             cause = alert.cause ?: UNKNOWN_CAUSE,
@@ -115,16 +104,35 @@ private fun GtfsRtTranslatedString?.preferredText(): String? {
         ?.text
 }
 
-/** A short hash that changes whenever what a rider would see changes. */
-private fun alertVersion(header: String, description: String, periods: List<AlertPeriod>, selectors: List<AlertSelector>): String {
+/** A short hash that changes only when the header or time period changes; used to decide when a
+ * seen alert pops up again. */
+private fun alertVersion(header: String, periods: List<AlertPeriod>): String {
     val text = buildString {
-        append(header).append('\u0000').append(description).append('\u0000')
+        append(header).append('\u0000')
         periods.forEach { append(it.start).append('-').append(it.end).append(';') }
-        append('\u0000')
-        selectors.forEach { append(it).append(';') }
     }
     val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
     return digest.take(8).joinToString("") { "%02x".format(it) }
+}
+
+/** Alerts to pop up now, and the updated seen versions to save. */
+data class PopupDecision(val toShow: List<Alert>, val seen: Map<String, String>)
+
+/**
+ * Decides which [candidates] pop up for [agencyId]. [seen] maps "agencyId:alertId" to the version
+ * last shown, plus an "agencyId:" marker once the agency has a baseline. The first check for an
+ * agency records every candidate without showing any. After that, a candidate pops when it's new
+ * or its version changed. Entries for alerts no longer in the feed ([feedAlertIds]) are dropped.
+ */
+fun decidePopups(agencyId: String, candidates: List<Alert>, feedAlertIds: Set<String>, seen: Map<String, String>): PopupDecision {
+    val prefix = "$agencyId:"
+    val updated = seen.filterKeys { key -> !key.startsWith(prefix) || key == prefix || key.removePrefix(prefix) in feedAlertIds }
+        .toMutableMap()
+    val isBaseline = prefix !in seen
+    val toShow = if (isBaseline) emptyList() else candidates.filter { updated[prefix + it.id] != it.version }
+    candidates.forEach { updated[prefix + it.id] = it.version }
+    updated[prefix] = ""
+    return PopupDecision(toShow, updated)
 }
 
 private val PERIOD_FORMAT = DateTimeFormatter.ofPattern("EEE MMM d, h:mm a", Locale.US)
@@ -160,6 +168,8 @@ data class StopAlert(val alert: Alert, val routeId: String?)
 /** Active alerts indexed for quick lookup by stop, route, direction and trip. */
 class AlertIndex(alerts: List<Alert>, private val graph: StopGraph, agencyRouteCount: Int, now: Long) {
     val active: List<Alert> = alerts.filter { it.status(now) == AlertStatus.ACTIVE }
+    /** Every alert id in the feed, active or not. */
+    val feedIds: Set<String> = alerts.mapTo(HashSet()) { it.id }
 
     private val byStop = HashMap<String, MutableList<StopAlert>>()
     private val byRoute = HashMap<String, MutableList<Alert>>()
@@ -174,8 +184,9 @@ class AlertIndex(alerts: List<Alert>, private val graph: StopGraph, agencyRouteC
                         byStop.getOrPut(stop) { mutableListOf() }.addUnique(StopAlert(alert, selector.routeId))
                     }
                 }
+                // A route named with a stop gets the alert too, except for facility alerts.
                 val routeId = selector.routeId ?: continue
-                if (alert.isFacility || (!alert.isServiceAffecting && selector.stopId != null)) continue
+                if (alert.isFacility) continue
                 if (selector.directionId != null) {
                     byRouteDirection.getOrPut(routeId to selector.directionId) { mutableListOf() }.addUnique(alert)
                 } else {

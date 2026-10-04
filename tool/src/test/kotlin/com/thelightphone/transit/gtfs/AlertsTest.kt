@@ -109,9 +109,10 @@ class AlertsTest {
     }
 
     @Test
-    fun routeBadgesNeedServiceEffectOrNoStop() {
+    fun stopAndRouteAlertsBadgeBoth() {
         val stopRouteUnknownEffect = AlertIndex(listOf(alert(effect = 8, selectors = arrayOf(sel(stop = "S1", route = "R1")))), noStations, 10, 0)
-        assertEquals(0, stopRouteUnknownEffect.forRoute("R1").size)
+        assertEquals(1, stopRouteUnknownEffect.forRoute("R1").size)
+        assertEquals(1, stopRouteUnknownEffect.forStop("S1", setOf("R1")).size)
         val stopRouteDetour = AlertIndex(listOf(alert(effect = 4, selectors = arrayOf(sel(stop = "S1", route = "R1")))), noStations, 10, 0)
         assertEquals(1, stopRouteDetour.forRoute("R1").size)
         val routeOnlyUnknownEffect = AlertIndex(listOf(alert(effect = 8, selectors = arrayOf(sel(route = "R1")))), noStations, 10, 0)
@@ -198,6 +199,54 @@ class AlertsTest {
         assertTrue(selectors.all { it.agencyId == "SF" })
         assertFalse(selectors.any { it.routeId?.contains(':') == true || it.stopId?.contains(':') == true })
         assertTrue(alerts.any { isAgencyWide(it, 70) }, "The feed has a Muni-wide alert naming only the agency")
+    }
+
+    @Test
+    fun firstPopupCheckIsSilentAndRecordsEverything() {
+        val alerts = normalizeAlerts(feed("mbta_alerts.pb"), "mbta")
+        val decision = decidePopups("mbta", alerts, alerts.map { it.id }.toSet(), emptyMap())
+        assertTrue(decision.toShow.isEmpty())
+        assertEquals("", decision.seen["mbta:"])
+        assertTrue(alerts.all { decision.seen["mbta:${it.id}"] == it.version })
+
+        val again = decidePopups("mbta", alerts, alerts.map { it.id }.toSet(), decision.seen)
+        assertTrue(again.toShow.isEmpty(), "Nothing changed, so nothing pops")
+    }
+
+    @Test
+    fun newOrRetitledOrRetimedAlertsPopButDescriptionEditsDont() {
+        fun popAlert(id: String, header: String = "Shuttle buses", description: String = "", periods: List<AlertPeriod> = emptyList()) =
+            normalizeAlerts(
+                GtfsRtAlertFeedMessage(
+                    header = GtfsRtFeedHeader(gtfsRealtimeVersion = "2.0"),
+                    entity = listOf(
+                        GtfsRtAlertEntity(
+                            id = id,
+                            alert = GtfsRtAlert(
+                                activePeriod = periods.map { GtfsRtTimeRange(it.start, it.end) },
+                                headerText = GtfsRtTranslatedString(listOf(GtfsRtTranslation(header, "en"))),
+                                descriptionText = GtfsRtTranslatedString(listOf(GtfsRtTranslation(description, "en"))),
+                            ),
+                        ),
+                    ),
+                ),
+                "test",
+            ).single()
+
+        val original = popAlert("a")
+        val baseline = decidePopups("test", listOf(original), setOf("a"), emptyMap()).seen
+
+        assertEquals(listOf("b"), decidePopups("test", listOf(original, popAlert("b")), setOf("a", "b"), baseline).toShow.map { it.id })
+        assertEquals(1, decidePopups("test", listOf(popAlert("a", header = "No service")), setOf("a"), baseline).toShow.size)
+        assertEquals(1, decidePopups("test", listOf(popAlert("a", periods = listOf(AlertPeriod(1L, 2L)))), setOf("a"), baseline).toShow.size)
+        assertTrue(decidePopups("test", listOf(popAlert("a", description = "Now with more detail")), setOf("a"), baseline).toShow.isEmpty())
+    }
+
+    @Test
+    fun seenEntriesLeavingTheFeedArePrunedPerAgency() {
+        val seen = mapOf("mbta:" to "", "mbta:gone" to "v1", "mbta:kept" to "v2", "rtd:" to "", "rtd:gone" to "v3")
+        val decision = decidePopups("mbta", emptyList(), setOf("kept"), seen)
+        assertEquals(mapOf("mbta:" to "", "mbta:kept" to "v2", "rtd:" to "", "rtd:gone" to "v3"), decision.seen)
     }
 
     @Test

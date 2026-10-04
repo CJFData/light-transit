@@ -574,28 +574,13 @@ class HomeScreenViewModel(
      * only for boarded trips" is on. */
     private suspend fun refreshHomeAlerts() {
         val agency = selectedAgency.value ?: return
-        val dbFile = gtfsDbFile(filesDir, agency)
-        // No database yet while a first download is still loading.
-        val repository = if (dbFile.exists()) GtfsRepository(dbFile) else null
         try {
-            val screenAlerts = loadScreenAlerts(dbFile, repository, alertPreferences, AlertSurface.HOME)
-            if (screenAlerts == null) {
-                homeAlerts.value = null
-                return
-            }
-            val trip = boardedTrip.value?.takeIf { it.agency == agency }
-            val alerts = when {
-                trip != null && repository != null -> tripAlerts(screenAlerts, repository, trip.tripId, trip.fromStopSequence)
-                !alertPreferences.boardedOnlyFlow.first() -> screenAlerts.index.agencyWide
-                else -> emptyList()
-            }
-            homeAlerts.value = alerts.takeIf { it.isNotEmpty() }?.let { it to screenAlerts }
+            homeAlerts.value = homeScreenAlerts(agency, filesDir, alertPreferences, boardedTrip.value, AlertSurface.HOME)
+                ?.takeIf { (alerts, _) -> alerts.isNotEmpty() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e("HomeScreen", "Alerts refresh failed", e)
-        } finally {
-            repository?.close()
         }
     }
 
@@ -948,6 +933,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         get() = HomeScreenViewModel::class.java
 
     override fun createViewModel(): HomeScreenViewModel {
+        // Home is always the first screen, so pop-ups start watching here.
+        AlertPopups.install(lightContext.dataStore, lightContext.filesDir)
         return HomeScreenViewModel(
             lightContext.filesDir,
             AgencyPreferences(lightContext.dataStore),

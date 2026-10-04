@@ -81,6 +81,8 @@ dependencies {
     // calls the viewModel() composable directly, same as sdk:ui's own LightTextInputEditor does
     // internally, so it needs this on tool's own classpath too.
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // Tells AlertPopups when the app is in the foreground, on any screen.
+    implementation(libs.androidx.lifecycle.process)
     // Only the "org.jetbrains.kotlinx:kotlinx-serialization" prefix is on the SDK plugin's
     // dependency allow-list, but that check is a startsWith match, so this artifact passes too —
     // verified against a live build. No official protobuf/gtfs-realtime-bindings library is

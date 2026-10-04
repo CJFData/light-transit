@@ -42,12 +42,14 @@ import com.thelightphone.transit.gtfs.Alert
 import com.thelightphone.transit.gtfs.AlertIndex
 import com.thelightphone.transit.gtfs.AlertPreferences
 import com.thelightphone.transit.gtfs.AlertsStore
+import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.RealtimeStopIdBridge
 import com.thelightphone.transit.gtfs.bridgeStopIds
 import com.thelightphone.transit.gtfs.StopGraph
 import com.thelightphone.transit.gtfs.UNKNOWN_CAUSE
+import com.thelightphone.transit.gtfs.gtfsDbFile
 import com.thelightphone.transit.gtfs.label
 import java.io.File
 import java.time.ZoneId
@@ -58,7 +60,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 
 /** Where alerts are shown, which decides which Settings toggles apply. */
-enum class AlertSurface { HOME, MENUS, TRIP }
+enum class AlertSurface { HOME, MENUS, TRIP, POPUP }
 
 /** One agency's active alerts, ready for a screen to look up and display. [swipe] pages between
  * alerts by swiping instead of with buttons. */
@@ -91,6 +93,7 @@ suspend fun loadScreenAlerts(
         AlertSurface.HOME -> preferences.onHomeScreenFlow.first()
         AlertSurface.MENUS -> preferences.inMenusFlow.first() && !boardedOnly
         AlertSurface.TRIP -> tripIsBoarded || (preferences.inMenusFlow.first() && !boardedOnly)
+        AlertSurface.POPUP -> preferences.popUpFlow.first()
     }
     if (!shown) return null
     val agency = GtfsAgency.forDbFile(dbFile) ?: return null
@@ -109,6 +112,35 @@ suspend fun loadScreenAlerts(
         }.distinct()
     }
     return ScreenAlerts(index, agency.zoneId, now, appliesTo, preferences.swipeFlow.first())
+}
+
+/**
+ * The alerts the home screen shows for [agency]: the boarded trip's while one is boarded on it,
+ * otherwise agency-wide alerts unless "Show only for boarded trips" is on. The list can be empty;
+ * null means [surface] is off or there are no alerts.
+ */
+suspend fun homeScreenAlerts(
+    agency: GtfsAgency,
+    filesDir: File,
+    preferences: AlertPreferences,
+    boardedTrip: BoardedTrip?,
+    surface: AlertSurface,
+): Pair<List<Alert>, ScreenAlerts>? {
+    val dbFile = gtfsDbFile(filesDir, agency)
+    // No database yet while a first download is still loading.
+    val repository = if (dbFile.exists()) GtfsRepository(dbFile) else null
+    try {
+        val screenAlerts = loadScreenAlerts(dbFile, repository, preferences, surface) ?: return null
+        val trip = boardedTrip?.takeIf { it.agency == agency }
+        val alerts = when {
+            trip != null && repository != null -> tripAlerts(screenAlerts, repository, trip.tripId, trip.fromStopSequence)
+            !preferences.boardedOnlyFlow.first() -> screenAlerts.index.agencyWide
+            else -> emptyList()
+        }
+        return alerts to screenAlerts
+    } finally {
+        repository?.close()
+    }
 }
 
 /** Alerts for a trip from [fromStopSequence] onward: ones naming the trip, its route and

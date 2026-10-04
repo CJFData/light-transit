@@ -69,6 +69,7 @@ enum class GtfsAgency(
         "https://ripta.com/RIPTA-GTFS.zip",
         "https://gtfs.picotransit.com/ripta/tripupdates",
         "https://gtfs.picotransit.com/ripta/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/ripta/alerts",
         timeZoneId = "America/New_York",
         // Pilot agency for TripShapeSource -- see StaticGtfsShapeSource's own doc for why this reads
         // shapes.txt on demand from the already-downloaded zip rather than through ingestion.
@@ -96,12 +97,7 @@ enum class GtfsAgency(
         timeZoneId = "America/Denver",
     ),
     /**
-     * The rest of Colorado's agencies from colorado-gtfs.trilliumtransit.com: static schedules only,
-     * since that source publishes no GTFS-RT, so each gets a "(No Live)" suffix. Timezones come from
-     * each feed's agency.txt (America/Denver unless noted). Some entries share identical feed content
-     * under different rider-facing names (Boulder County/Via Mobility; San Miguel Authority/Mountain
-     * Village/Telluride) and stay separate so riders find the name they know. COLT and Cripple Creek
-     * Transportation are left out until a working feed URL is found.
+     * The rest of Colorado's agencies from colorado-gtfs.trilliumtransit.com
      */
     ALL_POINTS_TRANSIT(
         "all_points_transit",
