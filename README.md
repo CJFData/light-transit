@@ -33,6 +33,174 @@ The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - 🗺️ **Route shapes on the map**: drawing the real path between stops instead of straight lines (RIPTA's shapes are already read).
 - 🚏 **More agencies**, with help from the community.
 
+## 🚏 Agencies and live data
+
+Everything Pico Transit covers, and what each agency publishes live.
+
+**Northeast & Canada**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| MBTA¹ | ✓ | ✓ | ✓ | 🔜 |
+| RIPTA | ✓ | ✓ | ✓ | — |
+| LTC Ontario | ✓ | ✓ | ✓ | — |
+| STM Montréal | ✓ | ✓ | ✓ | 🔜 |
+
+**New York City**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| NYC Subway | ✓ | ✓ | ✓⁵ | — |
+| LIRR | ✓ | ✓ | ✓ | — |
+| Metro-North | ✓ | ✓ | ✓ | — |
+| NYC Bus - Bronx | ✓ | ✓ | ✓ | — |
+| NYC Bus - Brooklyn | ✓ | ✓ | ✓ | — |
+| NYC Bus - Manhattan | ✓ | ✓ | ✓ | — |
+| NYC Bus - Queens | ✓ | ✓ | ✓ | — |
+| NYC Bus - Staten Island | ✓ | ✓ | ✓ | — |
+| NYC Bus - MTA Bus Company | ✓ | ✓ | ✓ | — |
+
+**Chicago**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| CTA | ✓ | ✓³ | ✓³ | — |
+| Metra | ✓ | — | — | — |
+| Pace | ✓ | — | — | — |
+
+**Denver & Colorado**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| RTD Denver² | ✓ | ✓ | ✓ | 🔜 |
+| Bustang | ✓ | ✓ | ✓ | — |
+
+**San Francisco Bay Area (via 511.org)**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| BART | ✓ | ✓ | —⁴ | — |
+| SFMTA Muni | ✓ | ✓ | ✓ | — |
+| AC Transit | ✓ | ✓ | ✓ | — |
+| Caltrain | ✓ | ✓ | ✓ | — |
+| VTA | ✓ | ✓ | ✓ | — |
+| County Connection | ✓ | ✓ | ✓ | — |
+| ACE | ✓ | ✓ | ✓ | — |
+| Santa Cruz METRO | ✓ | ✓ | ✓ | — |
+| Capitol Corridor | ✓ | ✓ | ✓ | — |
+| Emery Go-Round | ✓ | ✓ | ✓ | — |
+| Golden Gate Transit | ✓ | ✓ | ✓ | — |
+| Marin Transit | ✓ | ✓ | ✓ | — |
+| Mission Bay TMA | ✓ | ✓ | ✓ | — |
+| Mountain View Community Shuttle | ✓ | ✓ | ✓ | — |
+| MVgo | ✓ | ✓ | ✓ | — |
+| Petaluma Transit | ✓ | ✓ | ✓ | — |
+| Rio Vista Delta Breeze | ✓ | ✓ | ✓ | — |
+| SMART | ✓ | ✓ | ✓ | — |
+| SF Bay Ferry | ✓ | ✓ | ✓ | — |
+| San Leandro LINKS | ✓ | ✓ | ✓ | — |
+| SamTrans | ✓ | ✓ | ✓ | — |
+| Sonoma County Transit | ✓ | ✓ | ✓ | — |
+| Santa Rosa CityBus | ✓ | ✓ | ✓ | — |
+| SolTrans | ✓ | ✓ | ✓ | — |
+| WestCat | ✓ | ✓ | ✓ | — |
+| LAVTA Wheels | ✓ | ✓ | ✓ | — |
+| Tri Delta Transit | ✓ | ✓ | ✓ | — |
+| Angel Island Tiburon Ferry | ✓ | ✓ | ✓ | — |
+| Commute.org Shuttles | ✓ | ✓ | ✓ | — |
+| Dumbarton Express | ✓ | ✓ | ✓ | — |
+| Emery Express | ✓ | ✓ | ✓ | — |
+| FAST | ✓ | ✓ | ✓ | — |
+| Golden Gate Ferry | ✓ | ✓ | ✓ | — |
+| Presidio Go | ✓ | ✓ | ✓ | — |
+| SFO Airport | ✓ | ✓ | ✓ | — |
+| South San Francisco Shuttle | ✓ | ✓ | ✓ | — |
+| Treasure Island Ferry | ✓ | ✓ | ✓ | — |
+| Union City Transit | ✓ | ✓ | ✓ | — |
+| Vacaville City Coach | ✓ | ✓ | ✓ | — |
+| VINE Transit | ✓ | ✓ | ✓ | — |
+
+**Nashville**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| Nashville - WeGo Public Transit | ✓ | ✓ | ✓ | — |
+
+**Los Angeles**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| LA Metro | ✓ | — | — | — |
+
+**Puget Sound**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| King County Metro | ✓ | ✓ | ✓ | 🔜 |
+| Sound Transit | ✓ | ✓ | ✓ | 🔜 |
+| Pierce Transit | ✓ | ✓ | ✓ | 🔜 |
+| Community Transit | ✓ | ✓ | ✓ | 🔜 |
+| Kitsap Transit | ✓ | ✓ | ✓ | 🔜 |
+| Intercity Transit | ✓ | ✓ | ✓ | 🔜 |
+| Everett Transit | ✓ | ✓ | ✓ | 🔜 |
+| Washington State Ferries | ✓ | ✓ | ✓ | 🔜 |
+| Seattle Center Monorail | ✓ | ✓ | ✓ | 🔜 |
+
+<details><summary><b>Colorado</b> (41 more agencies, schedules only)</summary>
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| All Points Transit | ✓ | — | — | — |
+| Avon Transit | ✓ | — | — | — |
+| Baca Area Transportation | ✓ | — | — | — |
+| Bent County Transportation | ✓ | — | — | — |
+| Blackhawk and Central City Tramway | ✓ | — | — | — |
+| Boulder County | ✓ | — | — | — |
+| Breckenridge Free Ride | ✓ | — | — | — |
+| Bustang Outrider | ✓ | — | — | — |
+| City of Fountain Transit | ✓ | — | — | — |
+| Clear Creek County Transit | ✓ | — | — | — |
+| Core Transit | ✓ | — | — | — |
+| Dolores County | ✓ | — | — | — |
+| Durango Transit | ✓ | — | — | — |
+| Easy Ride Transportation | ✓ | — | — | — |
+| El Paso Fountain Valley Senior Citizens Program Inc. | ✓ | — | — | — |
+| Envida | ✓ | — | — | — |
+| Epic Mountain Express | ✓ | — | — | — |
+| Estes Transit | ✓ | — | — | — |
+| Garden of the Gods | ✓ | — | — | — |
+| Greeley-Evans Transit | ✓ | — | — | — |
+| Gunnison Valley RTA | ✓ | — | — | — |
+| Home James Transportation | ✓ | — | — | — |
+| Mountain Metropolitan Transit | ✓ | — | — | — |
+| Parachute Area Transit System | ✓ | — | — | — |
+| Prairie Express Transit | ✓ | — | — | — |
+| Pueblo Transit | ✓ | — | — | — |
+| RFTA | ✓ | — | — | — |
+| Road Runner Transit | ✓ | — | — | — |
+| Rocky Mountain National Park Shuttles | ✓ | — | — | — |
+| San Miguel Authority for Regional Transportation | ✓ | — | — | — |
+| Snowmass Village Transportation | ✓ | — | — | — |
+| Steamboat Springs Transit | ✓ | — | — | — |
+| Summit Stage | ✓ | — | — | — |
+| Town of Mountain Village | ✓ | — | — | — |
+| Town of Telluride | ✓ | — | — | — |
+| Transfort | ✓ | — | — | — |
+| TSC Transit | ✓ | — | — | — |
+| University of Colorado Boulder | ✓ | — | — | — |
+| Vail Transit | ✓ | — | — | — |
+| Via Mobility | ✓ | — | — | — |
+| Winter Park Transit | ✓ | — | — | — |
+
+</details>
+
+¹ MBTA Green Line trains are matched to the schedule as a "closest match", since most run as unscheduled added trips. Commuter rail positions and track numbers come from MBTA's V3 API.  
+² RTD Denver includes Bustang's routes and live vehicles.  
+³ CTA doesn't publish standard GTFS-RT. Buses use CTA Bus Tracker (predicted arrivals and positions, matched to scheduled trips). 'L' trains use Train Tracker as a "closest match" for live arrivals and boarded trips, and aren't drawn on the map yet.  
+⁴ BART publishes no vehicle positions; arrivals come from trip updates.  
+⁵ NYC Subway trains have no GPS, so they're shown at their current stop.  
+⁶ Service alerts are coming in a future update. 🔜 means the agency's alerts feed is connected and ready.
+
 ## 🗺️ What can it do?
 
 - 🏠 **Pick your agency** from the welcome screen and Pico Transit downloads its schedule to your phone. The home screen then shows a clock in the agency's timezone and its name.
