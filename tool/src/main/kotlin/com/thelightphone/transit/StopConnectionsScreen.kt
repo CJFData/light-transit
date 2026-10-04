@@ -1,6 +1,8 @@
 package com.thelightphone.transit
 
 import android.util.Log
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertPreferences
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,10 +81,11 @@ fun StopConnection.displayLabel(): String {
 }
 
 class StopConnectionsViewModel(
-    dbFile: File,
+    private val dbFile: File,
     private val stopId: String,
     private val afterTime: String,
     private val excludeTripId: String,
+    private val alertPreferences: AlertPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -96,8 +99,12 @@ class StopConnectionsViewModel(
      * transfer icon uses. */
     val isStation = MutableStateFlow(false)
 
+    /** Alerts naming this stop, when alerts are shown in menus. */
+    val stopAlerts = MutableStateFlow<Pair<List<Alert>, ScreenAlerts>?>(null)
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
+        viewModelScope.launch(Dispatchers.IO) { stopAlerts.value = loadStopAlerts(dbFile, repository, alertPreferences, listOf(stopId)) }
         viewModelScope.launch(Dispatchers.IO) {
             // Inside the same try/catch as the rest of this block (not a separate unguarded call before it)
             // so a screen popped mid-query -- e.g. several rapid-fire goBack() calls in a row, like
@@ -165,7 +172,7 @@ class StopConnectionsScreen(
         get() = StopConnectionsViewModel::class.java
 
     override fun createViewModel(): StopConnectionsViewModel =
-        StopConnectionsViewModel(dbFile, stopId, afterTime, excludeTripId)
+        StopConnectionsViewModel(dbFile, stopId, afterTime, excludeTripId, AlertPreferences(lightContext.dataStore))
 
     @Composable
     private fun ConnectionRow(connection: StopConnection) {
@@ -206,6 +213,7 @@ class StopConnectionsScreen(
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val isStation by viewModel.isStation.collectAsState()
+        val stopAlerts by viewModel.stopAlerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -214,12 +222,14 @@ class StopConnectionsScreen(
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
             ) {
-                LightTopBar(
-                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text("Connections"),
+                AlertsTopBar(
+                    title = "Connections",
+                    onBack = { goBack() },
                     rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
                         navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
                     },
+                    alerts = stopAlerts?.first.orEmpty(),
+                    screenAlerts = stopAlerts?.second,
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 Row(

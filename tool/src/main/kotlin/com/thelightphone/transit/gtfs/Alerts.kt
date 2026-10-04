@@ -187,6 +187,9 @@ class AlertIndex(alerts: List<Alert>, private val graph: StopGraph, agencyRouteC
             .map { it.alert }
             .distinct()
 
+    /** Every alert naming a stop, with or without a route, for screens about the stop itself. */
+    fun forStopAnyRoute(stopId: String): List<Alert> = byStop[stopId].orEmpty().map { it.alert }.distinct()
+
     fun forRoute(routeId: String): List<Alert> =
         (byRoute[routeId].orEmpty() + byRouteDirection.filterKeys { it.first == routeId }.values.flatten()).distinct()
 

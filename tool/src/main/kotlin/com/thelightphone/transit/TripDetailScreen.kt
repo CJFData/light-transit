@@ -666,7 +666,8 @@ class TripDetailScreen(
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        alerts?.let { AlertBadge(it.trip, it.screenAlerts) }
+                        // Spaced away from Board/Alight so a tap meant for it doesn't open the alerts.
+                        alerts?.let { AlertBadge(it.trip, it.screenAlerts, Modifier.padding(end = 16.dp)) }
                         // A different trip is already boarded -- tapping Play here would end that
                         // one and start tracking this one instead, so it's flagged before the tap
                         // rather than silently swapping.
@@ -885,12 +886,14 @@ class TripDetailScreen(
                                                     modifier = Modifier.padding(start = 8.dp),
                                                 )
                                             }
-                                            // Vertically centered on the transfer-station icon beside it.
+                                            // Same size as the transfer-station icon, so they line up. While boarded,
+                                            // a tap on the row picks the alight stop, so the icon isn't tappable.
                                             alerts?.let {
                                                 AlertBadge(
                                                     it.byStop[stop.stopId].orEmpty(),
                                                     it.screenAlerts,
-                                                    padding = PaddingValues(horizontal = 8.dp, vertical = ((1.2f - ALERT_ICON_SIZE) / 2).gridUnitsAsDp()),
+                                                    padding = PaddingValues(horizontal = 8.dp),
+                                                    tappable = !isBoardedHere,
                                                 )
                                             }
                                         }

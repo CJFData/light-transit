@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.ArrivalEta
 import com.thelightphone.transit.gtfs.ArrivalStatus
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertPreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.GtfsRtStopTimeEvent
@@ -137,13 +139,14 @@ sealed class UpcomingArrivalsState {
 }
 
 class UpcomingArrivalsViewModel(
-    dbFile: File,
+    private val dbFile: File,
     private val agency: GtfsAgency,
     /** Every child platform stop_id belonging to the selected stop -- more than one entry means this
      * is a real multi-platform grouped station (see GtfsRepository.groupStationsByParent), in
      * which case arrivals across every platform are unioned and each is labeled with its own
      * platform. A plain stop is just its own single-element list. */
     private val stopIds: List<String>,
+    private val alertPreferences: AlertPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -159,6 +162,9 @@ class UpcomingArrivalsViewModel(
      * quick lookup resolves, without waiting on the network-bound arrivals fetch below. */
     val isStation = MutableStateFlow(false)
 
+    /** Alerts naming this stop, when alerts are shown in menus. */
+    val stopAlerts = MutableStateFlow<Pair<List<Alert>, ScreenAlerts>?>(null)
+
     /** Tracked so a previous load job is cancelled on hide/re-show, like other screens' load jobs;
      * an untracked one could outlive [onCleared] and hit the closed [repository]. */
     private var loadJob: Job? = null
@@ -166,6 +172,7 @@ class UpcomingArrivalsViewModel(
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         loadJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) { stopAlerts.value = loadStopAlerts(dbFile, repository, alertPreferences, stopIds) }
         loadJob = viewModelScope.launch(Dispatchers.IO) {
             // Own try/catch (not folded into the state one below) so a screen popped mid-query -- e.g.
             // several rapid-fire goBack() calls in a row, like BackToHomeFooter's "jump to Home" loop --
@@ -384,12 +391,13 @@ class UpcomingArrivalsScreen(
         get() = UpcomingArrivalsViewModel::class.java
 
     override fun createViewModel(): UpcomingArrivalsViewModel =
-        UpcomingArrivalsViewModel(dbFile, agency, stopIds)
+        UpcomingArrivalsViewModel(dbFile, agency, stopIds, AlertPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val isStation by viewModel.isStation.collectAsState()
+        val stopAlerts by viewModel.stopAlerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -398,12 +406,14 @@ class UpcomingArrivalsScreen(
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
             ) {
-                LightTopBar(
-                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text("Upcoming Arrivals"),
+                AlertsTopBar(
+                    title = "Upcoming Arrivals",
+                    onBack = { goBack() },
                     rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
                         navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
                     },
+                    alerts = stopAlerts?.first.orEmpty(),
+                    screenAlerts = stopAlerts?.second,
                 )
                 Column(modifier = Modifier.weight(1f).padding(32.dp)) {
                 LightText(

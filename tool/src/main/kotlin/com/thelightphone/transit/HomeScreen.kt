@@ -25,6 +25,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
@@ -1159,12 +1160,15 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                             // Lives here -- directly under the heading/status block, in the same spot whether boarded
                             // (below the progress bar) or not (below Stage 2's own clock/agency-name heading) -- rather
                             // than pinned to the bottom alongside the feed attribution below.
-                            if (dailyMessageVisible) {
+                            // With the daily message off, alerts keep the same gap it would take up.
+                            if (dailyMessageVisible || homeAlerts != null) {
                                 LightText(
                                     text = dailyMessageText,
                                     variant = LightTextVariant.Detail,
                                     lighten = true,
-                                    modifier = Modifier.padding(bottom = 16.dp),
+                                    modifier = Modifier
+                                        .padding(bottom = 16.dp)
+                                        .alpha(if (dailyMessageVisible) 1f else 0f),
                                 )
                             }
                             // While boarded these are the trip's alerts; tapping opens all of them in one modal.

@@ -26,7 +26,7 @@ fun currentTripTopBarButton(
     dataStore: DataStore<Preferences>,
     filesDir: File,
     onOpenTripDetail: (dbFile: File, tripId: String, fromStopSequence: Int, routeLabel: String, directionLabel: String) -> Unit,
-): LightBarButton? {
+): LightBarButton.LightIcon? {
     val boardedTrip by remember(dataStore) { BoardedTripPreferences(dataStore).boardedTripFlow }.collectAsState(initial = null)
     return boardedTrip?.let { trip ->
         LightBarButton.LightIcon(
