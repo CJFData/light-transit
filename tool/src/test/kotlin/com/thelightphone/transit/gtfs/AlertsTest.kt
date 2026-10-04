@@ -50,6 +50,13 @@ class AlertsTest {
     }
 
     @Test
+    fun decodesLtcFeedWithItsExtension() {
+        val alerts = normalizeAlerts(feed("ltc_alerts.pb"), "ltc")
+        assertEquals(85, alerts.size)
+        assertTrue(alerts.flatMap { it.selectors }.all { it.routeId != null })
+    }
+
+    @Test
     fun picksEnglishAndAllowsEmptyDescriptions() {
         val alerts = normalizeAlerts(feed("mbta_alerts.pb"), "mbta")
         assertTrue(alerts.all { it.header.isNotBlank() })

@@ -256,6 +256,8 @@ class GtfsRtAlert(
     @ProtoNumber(18) val effectDetailUnused: GtfsRtTranslatedString? = null,
     /** MTA's alert extension (created/updated times, alert type); unused. */
     @ProtoNumber(1001) val mtaAlertUnused: ByteArray? = null,
+    /** LTC's alert extension (an id, a flag, and an update time); unused. */
+    @ProtoNumber(9000) val ltcAlertUnused: ByteArray? = null,
 )
 
 /** Epoch seconds; either end may be missing. */

@@ -42,7 +42,7 @@ Everything Pico Transit covers, and what each agency publishes live.
 |---|:-:|:-:|:-:|:-:|
 | MBTA¹ | ✓ | ✓ | ✓ | ✓ |
 | RIPTA | ✓ | ✓ | ✓ | — |
-| LTC Ontario | ✓ | ✓ | ✓ | — |
+| LTC Ontario | ✓ | ✓ | ✓ | ✓ |
 | STM Montréal | ✓ | ✓ | ✓ | — |
 
 **New York City**

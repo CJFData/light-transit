@@ -454,6 +454,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/ltc/static",
         "https://gtfs.picotransit.com/ltc/tripupdates",
         "https://gtfs.picotransit.com/ltc/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/ltc/alerts",
         timeZoneId = "America/Toronto",
     ),
     STM(
