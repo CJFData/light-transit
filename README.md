@@ -74,6 +74,47 @@ Everything Pico Transit covers, and what each agency publishes live.
 |---|:-:|:-:|:-:|:-:|
 | RTD Denver² | ✓ | ✓ | ✓ | 🔜 |
 | Bustang | ✓ | ✓ | ✓ | — |
+| All Points Transit | ✓ | — | — | — |
+| Avon Transit | ✓ | — | — | — |
+| Baca Area Transportation | ✓ | — | — | — |
+| Bent County Transportation | ✓ | — | — | — |
+| Blackhawk and Central City Tramway | ✓ | — | — | — |
+| Boulder County | ✓ | — | — | — |
+| Breckenridge Free Ride | ✓ | — | — | — |
+| Bustang Outrider | ✓ | — | — | — |
+| City of Fountain Transit | ✓ | — | — | — |
+| Clear Creek County Transit | ✓ | — | — | — |
+| Core Transit | ✓ | — | — | — |
+| Dolores County | ✓ | — | — | — |
+| Durango Transit | ✓ | — | — | — |
+| Easy Ride Transportation | ✓ | — | — | — |
+| El Paso Fountain Valley Senior Citizens Program Inc. | ✓ | — | — | — |
+| Envida | ✓ | — | — | — |
+| Epic Mountain Express | ✓ | — | — | — |
+| Estes Transit | ✓ | — | — | — |
+| Garden of the Gods | ✓ | — | — | — |
+| Greeley-Evans Transit | ✓ | — | — | — |
+| Gunnison Valley RTA | ✓ | — | — | — |
+| Home James Transportation | ✓ | — | — | — |
+| Mountain Metropolitan Transit | ✓ | — | — | — |
+| Parachute Area Transit System | ✓ | — | — | — |
+| Prairie Express Transit | ✓ | — | — | — |
+| Pueblo Transit | ✓ | — | — | — |
+| RFTA | ✓ | — | — | — |
+| Road Runner Transit | ✓ | — | — | — |
+| Rocky Mountain National Park Shuttles | ✓ | — | — | — |
+| San Miguel Authority for Regional Transportation | ✓ | — | — | — |
+| Snowmass Village Transportation | ✓ | — | — | — |
+| Steamboat Springs Transit | ✓ | — | — | — |
+| Summit Stage | ✓ | — | — | — |
+| Town of Mountain Village | ✓ | — | — | — |
+| Town of Telluride | ✓ | — | — | — |
+| Transfort | ✓ | — | — | — |
+| TSC Transit | ✓ | — | — | — |
+| University of Colorado Boulder | ✓ | — | — | — |
+| Vail Transit | ✓ | — | — | — |
+| Via Mobility | ✓ | — | — | — |
+| Winter Park Transit | ✓ | — | — | — |
 
 **San Francisco Bay Area (via 511.org)**
 
@@ -145,54 +186,6 @@ Everything Pico Transit covers, and what each agency publishes live.
 | Everett Transit | ✓ | ✓ | ✓ | 🔜 |
 | Washington State Ferries | ✓ | ✓ | ✓ | 🔜 |
 | Seattle Center Monorail | ✓ | ✓ | ✓ | 🔜 |
-
-<details><summary><b>Colorado</b> (41 more agencies, schedules only)</summary>
-
-| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
-|---|:-:|:-:|:-:|:-:|
-| All Points Transit | ✓ | — | — | — |
-| Avon Transit | ✓ | — | — | — |
-| Baca Area Transportation | ✓ | — | — | — |
-| Bent County Transportation | ✓ | — | — | — |
-| Blackhawk and Central City Tramway | ✓ | — | — | — |
-| Boulder County | ✓ | — | — | — |
-| Breckenridge Free Ride | ✓ | — | — | — |
-| Bustang Outrider | ✓ | — | — | — |
-| City of Fountain Transit | ✓ | — | — | — |
-| Clear Creek County Transit | ✓ | — | — | — |
-| Core Transit | ✓ | — | — | — |
-| Dolores County | ✓ | — | — | — |
-| Durango Transit | ✓ | — | — | — |
-| Easy Ride Transportation | ✓ | — | — | — |
-| El Paso Fountain Valley Senior Citizens Program Inc. | ✓ | — | — | — |
-| Envida | ✓ | — | — | — |
-| Epic Mountain Express | ✓ | — | — | — |
-| Estes Transit | ✓ | — | — | — |
-| Garden of the Gods | ✓ | — | — | — |
-| Greeley-Evans Transit | ✓ | — | — | — |
-| Gunnison Valley RTA | ✓ | — | — | — |
-| Home James Transportation | ✓ | — | — | — |
-| Mountain Metropolitan Transit | ✓ | — | — | — |
-| Parachute Area Transit System | ✓ | — | — | — |
-| Prairie Express Transit | ✓ | — | — | — |
-| Pueblo Transit | ✓ | — | — | — |
-| RFTA | ✓ | — | — | — |
-| Road Runner Transit | ✓ | — | — | — |
-| Rocky Mountain National Park Shuttles | ✓ | — | — | — |
-| San Miguel Authority for Regional Transportation | ✓ | — | — | — |
-| Snowmass Village Transportation | ✓ | — | — | — |
-| Steamboat Springs Transit | ✓ | — | — | — |
-| Summit Stage | ✓ | — | — | — |
-| Town of Mountain Village | ✓ | — | — | — |
-| Town of Telluride | ✓ | — | — | — |
-| Transfort | ✓ | — | — | — |
-| TSC Transit | ✓ | — | — | — |
-| University of Colorado Boulder | ✓ | — | — | — |
-| Vail Transit | ✓ | — | — | — |
-| Via Mobility | ✓ | — | — | — |
-| Winter Park Transit | ✓ | — | — | — |
-
-</details>
 
 ¹ MBTA Green Line trains are matched to the schedule as a "closest match", since most run as unscheduled added trips. Commuter rail positions and track numbers come from MBTA's V3 API.  
 ² RTD Denver includes Bustang's routes and live vehicles.  

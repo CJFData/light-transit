@@ -326,8 +326,6 @@ enum class GtfsAgency(
         null,
         timeZoneId = "America/Denver",
     ),
-    /** Large feed (~1.4MB stop_times.txt) -- no size concern given STM Montreal's own feed is
-     * already handled at multi-hundred-MB scale (see GtfsIngestor's streaming-download doc). */
     RFTA(
         "rfta",
         "RFTA (No Live)",
@@ -470,6 +468,7 @@ enum class GtfsAgency(
         "https://www.stm.info/sites/default/files/gtfs/gtfs_stm.zip",
         "https://gtfs.picotransit.com/stm/tripupdates",
         "https://gtfs.picotransit.com/stm/vehiclepositions",
+        //realtimeAlertsUrl = "https://gtfs.picotransit.com/stm/alerts",
         timeZoneId = "America/Montreal",
     ),
 
