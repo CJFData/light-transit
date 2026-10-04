@@ -887,7 +887,10 @@ class HomeScreenViewModel(
             val legend = agency.component<AttributionLegend>()?.text
             val partner = agency.component<AttributionPartner>()?.name
             // An agency that is its own partner (e.g. Sound Transit) is credited once, as the partner.
-            val credit = repo.getFeedAttribution()?.let {
+            // A partner-sourced feed names the partner as its publisher (511's Muni feed says "511 SF
+            // Bay"), so the agency itself is credited by its agency.txt name instead.
+            val feedCredit = if (partner != null) repo.getAgencyAttribution() ?: repo.getFeedAttribution() else repo.getFeedAttribution()
+            val credit = feedCredit?.let {
                 if (partner == agency.displayName) it.copy(name = partner) else it.copy(partner = partner)
             }
             listOfNotNull(credit?.copy(requiredLegend = legend)) +
@@ -1147,7 +1150,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                             // Lives here -- directly under the heading/status block, in the same spot whether boarded
                             // (below the progress bar) or not (below Stage 2's own clock/agency-name heading) -- rather
                             // than pinned to the bottom alongside the feed attribution below.
-                            // With the daily message off, alerts keep the same gap it would take up.
+                            // Hidden while alerts are showing, but alerts keep the gap it takes up.
                             if (dailyMessageVisible || homeAlerts != null) {
                                 LightText(
                                     text = dailyMessageText,
@@ -1155,7 +1158,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                     lighten = true,
                                     modifier = Modifier
                                         .padding(bottom = 16.dp)
-                                        .alpha(if (dailyMessageVisible) 1f else 0f),
+                                        .alpha(if (dailyMessageVisible && homeAlerts == null) 1f else 0f),
                                 )
                             }
                             // While boarded these are the trip's alerts; tapping opens all of them in one modal.

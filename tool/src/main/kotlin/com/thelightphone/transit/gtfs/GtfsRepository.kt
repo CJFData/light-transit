@@ -943,10 +943,14 @@ class GtfsRepository(dbFile: File) {
         db.rawQuery("SELECT feed_publisher_name, feed_publisher_url FROM feed_info LIMIT 1", null).use { cursor ->
             cursor.mapRows { FeedAttribution(getString(0), getStringOrNull(1)) }.firstOrNull()?.let { return it }
         }
-        return db.rawQuery("SELECT agency_name, agency_url FROM agency LIMIT 1", null).use { cursor ->
+        return getAgencyAttribution()
+    }
+
+    /** The operating agency's name and URL from agency.txt, rather than the feed's publisher. */
+    fun getAgencyAttribution(): FeedAttribution? =
+        db.rawQuery("SELECT agency_name, agency_url FROM agency LIMIT 1", null).use { cursor ->
             cursor.mapRows { FeedAttribution(getString(0), getStringOrNull(1)) }.firstOrNull()
         }
-    }
 
     /** Every stop's parent station, for matching alerts across a station and its platforms. */
     fun getStopGraph(): StopGraph =
