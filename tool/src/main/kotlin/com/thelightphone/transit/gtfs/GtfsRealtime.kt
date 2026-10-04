@@ -43,6 +43,8 @@ data class GtfsRtFeedHeader(
     @ProtoNumber(1) val gtfsRealtimeVersion: String = "",
     @ProtoNumber(2) val incrementality: Int = 0,
     @ProtoNumber(3) val timestamp: Long = 0L,
+    /** MTA's header extension, sent on its alerts feeds; unused. */
+    @ProtoNumber(1001) val mtaHeaderUnused: ByteArray? = null,
 )
 
 /** Fields 2 (is_deleted) and 5 (alert) are standard GTFS-RT FeedEntity fields no prior agency's
@@ -252,6 +254,8 @@ class GtfsRtAlert(
     @ProtoNumber(16) val imageAlternativeTextUnused: GtfsRtTranslatedString? = null,
     @ProtoNumber(17) val causeDetailUnused: GtfsRtTranslatedString? = null,
     @ProtoNumber(18) val effectDetailUnused: GtfsRtTranslatedString? = null,
+    /** MTA's alert extension (created/updated times, alert type); unused. */
+    @ProtoNumber(1001) val mtaAlertUnused: ByteArray? = null,
 )
 
 /** Epoch seconds; either end may be missing. */
@@ -269,6 +273,8 @@ data class GtfsRtEntitySelector(
     @ProtoNumber(4) val trip: GtfsRtTripDescriptor? = null,
     @ProtoNumber(5) val stopId: String? = null,
     @ProtoNumber(6) val directionId: Int? = null,
+    /** MTA's selector extension (a sort order); unused. */
+    @ProtoNumber(1001) val mtaSelectorUnused: ByteArray? = null,
 )
 
 @Serializable

@@ -49,15 +49,15 @@ Everything Pico Transit covers, and what each agency publishes live.
 
 | Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
 |---|:-:|:-:|:-:|:-:|
-| NYC Subway | ✓ | ✓ | ✓⁵ | — |
-| LIRR | ✓ | ✓ | ✓ | — |
-| Metro-North | ✓ | ✓ | ✓ | — |
-| NYC Bus - Bronx | ✓ | ✓ | ✓ | — |
-| NYC Bus - Brooklyn | ✓ | ✓ | ✓ | — |
-| NYC Bus - Manhattan | ✓ | ✓ | ✓ | — |
-| NYC Bus - Queens | ✓ | ✓ | ✓ | — |
-| NYC Bus - Staten Island | ✓ | ✓ | ✓ | — |
-| NYC Bus - MTA Bus Company | ✓ | ✓ | ✓ | — |
+| NYC Subway | ✓ | ✓ | ✓⁵ | ✓ |
+| LIRR | ✓ | ✓ | ✓ | ✓ |
+| Metro-North | ✓ | ✓ | ✓ | ✓ |
+| NYC Bus - Bronx | ✓ | ✓ | ✓ | ✓ |
+| NYC Bus - Brooklyn | ✓ | ✓ | ✓ | ✓ |
+| NYC Bus - Manhattan | ✓ | ✓ | ✓ | ✓ |
+| NYC Bus - Queens | ✓ | ✓ | ✓ | ✓ |
+| NYC Bus - Staten Island | ✓ | ✓ | ✓ | ✓ |
+| NYC Bus - MTA Bus Company | ✓ | ✓ | ✓ | ✓ |
 
 **Chicago**
 

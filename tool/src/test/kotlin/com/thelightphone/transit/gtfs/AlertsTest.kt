@@ -40,6 +40,16 @@ class AlertsTest {
     }
 
     @Test
+    fun decodesMtaFeedsWithTheirExtensions() {
+        assertEquals(173, normalizeAlerts(feed("nyc_subway_alerts.pb"), "nyc_subway").size)
+        assertEquals(230, normalizeAlerts(feed("nyc_bus_alerts.pb"), "nyc_bus_manhattan").size)
+        assertEquals(14, normalizeAlerts(feed("nyc_lirr_alerts.pb"), "lirr").size)
+        val mnr = normalizeAlerts(feed("nyc_mnr_alerts.pb"), "metro_north")
+        assertEquals(14, mnr.size)
+        assertTrue(mnr.flatMap { it.selectors }.all { it.agencyId == "MNR" })
+    }
+
+    @Test
     fun picksEnglishAndAllowsEmptyDescriptions() {
         val alerts = normalizeAlerts(feed("mbta_alerts.pb"), "mbta")
         assertTrue(alerts.all { it.header.isNotBlank() })

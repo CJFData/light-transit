@@ -981,6 +981,7 @@ enum class GtfsAgency(
         "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip",
         "https://gtfs.picotransit.com/nyc_subway/combined",
         "https://gtfs.picotransit.com/nyc_subway/combined",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/nyc_subway/alerts",
         timeZoneId = "America/New_York",
         components = listOf(NycSubwayTripIdBridge),
     ),
@@ -995,6 +996,7 @@ enum class GtfsAgency(
         "https://rrgtfsfeeds.s3.amazonaws.com/gtfslirr.zip",
         "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr",
         "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/lirr/alerts",
         timeZoneId = "America/New_York",
     ),
     /** Same situation as LIRR -- no key, HTTPS, one combined feed, wired in below. Shares
@@ -1008,6 +1010,7 @@ enum class GtfsAgency(
         "https://rrgtfsfeeds.s3.amazonaws.com/gtfsmnr.zip",
         "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/mnr%2Fgtfs-mnr",
         "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/mnr%2Fgtfs-mnr",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/mnr/alerts",
         timeZoneId = "America/New_York",
     ),
     /**
@@ -1023,6 +1026,7 @@ enum class GtfsAgency(
         "https://web.mta.info/developers/data/nyct/bus/google_transit_bronx.zip",
         "https://gtfs.picotransit.com/mta_bus/tripupdates",
         "https://gtfs.picotransit.com/mta_bus/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/nyc_bus/alerts",
         timeZoneId = "America/New_York",
     ),
     NYC_BUS_BROOKLYN(
@@ -1031,6 +1035,7 @@ enum class GtfsAgency(
         "https://web.mta.info/developers/data/nyct/bus/google_transit_brooklyn.zip",
         "https://gtfs.picotransit.com/mta_bus/tripupdates",
         "https://gtfs.picotransit.com/mta_bus/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/nyc_bus/alerts",
         timeZoneId = "America/New_York",
     ),
     NYC_BUS_MANHATTAN(
@@ -1039,6 +1044,7 @@ enum class GtfsAgency(
         "https://web.mta.info/developers/data/nyct/bus/google_transit_manhattan.zip",
         "https://gtfs.picotransit.com/mta_bus/tripupdates",
         "https://gtfs.picotransit.com/mta_bus/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/nyc_bus/alerts",
         timeZoneId = "America/New_York",
     ),
     NYC_BUS_QUEENS(
@@ -1047,6 +1053,7 @@ enum class GtfsAgency(
         "https://web.mta.info/developers/data/nyct/bus/google_transit_queens.zip",
         "https://gtfs.picotransit.com/mta_bus/tripupdates",
         "https://gtfs.picotransit.com/mta_bus/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/nyc_bus/alerts",
         timeZoneId = "America/New_York",
     ),
     NYC_BUS_STATEN_ISLAND(
@@ -1055,6 +1062,7 @@ enum class GtfsAgency(
         "https://web.mta.info/developers/data/nyct/bus/google_transit_staten_island.zip",
         "https://gtfs.picotransit.com/mta_bus/tripupdates",
         "https://gtfs.picotransit.com/mta_bus/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/nyc_bus/alerts",
         timeZoneId = "America/New_York",
     ),
     NYC_BUS_COMPANY(
@@ -1063,6 +1071,7 @@ enum class GtfsAgency(
         "https://web.mta.info/developers/data/busco/google_transit.zip",
         "https://gtfs.picotransit.com/mta_bus/tripupdates",
         "https://gtfs.picotransit.com/mta_bus/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/nyc_bus/alerts",
         timeZoneId = "America/New_York",
     ),
 
