@@ -12,6 +12,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,7 @@ import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.RegionalGroup
 import com.thelightphone.transit.gtfs.RunSelectionPreferences
+import com.thelightphone.transit.gtfs.AlertPreferences
 import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.transit.gtfs.TripDetailPreferences
 import com.thelightphone.sdk.LightScreen
@@ -66,6 +68,7 @@ class SettingsViewModel(
     private val runSelectionPreferences: RunSelectionPreferences,
     private val tripDetailPreferences: TripDetailPreferences,
     private val locationPreferences: LocationPreferences,
+    private val alertPreferences: AlertPreferences,
     private val filesDir: File,
 ) : LightViewModel<Unit>() {
 
@@ -152,6 +155,22 @@ class SettingsViewModel(
     val runSelectionEnabled: StateFlow<Boolean>
         get() = _runSelectionEnabled
     private val _runSelectionEnabled = MutableStateFlow(true)
+
+    val alertsEnabled: StateFlow<Boolean>
+        get() = _alertsEnabled
+    private val _alertsEnabled = MutableStateFlow(false)
+
+    val alertsOnHomeScreen: StateFlow<Boolean>
+        get() = _alertsOnHomeScreen
+    private val _alertsOnHomeScreen = MutableStateFlow(true)
+
+    val alertsBoardedOnly: StateFlow<Boolean>
+        get() = _alertsBoardedOnly
+    private val _alertsBoardedOnly = MutableStateFlow(false)
+
+    val alertsPopUp: StateFlow<Boolean>
+        get() = _alertsPopUp
+    private val _alertsPopUp = MutableStateFlow(false)
 
     val runStepperEnabled: StateFlow<Boolean>
         get() = _runStepperEnabled
@@ -242,6 +261,10 @@ class SettingsViewModel(
         viewModelScope.launch {
             runSelectionPreferences.runSelectionEnabledFlow.collect { _runSelectionEnabled.value = it }
         }
+        viewModelScope.launch { alertPreferences.enabledFlow.collect { _alertsEnabled.value = it } }
+        viewModelScope.launch { alertPreferences.onHomeScreenFlow.collect { _alertsOnHomeScreen.value = it } }
+        viewModelScope.launch { alertPreferences.boardedOnlyFlow.collect { _alertsBoardedOnly.value = it } }
+        viewModelScope.launch { alertPreferences.popUpFlow.collect { _alertsPopUp.value = it } }
         viewModelScope.launch {
             runSelectionPreferences.runStepperEnabledFlow.collect { _runStepperEnabled.value = it }
         }
@@ -358,6 +381,22 @@ class SettingsViewModel(
         viewModelScope.launch { runSelectionPreferences.setRunSelectionEnabled(enabled) }
     }
 
+    fun setAlertsEnabled(enabled: Boolean) {
+        viewModelScope.launch { alertPreferences.setEnabled(enabled) }
+    }
+
+    fun setAlertsOnHomeScreen(enabled: Boolean) {
+        viewModelScope.launch { alertPreferences.setOnHomeScreen(enabled) }
+    }
+
+    fun setAlertsBoardedOnly(enabled: Boolean) {
+        viewModelScope.launch { alertPreferences.setBoardedOnly(enabled) }
+    }
+
+    fun setAlertsPopUp(enabled: Boolean) {
+        viewModelScope.launch { alertPreferences.setPopUp(enabled) }
+    }
+
     fun setShowStopsBeforeBoardingEnabled(enabled: Boolean) {
         viewModelScope.launch { tripDetailPreferences.setShowStopsBeforeBoardingEnabled(enabled) }
     }
@@ -388,6 +427,7 @@ class SettingsScreen(
         RunSelectionPreferences(lightContext.dataStore),
         TripDetailPreferences(lightContext.dataStore),
         LocationPreferences(lightContext.dataStore),
+        AlertPreferences(lightContext.dataStore),
         lightContext.filesDir,
     )
 
@@ -395,12 +435,13 @@ class SettingsScreen(
      * toggle-state icon, replacing the old two-separate-rows "On"/"Off" list this screen used to
      * use for [SettingsViewModel.tapHoldArrivalsEnabled]/[SettingsViewModel.doubleTapStationEnabled]. */
     @Composable
-    private fun ToggleRow(label: String, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    private fun ToggleRow(label: String, enabled: Boolean, onToggle: (Boolean) -> Unit, available: Boolean = true) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .lightClickable { onToggle(!enabled) }
+                .alpha(if (available) 1f else 0.4f)
+                .lightClickable { if (available) onToggle(!enabled) }
                 .padding(vertical = 12.dp),
         ) {
             LightIcon(
@@ -436,6 +477,10 @@ class SettingsScreen(
         val includeLongerTripsEnabled by viewModel.includeLongerTripsEnabled.collectAsState()
         val wifiOnlyDownloadsEnabled by viewModel.wifiOnlyDownloadsEnabled.collectAsState()
         val runSelectionEnabled by viewModel.runSelectionEnabled.collectAsState()
+        val alertsEnabled by viewModel.alertsEnabled.collectAsState()
+        val alertsOnHomeScreen by viewModel.alertsOnHomeScreen.collectAsState()
+        val alertsBoardedOnly by viewModel.alertsBoardedOnly.collectAsState()
+        val alertsPopUp by viewModel.alertsPopUp.collectAsState()
         val runStepperEnabled by viewModel.runStepperEnabled.collectAsState()
         val showStopsBeforeBoardingEnabled by viewModel.showStopsBeforeBoardingEnabled.collectAsState()
         val locationEnabled by viewModel.locationEnabled.collectAsState()
@@ -579,6 +624,24 @@ class SettingsScreen(
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
                 ToggleRow("Only download over Wi-Fi", wifiOnlyDownloadsEnabled, viewModel::setWifiOnlyDownloadsEnabled)
+
+                LightText(
+                    text = "Service alerts",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "Shows detours, closures, and other service changes, for agencies that publish them.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Service alerts", alertsEnabled, viewModel::setAlertsEnabled)
+                // Sub-options stay visible but greyed out while alerts are off.
+                ToggleRow("Show on home screen", alertsOnHomeScreen, viewModel::setAlertsOnHomeScreen, available = alertsEnabled)
+                ToggleRow("Show only for boarded trips", alertsBoardedOnly, viewModel::setAlertsBoardedOnly, available = alertsEnabled)
+                ToggleRow("Pop up new alerts", alertsPopUp, viewModel::setAlertsPopUp, available = alertsEnabled)
 
                 LightText(
                     text = "Location (Testing)",
