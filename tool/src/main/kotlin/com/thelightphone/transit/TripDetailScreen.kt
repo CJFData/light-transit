@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +25,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.AgencyPreferences
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertPreferences
 import com.thelightphone.transit.gtfs.ArrivalStatus
 import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.BoardedTripPreferences
@@ -74,6 +77,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -134,6 +142,7 @@ class TripDetailViewModel(
     private val runSelectionPreferences: RunSelectionPreferences,
     private val agencyPreferences: AgencyPreferences,
     private val tripDetailPreferences: TripDetailPreferences,
+    private val alertPreferences: AlertPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -192,7 +201,20 @@ class TripDetailViewModel(
 
     private var pollJob: Job? = null
 
+    /** Alerts for the trip as a whole (the header icon) and for each listed stop. */
+    class TripAlerts(val trip: List<Alert>, val byStop: Map<String, List<Alert>>, val screenAlerts: ScreenAlerts)
+    val alerts = MutableStateFlow<TripAlerts?>(null)
+
     init {
+        // Reloaded when boarding changes, since a boarded trip shows alerts even with "Show in menus"
+        // off, and when the listed stops change.
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(
+                boardedTrip.map { it?.tripId == tripId }.distinctUntilChanged(),
+                _state.map { (it as? TripDetailState.Loaded)?.stops?.map { stop -> stop.stopId } }.filterNotNull().distinctUntilChanged(),
+            ) { boarded, stopIds -> boarded to stopIds }
+                .collectLatest { (boarded, stopIds) -> alerts.value = loadTripAlerts(boarded, stopIds) }
+        }
         viewModelScope.launch { boardedTripPreferences.boardedTripFlow.collect { boardedTrip.value = it } }
         viewModelScope.launch { boardedFuzzyRunPreferences.boardedFuzzyRunFlow.collect { boardedFuzzyRun.value = it } }
         viewModelScope.launch { runSelectionPreferences.runSelectionEnabledFlow.collect { runSelectionEnabled.value = it } }
@@ -484,6 +506,22 @@ class TripDetailViewModel(
         checkReachedAlightStop(boarded, stops, liveStopSequence, boardedTripPreferences) { reachedAlightStop.value = it }
     }
 
+    private suspend fun loadTripAlerts(boarded: Boolean, stopIds: List<String>): TripAlerts? = try {
+        loadScreenAlerts(dbFile, repository, alertPreferences, AlertSurface.TRIP, tripIsBoarded = boarded)?.let { screenAlerts ->
+            val routeIds = setOfNotNull(repository.getRouteIdForTrip(tripId))
+            TripAlerts(
+                tripAlerts(screenAlerts, repository, tripId, fromStopSequence),
+                stopIds.associateWith { screenAlerts.index.forStop(it, routeIds) }.filterValues { it.isNotEmpty() },
+                screenAlerts,
+            )
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.e("TripDetailScreen", "Failed to load alerts", e)
+        null
+    }
+
     fun clearReachedAlightStop() {
         reachedAlightStop.value = null
     }
@@ -565,7 +603,7 @@ class TripDetailScreen(
         dbFile, tripId, fromStopSequence, routeLabel, directionLabel,
         BoardedTripPreferences(lightContext.dataStore), BoardedFuzzyRunPreferences(lightContext.dataStore),
         RunSelectionPreferences(lightContext.dataStore), AgencyPreferences(lightContext.dataStore),
-        TripDetailPreferences(lightContext.dataStore),
+        TripDetailPreferences(lightContext.dataStore), AlertPreferences(lightContext.dataStore),
     )
 
     @Composable
@@ -579,6 +617,7 @@ class TripDetailScreen(
         val runStepperEnabled by viewModel.runStepperEnabled.collectAsState()
         val runStepperState by viewModel.runStepperState.collectAsState()
         val reachedAlightStop by viewModel.reachedAlightStop.collectAsState()
+        val alerts by viewModel.alerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         // Fires once the "you've arrived" modal has been dismissed (manually or by timeout) --
@@ -627,6 +666,7 @@ class TripDetailScreen(
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        alerts?.let { AlertBadge(it.trip, it.screenAlerts) }
                         // A different trip is already boarded -- tapping Play here would end that
                         // one and start tracking this one instead, so it's flagged before the tap
                         // rather than silently swapping.
@@ -843,6 +883,14 @@ class TripDetailScreen(
                                                     size = 1.2f,
                                                     contentDescription = "Transfer station",
                                                     modifier = Modifier.padding(start = 8.dp),
+                                                )
+                                            }
+                                            // Vertically centered on the transfer-station icon beside it.
+                                            alerts?.let {
+                                                AlertBadge(
+                                                    it.byStop[stop.stopId].orEmpty(),
+                                                    it.screenAlerts,
+                                                    padding = PaddingValues(horizontal = 8.dp, vertical = ((1.2f - ALERT_ICON_SIZE) / 2).gridUnitsAsDp()),
                                                 )
                                             }
                                         }

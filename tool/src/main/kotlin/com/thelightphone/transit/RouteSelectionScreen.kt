@@ -17,6 +17,10 @@ import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.RouteOption
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertPreferences
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -44,12 +48,19 @@ sealed class RouteSelectionState {
     data class Error(val message: String) : RouteSelectionState()
 }
 
-class RouteSelectionViewModel(dbFile: File, private val lineType: LineType) : LightViewModel<Unit>() {
+class RouteSelectionViewModel(
+    private val dbFile: File,
+    private val lineType: LineType,
+    private val alertPreferences: AlertPreferences,
+) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
 
     private val _state = MutableStateFlow<RouteSelectionState>(RouteSelectionState.Loading)
     val state: StateFlow<RouteSelectionState> = _state
+
+    /** Each route's alerts, when alerts are shown in menus. */
+    val routeAlerts = MutableStateFlow<Pair<Map<String, List<Alert>>, ScreenAlerts>?>(null)
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
@@ -61,6 +72,17 @@ class RouteSelectionViewModel(dbFile: File, private val lineType: LineType) : Li
             } catch (e: Exception) {
                 Log.e("RouteSelectionScreen", "Failed to load routes", e)
                 RouteSelectionState.Error("Unable to load routes.")
+            }
+            val routes = (_state.value as? RouteSelectionState.Loaded)?.routes ?: return@launch
+            routeAlerts.value = try {
+                loadScreenAlerts(dbFile, repository, alertPreferences, AlertSurface.MENUS)?.let { screenAlerts ->
+                    routes.associate { it.routeId to screenAlerts.index.forRoute(it.routeId) }.filterValues { it.isNotEmpty() } to screenAlerts
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("RouteSelectionScreen", "Failed to load alerts", e)
+                null
             }
         }
     }
@@ -80,11 +102,13 @@ class RouteSelectionScreen(
     override val viewModelClass: Class<RouteSelectionViewModel>
         get() = RouteSelectionViewModel::class.java
 
-    override fun createViewModel(): RouteSelectionViewModel = RouteSelectionViewModel(dbFile, lineType)
+    override fun createViewModel(): RouteSelectionViewModel =
+        RouteSelectionViewModel(dbFile, lineType, AlertPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
+        val routeAlerts by viewModel.routeAlerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -130,23 +154,26 @@ class RouteSelectionScreen(
                     } else {
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.routes, key = { it.routeId }) { route ->
-                                LightText(
-                                    text = route.displayName,
-                                    variant = LightTextVariant.Copy,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .lightClickable {
-                                            navigateTo(screenFactory = { activity ->
-                                                DirectionSelectionScreen(
-                                                    activity,
-                                                    dbFile,
-                                                    route.routeId,
-                                                    route.displayName,
-                                                )
-                                            })
-                                        }
-                                        .padding(vertical = 12.dp),
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                    LightText(
+                                        text = route.displayName,
+                                        variant = LightTextVariant.Copy,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .lightClickable {
+                                                navigateTo(screenFactory = { activity ->
+                                                    DirectionSelectionScreen(
+                                                        activity,
+                                                        dbFile,
+                                                        route.routeId,
+                                                        route.displayName,
+                                                    )
+                                                })
+                                            }
+                                            .padding(vertical = 12.dp),
+                                    )
+                                    routeAlerts?.let { (byRoute, screenAlerts) -> AlertBadge(byRoute[route.routeId].orEmpty(), screenAlerts) }
+                                }
                             }
                         }
                     }

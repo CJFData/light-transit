@@ -31,6 +31,10 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.lightClickable
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertPreferences
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -105,12 +109,19 @@ fun List<DirectionOption>.disambiguatedRowLabels(): Map<DirectionOption, String>
     }
 }
 
-class DirectionSelectionViewModel(dbFile: File, private val routeId: String) : LightViewModel<Unit>() {
+class DirectionSelectionViewModel(
+    private val dbFile: File,
+    private val routeId: String,
+    private val alertPreferences: AlertPreferences,
+) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
 
     private val _state = MutableStateFlow<DirectionSelectionState>(DirectionSelectionState.Loading)
     val state: StateFlow<DirectionSelectionState> = _state
+
+    /** Each direction's alerts (keyed by direction_id), when alerts are shown in menus. */
+    val directionAlerts = MutableStateFlow<Pair<Map<Int?, List<Alert>>, ScreenAlerts>?>(null)
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
@@ -127,6 +138,19 @@ class DirectionSelectionViewModel(dbFile: File, private val routeId: String) : L
             } catch (e: Exception) {
                 Log.e("DirectionSelectionScreen", "Failed to load directions for route $routeId", e)
                 DirectionSelectionState.Error("Unable to load directions.")
+            }
+            val directions = (_state.value as? DirectionSelectionState.Loaded)?.directions ?: return@launch
+            directionAlerts.value = try {
+                loadScreenAlerts(dbFile, repository, alertPreferences, AlertSurface.MENUS)?.let { screenAlerts ->
+                    directions.map { it.directionId }.distinct().associateWith { directionId ->
+                        if (directionId == null) screenAlerts.index.forRoute(routeId) else screenAlerts.index.forDirection(routeId, directionId)
+                    } to screenAlerts
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("DirectionSelectionScreen", "Failed to load alerts", e)
+                null
             }
         }
     }
@@ -147,11 +171,13 @@ class DirectionSelectionScreen(
     override val viewModelClass: Class<DirectionSelectionViewModel>
         get() = DirectionSelectionViewModel::class.java
 
-    override fun createViewModel(): DirectionSelectionViewModel = DirectionSelectionViewModel(dbFile, routeId)
+    override fun createViewModel(): DirectionSelectionViewModel =
+        DirectionSelectionViewModel(dbFile, routeId, AlertPreferences(lightContext.dataStore))
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
+        val directionAlerts by viewModel.directionAlerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         // Only reachable when this route DOES have trips (see DirectionSelectionState.NoTrips's own
@@ -231,11 +257,12 @@ class DirectionSelectionScreen(
                                 val disambiguatedLabels = variants.disambiguatedRowLabels()
                                 items(variants) { direction ->
                                     val label = disambiguatedLabels.getValue(direction)
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                     LightText(
                                         text = label,
                                         variant = LightTextVariant.Copy,
                                         modifier = Modifier
-                                            .fillMaxWidth()
+                                            .weight(1f)
                                             .lightClickable {
                                                 navigateTo(screenFactory = { activity ->
                                                     FirstStopSelectionScreen(
@@ -252,6 +279,8 @@ class DirectionSelectionScreen(
                                             }
                                             .padding(vertical = 12.dp),
                                     )
+                                    directionAlerts?.let { (byDirection, screenAlerts) -> AlertBadge(byDirection[direction.directionId].orEmpty(), screenAlerts) }
+                                    }
                                 }
                             }
                         }

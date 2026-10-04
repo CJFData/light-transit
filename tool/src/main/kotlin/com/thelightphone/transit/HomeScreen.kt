@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -40,6 +41,8 @@ import com.thelightphone.transit.gtfs.GtfsCacheClearedSignal
 import com.thelightphone.transit.gtfs.GtfsIngestor
 import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertPreferences
 import com.thelightphone.transit.gtfs.GtfsRtStopTimeEvent
 import com.thelightphone.transit.gtfs.GtfsRtStopTimeUpdate
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
@@ -81,6 +84,8 @@ import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightModalManager
 import com.thelightphone.sdk.ui.LightProgressBar
+import com.thelightphone.sdk.ui.LightScrollBarPosition
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
@@ -92,6 +97,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -274,6 +281,7 @@ class HomeScreenViewModel(
     private val connectivity: LightConnectivity,
     private val networkPreferences: NetworkPreferences,
     private val locationPreferences: LocationPreferences,
+    private val alertPreferences: AlertPreferences,
 ) : LightViewModel<Unit>() {
 
     private val ingestor = GtfsIngestor(filesDir, connectivity, networkPreferences)
@@ -324,6 +332,10 @@ class HomeScreenViewModel(
      * same conflated-trigger pattern MapScreen's own refreshTrigger uses. */
     private val tripStatusRefreshTrigger = Channel<Unit>(Channel.CONFLATED)
     private var tripStatusPollJob: Job? = null
+
+    /** The home screen's alerts and what's needed to show them; null when there's nothing to show. */
+    val homeAlerts = MutableStateFlow<Pair<List<Alert>, ScreenAlerts>?>(null)
+    private var alertsPollJob: Job? = null
 
     /** Null until Stage 1's onboarding modal (or a Settings-driven switch) picks one -- see the
      * defaultAgencyFlow collector in [init]. Declared, along with every field below through
@@ -530,6 +542,22 @@ class HomeScreenViewModel(
         }
         // Agency selection (default-agency auto-select, or showing the onboarding modal) is now
         // handled by the defaultAgencyFlow collector in init -- see its own doc comment.
+        alertsPollJob?.cancel()
+        alertsPollJob = viewModelScope.launch(Dispatchers.IO) {
+            // No polling at all while alerts are off. Restarts on an agency change, so the previous
+            // agency's alerts are never shown, and again once its schedule finishes loading.
+            combine(alertPreferences.enabledFlow, selectedAgency, readyAgency) { enabled, _, _ -> enabled }.collectLatest { enabled ->
+                homeAlerts.value = null
+                if (!enabled) {
+                    homeAlerts.value = null
+                    return@collectLatest
+                }
+                while (isActive) {
+                    refreshHomeAlerts()
+                    delay(60_000L)
+                }
+            }
+        }
     }
 
     override fun onScreenHide(screen: SimpleLightScreen<Unit>) {
@@ -537,6 +565,37 @@ class HomeScreenViewModel(
         HomeVisibility.isVisible.value = false
         tripStatusPollJob?.cancel()
         tripStatusPollJob = null
+        alertsPollJob?.cancel()
+        alertsPollJob = null
+    }
+
+    /** The boarded trip's alerts while one is boarded; otherwise agency-wide alerts, unless "Show
+     * only for boarded trips" is on. */
+    private suspend fun refreshHomeAlerts() {
+        val agency = selectedAgency.value ?: return
+        val dbFile = gtfsDbFile(filesDir, agency)
+        // No database yet while a first download is still loading.
+        val repository = if (dbFile.exists()) GtfsRepository(dbFile) else null
+        try {
+            val screenAlerts = loadScreenAlerts(dbFile, repository, alertPreferences, AlertSurface.HOME)
+            if (screenAlerts == null) {
+                homeAlerts.value = null
+                return
+            }
+            val trip = boardedTrip.value?.takeIf { it.agency == agency }
+            val alerts = when {
+                trip != null && repository != null -> tripAlerts(screenAlerts, repository, trip.tripId, trip.fromStopSequence)
+                !alertPreferences.boardedOnlyFlow.first() -> screenAlerts.index.agencyWide
+                else -> emptyList()
+            }
+            homeAlerts.value = alerts.takeIf { it.isNotEmpty() }?.let { it to screenAlerts }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("HomeScreen", "Alerts refresh failed", e)
+        } finally {
+            repository?.close()
+        }
     }
 
     /**
@@ -897,6 +956,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
             lightContext.connectivity,
             NetworkPreferences(lightContext.dataStore),
             LocationPreferences(lightContext.dataStore),
+            AlertPreferences(lightContext.dataStore),
         )
     }
 
@@ -913,6 +973,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val progressBarVisible by viewModel.progressBarVisible.collectAsState()
         val dailyMessageVisible by viewModel.dailyMessageVisible.collectAsState()
         val dailyMessageText by viewModel.dailyMessageText.collectAsState()
+        val homeAlerts by viewModel.homeAlerts.collectAsState()
         val reachedAlightStop by viewModel.reachedAlightStop.collectAsState()
         val additionalDownloads by viewModel.additionalDownloads.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
@@ -978,242 +1039,249 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                         )
                     }
                 }
-            Box(
+            // Everything between the header row and the icon row scrolls together when it doesn't fit.
+            // When it does fit, the attribution sits at the bottom, just above the icon row.
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp)
-                ) {
-                    // While a trip is boarded, this becomes an active-trip status instead of Stage 2's own
-                    // clock/agency-name heading -- everything below (mode icons, daily message) stays as-is either
-                    // way. Reverts the moment the trip is alighted (boardedTrip/activeTripStatus both go null
-                    // together).
-                    if (boardedTrip != null) {
-                        // Same ticking clock Stage 2's own heading uses (HomeScreenViewModel.currentTime) -- kept
-                        // visible here too rather than giving up the space to trip status, since the current time is
-                        // just as useful mid-trip as before boarding.
-                        LightText(
-                            text = currentTime,
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        )
-                        LightText(
-                            text = activeTripStatus?.routeLabel ?: boardedTrip?.routeLabel ?: "Current Trip",
-                            variant = LightTextVariant.Heading,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        )
-                        LightText(
-                            text = activeTripStatus?.headingSubtitle() ?: "Boarded",
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(bottom = 16.dp),
-                        )
-                        // Boarding stop (left) to alight stop (right), with a vehicle-type marker positioned at the
-                        // live stop_sequence progress between them -- see ActiveTripStatus.progressFraction. Settings
-                        // toggle (on by default); 0f (marker at start) whenever there's no live position yet, rather
-                        // than hiding the bar, so its layout doesn't jump once one arrives.
-                        if (progressBarVisible) {
-                            BoxWithConstraints(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 16.dp),
-                            ) {
-                                LightProgressBar(colors = LightThemeTokens.colors, progress = activeTripStatus?.progressFraction ?: 0f)
-                                val markerSize = 1.4f
-                                val trackWidth = maxWidth - markerSize.gridUnitsAsDp()
-                                LightIcon(
-                                    icon = boardedTrip?.lineType.toVehicleIcon(),
-                                    size = markerSize,
-                                    contentDescription = "Vehicle position",
-                                    modifier = Modifier.offset(x = trackWidth * (activeTripStatus?.progressFraction ?: 0f)),
-                                )
-                            }
-                        }
-                    } else if (selectedAgency != null) {
-                        // Stage 2's own landing heading: a ticking clock in the agency's own timezone
-                        // (HomeScreenViewModel.currentTime), its name, and -- only while its GTFS data is still
-                        // ingesting -- a spinning REFRESH icon, shown just once here since Stage 2 only ever has one
-                        // agency to show at a time.
-                        LightText(
-                            text = currentTime,
-                            variant = LightTextVariant.Heading,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(bottom = 16.dp),
+                val viewportHeight = maxHeight
+                LightScrollView(modifier = Modifier.fillMaxSize(), scrollBarPosition = LightScrollBarPosition.Inside) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = viewportHeight),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp)
                         ) {
-                            LightText(
-                                text = selectedAgency?.displayName.orEmpty(),
-                                variant = LightTextVariant.Subheading,
-                                lighten = true,
-                            )
-                            if (readyAgency != selectedAgency && status == null) {
-                                val infiniteTransition = rememberInfiniteTransition(label = "agencyLoading")
-                                val angle by infiniteTransition.animateFloat(
-                                    initialValue = 0f,
-                                    targetValue = 360f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(durationMillis = 1000, easing = LinearEasing),
-                                        repeatMode = RepeatMode.Restart,
-                                    ),
-                                    label = "agencyLoadingAngle",
+                            // While a trip is boarded, this becomes an active-trip status instead of Stage 2's own
+                            // clock/agency-name heading -- everything below (mode icons, daily message) stays as-is either
+                            // way. Reverts the moment the trip is alighted (boardedTrip/activeTripStatus both go null
+                            // together).
+                            if (boardedTrip != null) {
+                                // Same ticking clock Stage 2's own heading uses (HomeScreenViewModel.currentTime) -- kept
+                                // visible here too rather than giving up the space to trip status, since the current time is
+                                // just as useful mid-trip as before boarding.
+                                LightText(
+                                    text = currentTime,
+                                    variant = LightTextVariant.Detail,
+                                    lighten = true,
+                                    modifier = Modifier.padding(bottom = 4.dp),
                                 )
-                                LightIcon(
-                                    icon = LightIcons.REFRESH,
-                                    size = AGENCY_ICON_SIZE,
-                                    contentDescription = "Loading schedule",
-                                    modifier = Modifier
-                                        .padding(start = 8.dp)
-                                        .rotate(angle),
+                                LightText(
+                                    text = activeTripStatus?.routeLabel ?: boardedTrip?.routeLabel ?: "Current Trip",
+                                    variant = LightTextVariant.Heading,
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                )
+                                LightText(
+                                    text = activeTripStatus?.headingSubtitle() ?: "Boarded",
+                                    variant = LightTextVariant.Detail,
+                                    lighten = true,
+                                    modifier = Modifier.padding(bottom = 16.dp),
+                                )
+                                // Boarding stop (left) to alight stop (right), with a vehicle-type marker positioned at the
+                                // live stop_sequence progress between them -- see ActiveTripStatus.progressFraction. Settings
+                                // toggle (on by default); 0f (marker at start) whenever there's no live position yet, rather
+                                // than hiding the bar, so its layout doesn't jump once one arrives.
+                                if (progressBarVisible) {
+                                    BoxWithConstraints(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 16.dp),
+                                    ) {
+                                        LightProgressBar(colors = LightThemeTokens.colors, progress = activeTripStatus?.progressFraction ?: 0f)
+                                        val markerSize = 1.4f
+                                        val trackWidth = maxWidth - markerSize.gridUnitsAsDp()
+                                        LightIcon(
+                                            icon = boardedTrip?.lineType.toVehicleIcon(),
+                                            size = markerSize,
+                                            contentDescription = "Vehicle position",
+                                            modifier = Modifier.offset(x = trackWidth * (activeTripStatus?.progressFraction ?: 0f)),
+                                        )
+                                    }
+                                }
+                            } else if (selectedAgency != null) {
+                                // Stage 2's own landing heading: a ticking clock in the agency's own timezone
+                                // (HomeScreenViewModel.currentTime), its name, and -- only while its GTFS data is still
+                                // ingesting -- a spinning REFRESH icon, shown just once here since Stage 2 only ever has one
+                                // agency to show at a time.
+                                LightText(
+                                    text = currentTime,
+                                    variant = LightTextVariant.Heading,
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(bottom = 16.dp),
+                                ) {
+                                    LightText(
+                                        text = selectedAgency?.displayName.orEmpty(),
+                                        variant = LightTextVariant.Subheading,
+                                        lighten = true,
+                                    )
+                                    if (readyAgency != selectedAgency && status == null) {
+                                        val infiniteTransition = rememberInfiniteTransition(label = "agencyLoading")
+                                        val angle by infiniteTransition.animateFloat(
+                                            initialValue = 0f,
+                                            targetValue = 360f,
+                                            animationSpec = infiniteRepeatable(
+                                                animation = tween(durationMillis = 1000, easing = LinearEasing),
+                                                repeatMode = RepeatMode.Restart,
+                                            ),
+                                            label = "agencyLoadingAngle",
+                                        )
+                                        LightIcon(
+                                            icon = LightIcons.REFRESH,
+                                            size = AGENCY_ICON_SIZE,
+                                            contentDescription = "Loading schedule",
+                                            modifier = Modifier
+                                                .padding(start = 8.dp)
+                                                .rotate(angle),
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Ingest failure text only -- the loading state itself is the spinning icon
+                            // next to the agency name above, not a screen-wide banner.
+                            status?.let {
+                                LightText(
+                                    text = it,
+                                    variant = LightTextVariant.Detail,
+                                    lighten = true,
+                                    modifier = Modifier.padding(bottom = 16.dp),
+                                )
+                            }
+
+                            // Lives here -- directly under the heading/status block, in the same spot whether boarded
+                            // (below the progress bar) or not (below Stage 2's own clock/agency-name heading) -- rather
+                            // than pinned to the bottom alongside the feed attribution below.
+                            if (dailyMessageVisible) {
+                                LightText(
+                                    text = dailyMessageText,
+                                    variant = LightTextVariant.Detail,
+                                    lighten = true,
+                                    modifier = Modifier.padding(bottom = 16.dp),
+                                )
+                            }
+                            // While boarded these are the trip's alerts; tapping opens all of them in one modal.
+                            homeAlerts?.let { (alerts, screenAlerts) -> HomeAlertsPager(alerts, screenAlerts) }
+                        }
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's own doc for
+                            // exactly which GTFS file this comes from, plus one name per MultiGtfsFeed component with its own
+                            // static feed (e.g. "Bustang" alongside RTD Denver's own). Tied to whichever agency is currently selected, not
+                            // just "ready", so it reads correctly even mid-sync. An agency with a required legend
+                            // (see AttributionLegend) gets its own line with that exact wording instead. Agencies
+                            // credited through a partner (see AttributionPartner) are grouped after it, e.g.
+                            // "Sound Transit & Pierce Transit, Community Transit".
+                            val credits = feedAttribution.filter { it.requiredLegend == null }
+                            val partners = credits.mapNotNull { it.partner }.toSet()
+                            val creditParts = credits.filter { it.partner == null && it.name !in partners }.map { it.name } +
+                                credits.filter { it.partner != null }.groupBy { it.partner!! }.map { (partner, group) ->
+                                    val agencies = group.map { it.name }.filter { it != partner }
+                                    if (agencies.isEmpty()) partner else "$partner & " + agencies.joinToString(", ")
+                                }
+                            if (creditParts.isNotEmpty()) {
+                                LightText(
+                                    text = "Transit data © " + creditParts.joinToString(", "),
+                                    variant = LightTextVariant.Detail,
+                                    lighten = true,
+                                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
+                                )
+                            }
+                            feedAttribution.mapNotNull { it.requiredLegend }.distinct().forEach { legend ->
+                                LightText(
+                                    text = legend,
+                                    variant = LightTextVariant.Detail,
+                                    lighten = true,
+                                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
                                 )
                             }
                         }
                     }
-
-                    // Ingest failure text only -- the loading state itself is the spinning icon
-                    // next to the agency name above, not a screen-wide banner.
-                    status?.let {
-                        LightText(
-                            text = it,
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(bottom = 16.dp),
-                        )
-                    }
-
-                    // Lives here -- directly under the heading/status block, in the same spot whether boarded
-                    // (below the progress bar) or not (below Stage 2's own clock/agency-name heading) -- rather
-                    // than pinned to the bottom alongside the feed attribution below.
-                    if (dailyMessageVisible) {
-                        LightText(
-                            text = dailyMessageText,
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(bottom = 16.dp),
-                        )
-                    }
-
-                }
-
-                // Attribution sits directly above the icon row (not the very bottom edge) so nothing competes
-                // for the same space -- matches LightBottomBar's own "matching LightOS ActionBar" convention
-                // rather than a previous ad-hoc alignment approach.
-                Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-                    // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's own doc for
-                    // exactly which GTFS file this comes from, plus one name per MultiGtfsFeed component with its own
-                    // static feed (e.g. "Bustang" alongside RTD Denver's own). Tied to whichever agency is currently selected, not
-                    // just "ready", so it reads correctly even mid-sync. An agency with a required legend
-                    // (see AttributionLegend) gets its own line with that exact wording instead. Agencies
-                    // credited through a partner (see AttributionPartner) are grouped after it, e.g.
-                    // "Sound Transit & Pierce Transit, Community Transit".
-                    val credits = feedAttribution.filter { it.requiredLegend == null }
-                    val partners = credits.mapNotNull { it.partner }.toSet()
-                    val creditParts = credits.filter { it.partner == null && it.name !in partners }.map { it.name } +
-                        credits.filter { it.partner != null }.groupBy { it.partner!! }.map { (partner, group) ->
-                            val agencies = group.map { it.name }.filter { it != partner }
-                            if (agencies.isEmpty()) partner else "$partner & " + agencies.joinToString(", ")
-                        }
-                    if (creditParts.isNotEmpty()) {
-                        LightText(
-                            text = "Transit data © " + creditParts.joinToString(", "),
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
-                        )
-                    }
-                    feedAttribution.mapNotNull { it.requiredLegend }.distinct().forEach { legend ->
-                        LightText(
-                            text = legend,
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
-                        )
-                    }
-                    // Settings, About first, then whichever of Schedule/Station/Explore are actually reachable
-                    // right now (built, not a fixed-size list with null placeholders) -- Current Trip lives in the
-                    // top-right corner instead (see LightTopBar above), so this row's worst case is 5, always
-                    // exactly one LightBottomBar row (which hard-caps at 5 items).
-                    val bottomBarItems = buildList {
-                        add(
-                            LightBarButton.LightIcon(
-                                icon = LightIcons.SETTINGS,
-                                contentDescription = "Settings",
-                                onClick = {
-                                    navigateTo(screenFactory = { activity -> SettingsScreen(activity) })
-                                },
-                            ),
-                        )
-                        add(
-                            LightBarButton.LightIcon(
-                                icon = LightIcons.ELLIPSES,
-                                contentDescription = "About",
-                                onClick = {
-                                    navigateTo(screenFactory = { activity -> InfoScreen(activity) })
-                                },
-                            ),
-                        )
-                        readyAgency?.let { agency ->
-                            // Only region-mates of the primary agency count as "other available
-                            // schedules" here -- an additional download outside the primary's own
-                            // region (possible in principle, see AgencyPreferences.additionalDownloadsFlow's
-                            // own doc -- nothing stops a rider from ending up with a cross-region mix)
-                            // isn't treated as part of "this region's schedules" for this prompt -- go
-                            // straight to LineTypeSelectionScreen for the primary alone in that case,
-                            // same as the always-only-one-schedule case already does.
-                            val regionSchedules = RegionalGroup.forAgency(agency)?.members
-                                ?.filter { it == agency || (it in additionalDownloads && gtfsDbFile(lightContext.filesDir, it).exists()) }
-                                ?: listOf(agency)
-                            add(
-                                LightBarButton.LightIcon(
-                                    icon = LightIcons.LIST,
-                                    contentDescription = "Schedule",
-                                    onClick = {
-                                        navigateTo(screenFactory = { activity ->
-                                            if (regionSchedules.size > 1) {
-                                                ScheduleAgencyPickerScreen(activity, regionSchedules, lightContext.filesDir)
-                                            } else {
-                                                LineTypeSelectionScreen(activity, gtfsDbFile(lightContext.filesDir, agency))
-                                            }
-                                        })
-                                    },
-                                ),
-                            )
-                            if (agencyHasStations) {
-                                add(
-                                    LightBarButton.LightIcon(
-                                        icon = LightIcons.DIRECTIONS_MIDDLE_FORK,
-                                        contentDescription = "Station",
-                                        onClick = {
-                                            navigateTo(screenFactory = { activity ->
-                                                StationListScreen(activity, gtfsDbFile(lightContext.filesDir, agency), agency)
-                                            })
-                                        },
-                                    ),
-                                )
-                            }
-                            add(
-                                LightBarButton.LightIcon(
-                                    icon = LightIcons.DIRECTIONS_PEDESTRIAN,
-                                    contentDescription = if (agency.realtimeTripUpdatesUrl == null) "Explore (Offline)" else "Explore",
-                                    onClick = {
-                                        viewModel.primeLocation(requestPermission = { locationPermissionLauncher?.launch() })
-                                        navigateTo(screenFactory = { activity ->
-                                            NearbyStopsScreen(activity, gtfsDbFile(lightContext.filesDir, agency), agency)
-                                        })
-                                    },
-                                ),
-                            )
-                        }
-                    }
-                    LightBottomBar(items = bottomBarItems)
                 }
             }
+            // Settings, About first, then whichever of Schedule/Station/Explore are actually reachable
+            // right now (built, not a fixed-size list with null placeholders) -- Current Trip lives in the
+            // top-right corner instead (see LightTopBar above), so this row's worst case is 5, always
+            // exactly one LightBottomBar row (which hard-caps at 5 items).
+            val bottomBarItems = buildList {
+                add(
+                    LightBarButton.LightIcon(
+                        icon = LightIcons.SETTINGS,
+                        contentDescription = "Settings",
+                        onClick = {
+                            navigateTo(screenFactory = { activity -> SettingsScreen(activity) })
+                        },
+                    ),
+                )
+                add(
+                    LightBarButton.LightIcon(
+                        icon = LightIcons.ELLIPSES,
+                        contentDescription = "About",
+                        onClick = {
+                            navigateTo(screenFactory = { activity -> InfoScreen(activity) })
+                        },
+                    ),
+                )
+                readyAgency?.let { agency ->
+                    // Only region-mates of the primary agency count as "other available
+                    // schedules" here -- an additional download outside the primary's own
+                    // region (possible in principle, see AgencyPreferences.additionalDownloadsFlow's
+                    // own doc -- nothing stops a rider from ending up with a cross-region mix)
+                    // isn't treated as part of "this region's schedules" for this prompt -- go
+                    // straight to LineTypeSelectionScreen for the primary alone in that case,
+                    // same as the always-only-one-schedule case already does.
+                    val regionSchedules = RegionalGroup.forAgency(agency)?.members
+                        ?.filter { it == agency || (it in additionalDownloads && gtfsDbFile(lightContext.filesDir, it).exists()) }
+                        ?: listOf(agency)
+                    add(
+                        LightBarButton.LightIcon(
+                            icon = LightIcons.LIST,
+                            contentDescription = "Schedule",
+                            onClick = {
+                                navigateTo(screenFactory = { activity ->
+                                    if (regionSchedules.size > 1) {
+                                        ScheduleAgencyPickerScreen(activity, regionSchedules, lightContext.filesDir)
+                                    } else {
+                                        LineTypeSelectionScreen(activity, gtfsDbFile(lightContext.filesDir, agency))
+                                    }
+                                })
+                            },
+                        ),
+                    )
+                    if (agencyHasStations) {
+                        add(
+                            LightBarButton.LightIcon(
+                                icon = LightIcons.DIRECTIONS_MIDDLE_FORK,
+                                contentDescription = "Station",
+                                onClick = {
+                                    navigateTo(screenFactory = { activity ->
+                                        StationListScreen(activity, gtfsDbFile(lightContext.filesDir, agency), agency)
+                                    })
+                                },
+                            ),
+                        )
+                    }
+                    add(
+                        LightBarButton.LightIcon(
+                            icon = LightIcons.DIRECTIONS_PEDESTRIAN,
+                            contentDescription = if (agency.realtimeTripUpdatesUrl == null) "Explore (Offline)" else "Explore",
+                            onClick = {
+                                viewModel.primeLocation(requestPermission = { locationPermissionLauncher?.launch() })
+                                navigateTo(screenFactory = { activity ->
+                                    NearbyStopsScreen(activity, gtfsDbFile(lightContext.filesDir, agency), agency)
+                                })
+                            },
+                        ),
+                    )
+                }
+            }
+            LightBottomBar(items = bottomBarItems)
             }
         }
     }

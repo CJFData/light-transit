@@ -19,6 +19,10 @@ import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.StopOption
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertPreferences
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.transit.gtfs.currentGtfsTimeOfDay
 import com.thelightphone.transit.gtfs.todayForGtfs
@@ -52,7 +56,7 @@ sealed class FirstStopSelectionState {
 fun StopOption.displayLabel(): String = stopName?.takeIf { it.isNotBlank() } ?: "Stop $stopId"
 
 class FirstStopSelectionViewModel(
-    dbFile: File,
+    private val dbFile: File,
     private val routeId: String,
     private val directionId: Int?,
     /** Null only for the auto-skip case (see [GtfsRepository.getStops]'s own doc) -- every real
@@ -67,6 +71,7 @@ class FirstStopSelectionViewModel(
      * conflated into [headsign] itself (which stays the real trip_headsign column, or null). */
     private val lastStopId: String?,
     private val tapHoldPreferences: TapHoldPreferences,
+    private val alertPreferences: AlertPreferences,
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
@@ -74,6 +79,9 @@ class FirstStopSelectionViewModel(
 
     private val _state = MutableStateFlow<FirstStopSelectionState>(FirstStopSelectionState.Loading)
     val state: StateFlow<FirstStopSelectionState> = _state
+
+    /** Each stop's alerts for this route, when alerts are shown in menus. */
+    val stopAlerts = MutableStateFlow<Pair<Map<String, List<Alert>>, ScreenAlerts>?>(null)
 
     /** Settings screen's "Tap and hold" toggle for this screen specifically (on by default) -- see
      * TapHoldPreferences.tapHoldScheduleArrivalsEnabledFlow. Read once at screen-open, same as
@@ -122,6 +130,17 @@ class FirstStopSelectionViewModel(
             Log.e("FirstStopSelectionScreen", "Failed to load first stops for route $routeId", e)
             FirstStopSelectionState.Error("Unable to load stops.")
         }
+        val stops = (_state.value as? FirstStopSelectionState.Loaded)?.stops ?: return
+        stopAlerts.value = try {
+            loadScreenAlerts(dbFile, repository, alertPreferences, AlertSurface.MENUS)?.let { screenAlerts ->
+                stops.associate { it.stopId to screenAlerts.index.forStop(it.stopId, setOf(routeId)) }.filterValues { it.isNotEmpty() } to screenAlerts
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("FirstStopSelectionScreen", "Failed to load alerts", e)
+            null
+        }
     }
 
     override fun onCleared() {
@@ -148,13 +167,17 @@ class FirstStopSelectionScreen(
         get() = FirstStopSelectionViewModel::class.java
 
     override fun createViewModel(): FirstStopSelectionViewModel =
-        FirstStopSelectionViewModel(dbFile, routeId, directionId, headsign, lastStopId, TapHoldPreferences(lightContext.dataStore))
+        FirstStopSelectionViewModel(
+            dbFile, routeId, directionId, headsign, lastStopId,
+            TapHoldPreferences(lightContext.dataStore), AlertPreferences(lightContext.dataStore),
+        )
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val tapHoldArrivalsEnabled by viewModel.tapHoldArrivalsEnabled.collectAsState()
         val showTomorrow by viewModel.showTomorrow.collectAsState()
+        val stopAlerts by viewModel.stopAlerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
         LightTheme(colors = themeColors) {
@@ -213,11 +236,12 @@ class FirstStopSelectionScreen(
                         val agency = GtfsAgency.forDbFile(dbFile)
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.stops) { stop ->
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 LightText(
                                     text = stop.displayLabel(),
                                     variant = LightTextVariant.Copy,
                                     modifier = Modifier
-                                        .fillMaxWidth()
+                                        .weight(1f)
                                         // A short tap proceeds as usual to this route/direction's scheduled departure times at this
                                         // stop; tap-and-hold newly opens the stop's actual (live) upcoming arrivals
                                         // instead, across every route serving it, not just this one.
@@ -251,6 +275,8 @@ class FirstStopSelectionScreen(
                                         }
                                         .padding(vertical = 12.dp),
                                 )
+                                stopAlerts?.let { (byStop, screenAlerts) -> AlertBadge(byStop[stop.stopId].orEmpty(), screenAlerts) }
+                                }
                             }
                         }
                     }

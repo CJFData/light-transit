@@ -707,6 +707,11 @@ class GtfsRepository(dbFile: File) {
             cursor.mapRows { getString(0) }.firstOrNull()
         }
 
+    fun getDirectionIdForTrip(tripId: String): Int? =
+        db.rawQuery("SELECT direction_id FROM trips WHERE trip_id = ?", arrayOf(tripId)).use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getInt(0) else null
+        }
+
     /** [tripId]'s own shape_id, already stored on every ingested trip (trips.txt's own optional
      * column) but otherwise unread anywhere in this codebase -- see [TripShapeSource]'s own doc for
      * the one current consumer. Null for any trip whose feed doesn't publish shapes.txt at all, or
@@ -946,6 +951,29 @@ class GtfsRepository(dbFile: File) {
     fun getStopGraph(): StopGraph =
         db.rawQuery("SELECT stop_id, parent_station FROM stops WHERE parent_station IS NOT NULL AND parent_station != ''", null)
             .use { cursor -> StopGraph(cursor.mapRows { getString(0) to getString(1) }.toMap()) }
+
+    /** Rider-facing route names (short name, else long name) for the given route_ids. */
+    fun getRouteNames(routeIds: Collection<String>): Map<String, String> =
+        routeIds.distinct().chunked(500).flatMap { chunk ->
+            val placeholders = chunk.joinToString(",") { "?" }
+            db.rawQuery(
+                "SELECT route_id, route_short_name, route_long_name FROM routes WHERE route_id IN ($placeholders)",
+                chunk.toTypedArray(),
+            ).use { cursor ->
+                cursor.mapRows {
+                    val name = getStringOrNull(1)?.takeIf { it.isNotBlank() } ?: getStringOrNull(2)?.takeIf { it.isNotBlank() }
+                    getString(0) to (name ?: getString(0))
+                }
+            }
+        }.toMap()
+
+    /** Stop names for the given stop_ids. */
+    fun getStopNames(stopIds: Collection<String>): Map<String, String> =
+        stopIds.distinct().chunked(500).flatMap { chunk ->
+            val placeholders = chunk.joinToString(",") { "?" }
+            db.rawQuery("SELECT stop_id, stop_name FROM stops WHERE stop_id IN ($placeholders)", chunk.toTypedArray())
+                .use { cursor -> cursor.mapRows { getString(0) to (getStringOrNull(1) ?: getString(0)) } }
+        }.toMap()
 
     /** How many routes actually run, for deciding whether an alert covers most of the agency. */
     fun countRoutesWithTrips(): Int =

@@ -66,6 +66,7 @@ private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.STOP, "Stop/Alight: Trip Detail's header, shown in place of Play while that trip is the one you've boarded; taps end tracking"),
     IconLegendEntry(LightIcons.DELETE, "Trip switch warning: Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; pressing play will board the currently viewed trip and end tracking of the previously boarded trip"),
     IconLegendEntry(LightIcons.CIRCLE, "Home: every other screen's own footer button; jumps back to the Pico Transit HomeScreen"),
+    IconLegendEntry(LightIcons.EMERGENCY, "Alert: a service alert applies here; tap it to read the details"),
 )
 
 /** Settings screen's own on/off toggles -- every one of them renders as one of these two icons

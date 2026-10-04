@@ -164,6 +164,10 @@ class SettingsViewModel(
         get() = _alertsOnHomeScreen
     private val _alertsOnHomeScreen = MutableStateFlow(true)
 
+    val alertsInMenus: StateFlow<Boolean>
+        get() = _alertsInMenus
+    private val _alertsInMenus = MutableStateFlow(true)
+
     val alertsBoardedOnly: StateFlow<Boolean>
         get() = _alertsBoardedOnly
     private val _alertsBoardedOnly = MutableStateFlow(false)
@@ -171,6 +175,10 @@ class SettingsViewModel(
     val alertsPopUp: StateFlow<Boolean>
         get() = _alertsPopUp
     private val _alertsPopUp = MutableStateFlow(false)
+
+    val alertsSwipe: StateFlow<Boolean>
+        get() = _alertsSwipe
+    private val _alertsSwipe = MutableStateFlow(false)
 
     val runStepperEnabled: StateFlow<Boolean>
         get() = _runStepperEnabled
@@ -263,8 +271,10 @@ class SettingsViewModel(
         }
         viewModelScope.launch { alertPreferences.enabledFlow.collect { _alertsEnabled.value = it } }
         viewModelScope.launch { alertPreferences.onHomeScreenFlow.collect { _alertsOnHomeScreen.value = it } }
+        viewModelScope.launch { alertPreferences.inMenusFlow.collect { _alertsInMenus.value = it } }
         viewModelScope.launch { alertPreferences.boardedOnlyFlow.collect { _alertsBoardedOnly.value = it } }
         viewModelScope.launch { alertPreferences.popUpFlow.collect { _alertsPopUp.value = it } }
+        viewModelScope.launch { alertPreferences.swipeFlow.collect { _alertsSwipe.value = it } }
         viewModelScope.launch {
             runSelectionPreferences.runStepperEnabledFlow.collect { _runStepperEnabled.value = it }
         }
@@ -389,12 +399,20 @@ class SettingsViewModel(
         viewModelScope.launch { alertPreferences.setOnHomeScreen(enabled) }
     }
 
+    fun setAlertsInMenus(enabled: Boolean) {
+        viewModelScope.launch { alertPreferences.setInMenus(enabled) }
+    }
+
     fun setAlertsBoardedOnly(enabled: Boolean) {
         viewModelScope.launch { alertPreferences.setBoardedOnly(enabled) }
     }
 
     fun setAlertsPopUp(enabled: Boolean) {
         viewModelScope.launch { alertPreferences.setPopUp(enabled) }
+    }
+
+    fun setAlertsSwipe(enabled: Boolean) {
+        viewModelScope.launch { alertPreferences.setSwipe(enabled) }
     }
 
     fun setShowStopsBeforeBoardingEnabled(enabled: Boolean) {
@@ -479,8 +497,10 @@ class SettingsScreen(
         val runSelectionEnabled by viewModel.runSelectionEnabled.collectAsState()
         val alertsEnabled by viewModel.alertsEnabled.collectAsState()
         val alertsOnHomeScreen by viewModel.alertsOnHomeScreen.collectAsState()
+        val alertsInMenus by viewModel.alertsInMenus.collectAsState()
         val alertsBoardedOnly by viewModel.alertsBoardedOnly.collectAsState()
         val alertsPopUp by viewModel.alertsPopUp.collectAsState()
+        val alertsSwipe by viewModel.alertsSwipe.collectAsState()
         val runStepperEnabled by viewModel.runStepperEnabled.collectAsState()
         val showStopsBeforeBoardingEnabled by viewModel.showStopsBeforeBoardingEnabled.collectAsState()
         val locationEnabled by viewModel.locationEnabled.collectAsState()
@@ -641,7 +661,9 @@ class SettingsScreen(
                 // Sub-options stay visible but greyed out while alerts are off.
                 ToggleRow("Show on home screen", alertsOnHomeScreen, viewModel::setAlertsOnHomeScreen, available = alertsEnabled)
                 ToggleRow("Show only for boarded trips", alertsBoardedOnly, viewModel::setAlertsBoardedOnly, available = alertsEnabled)
+                ToggleRow("Show in menus", alertsInMenus, viewModel::setAlertsInMenus, available = alertsEnabled)
                 ToggleRow("Pop up new alerts", alertsPopUp, viewModel::setAlertsPopUp, available = alertsEnabled)
+                ToggleRow("Swipe between alerts", alertsSwipe, viewModel::setAlertsSwipe, available = alertsEnabled)
 
                 LightText(
                     text = "Location (Testing)",

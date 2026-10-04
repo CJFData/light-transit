@@ -1,0 +1,282 @@
+package com.thelightphone.transit
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
+import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightBottomBar
+import com.thelightphone.sdk.ui.LightIcon
+import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightModal
+import com.thelightphone.sdk.ui.LightModalManager
+import com.thelightphone.sdk.ui.LightScrollView
+import com.thelightphone.sdk.ui.LightText
+import com.thelightphone.sdk.ui.LightTextVariant
+import com.thelightphone.sdk.ui.LightTheme
+import com.thelightphone.sdk.ui.LightThemeController
+import com.thelightphone.sdk.ui.LightThemeTokens
+import com.thelightphone.sdk.ui.lightClickable
+import com.thelightphone.transit.gtfs.Alert
+import com.thelightphone.transit.gtfs.AlertIndex
+import com.thelightphone.transit.gtfs.AlertPreferences
+import com.thelightphone.transit.gtfs.AlertsStore
+import com.thelightphone.transit.gtfs.GtfsAgency
+import com.thelightphone.transit.gtfs.GtfsRepository
+import com.thelightphone.transit.gtfs.StopGraph
+import com.thelightphone.transit.gtfs.UNKNOWN_CAUSE
+import com.thelightphone.transit.gtfs.label
+import java.io.File
+import java.time.ZoneId
+import kotlin.math.abs
+import kotlin.time.Duration
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
+
+/** Where alerts are shown, which decides which Settings toggles apply. */
+enum class AlertSurface { HOME, MENUS, TRIP }
+
+/** One agency's active alerts, ready for a screen to look up and display. [swipe] pages between
+ * alerts by swiping instead of with buttons. */
+class ScreenAlerts(
+    val index: AlertIndex,
+    val zoneId: ZoneId,
+    val now: Long,
+    private val appliesTo: Map<String, List<String>>,
+    val swipe: Boolean,
+) {
+    fun appliesTo(alert: Alert): List<String> = appliesTo[alert.id].orEmpty()
+}
+
+/**
+ * Alerts for [surface], or null when alerts are off or that surface is turned off in Settings.
+ * Nothing is fetched in either case. A boarded trip's Trip Detail shows alerts even when "Show in
+ * menus" is off. [repository] is null while the agency's schedule is still loading: stops and
+ * routes can't be matched or named yet, so only alerts covering the whole agency are agency-wide.
+ */
+suspend fun loadScreenAlerts(
+    dbFile: File,
+    repository: GtfsRepository?,
+    preferences: AlertPreferences,
+    surface: AlertSurface,
+    tripIsBoarded: Boolean = false,
+): ScreenAlerts? {
+    if (!preferences.enabledFlow.first()) return null
+    val boardedOnly = preferences.boardedOnlyFlow.first()
+    val shown = when (surface) {
+        AlertSurface.HOME -> preferences.onHomeScreenFlow.first()
+        AlertSurface.MENUS -> preferences.inMenusFlow.first() && !boardedOnly
+        AlertSurface.TRIP -> tripIsBoarded || (preferences.inMenusFlow.first() && !boardedOnly)
+    }
+    if (!shown) return null
+    val agency = GtfsAgency.forDbFile(dbFile) ?: return null
+    val alerts = AlertsStore.shared.alertsFor(agency.id, agency.realtimeAlertsUrl, enabled = true)
+    if (alerts.isEmpty()) return null
+
+    val now = System.currentTimeMillis() / 1000
+    val index = AlertIndex(alerts, repository?.getStopGraph() ?: StopGraph(emptyMap()), repository?.countRoutesWithTrips() ?: 0, now)
+    val routeNames = repository?.getRouteNames(index.active.flatMap { a -> a.selectors.mapNotNull { it.routeId } }).orEmpty()
+    val stopNames = repository?.getStopNames(index.active.flatMap { a -> a.selectors.mapNotNull { it.stopId } }).orEmpty()
+    val appliesTo = index.active.associate { alert ->
+        alert.id to alert.selectors.flatMap { s ->
+            listOfNotNull(s.routeId?.let { routeNames[it] }, s.stopId?.let { stopNames[it] })
+        }.distinct()
+    }
+    return ScreenAlerts(index, agency.zoneId, now, appliesTo, preferences.swipeFlow.first())
+}
+
+/** Alerts for a trip from [fromStopSequence] onward: ones naming the trip, its route and
+ * direction, or one of its remaining stops. */
+fun tripAlerts(screenAlerts: ScreenAlerts, repository: GtfsRepository, tripId: String, fromStopSequence: Int): List<Alert> =
+    screenAlerts.index.forTrip(
+        tripId,
+        repository.getRouteIdForTrip(tripId),
+        repository.getDirectionIdForTrip(tripId),
+        repository.getTripStops(tripId, fromStopSequence).map { it.stopId },
+    )
+
+fun showAlerts(alerts: List<Alert>, screenAlerts: ScreenAlerts) {
+    if (alerts.isEmpty()) return
+    LightModalManager.show(modal = AlertModal(alerts, screenAlerts), duration = Duration.INFINITE)
+}
+
+/** The alert icon, opening [alerts] in [AlertModal]. [padding] is part of the tap target. */
+@Composable
+fun AlertBadge(
+    alerts: List<Alert>,
+    screenAlerts: ScreenAlerts?,
+    modifier: Modifier = Modifier,
+    padding: PaddingValues = PaddingValues(12.dp),
+) {
+    if (screenAlerts == null || alerts.isEmpty()) return
+    LightIcon(
+        icon = LightIcons.EMERGENCY,
+        size = ALERT_ICON_SIZE,
+        contentDescription = "Service alert",
+        modifier = modifier.lightClickable { showAlerts(alerts, screenAlerts) }.padding(padding),
+    )
+}
+
+const val ALERT_ICON_SIZE = 0.8f
+
+/** One dot per alert, between rewind/fast-forward buttons unless [swipe] is on. */
+@Composable
+fun AlertPageControls(count: Int, current: Int, onPage: (Int) -> Unit, swipe: Boolean, modifier: Modifier = Modifier) {
+    if (count < 2) return
+    Row(
+        modifier = modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!swipe) {
+            LightIcon(
+                icon = LightIcons.REWIND,
+                size = 0.8f,
+                contentDescription = "Previous alert",
+                modifier = Modifier.lightClickable { onPage((current - 1 + count) % count) }.padding(8.dp),
+            )
+        }
+        repeat(count) { page ->
+            LightIcon(icon = if (page == current) LightIcons.SELECT_ON else LightIcons.SELECT_OFF, size = 0.4f, contentDescription = null)
+        }
+        if (!swipe) {
+            LightIcon(
+                icon = LightIcons.FAST_FORWARD,
+                size = 0.8f,
+                contentDescription = "Next alert",
+                modifier = Modifier.lightClickable { onPage((current + 1) % count) }.padding(8.dp),
+            )
+        }
+    }
+}
+
+private val SWIPE_DISTANCE = 48.dp
+
+/** With [enabled], swiping left shows the next alert and swiping right the previous one. */
+fun Modifier.alertSwipe(enabled: Boolean, count: Int, current: Int, onPage: (Int) -> Unit): Modifier =
+    if (!enabled || count < 2) this else pointerInput(count, current) {
+        var dragged = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { dragged = 0f },
+            onDragEnd = {
+                if (abs(dragged) >= SWIPE_DISTANCE.toPx()) {
+                    onPage(if (dragged < 0) (current + 1) % count else (current - 1 + count) % count)
+                }
+            },
+        ) { change, amount ->
+            change.consume()
+            dragged += amount
+        }
+    }
+
+/** The home screen's agency-wide alerts, one header at a time. Tapping one opens it. */
+@Composable
+fun HomeAlertsPager(alerts: List<Alert>, screenAlerts: ScreenAlerts, modifier: Modifier = Modifier) {
+    if (alerts.isEmpty()) return
+    var page by remember(alerts) { mutableIntStateOf(0) }
+    Column(modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .alertSwipe(screenAlerts.swipe, alerts.size, page, onPage = { page = it })
+                .lightClickable { showAlerts(alerts.drop(page) + alerts.take(page), screenAlerts) },
+        ) {
+            LightIcon(icon = LightIcons.EMERGENCY, size = 0.8f, contentDescription = "Service alert", modifier = Modifier.padding(end = 12.dp))
+            LightText(text = alerts[page].header, variant = LightTextVariant.Detail, maxLines = 3)
+        }
+        AlertPageControls(alerts.size, page, onPage = { page = it }, swipe = screenAlerts.swipe)
+    }
+}
+
+private val CAUSE_LABELS = mapOf(
+    2 to "Other cause", 3 to "Technical problem", 4 to "Strike", 5 to "Demonstration", 6 to "Accident",
+    7 to "Holiday", 8 to "Weather", 9 to "Maintenance", 10 to "Construction", 11 to "Police activity",
+    12 to "Medical emergency",
+)
+private const val APPLIES_TO_LIMIT = 4
+
+/** One alert's details: what it applies to, how long it lasts, its cause and header, then the description. */
+@Composable
+fun AlertDetails(alert: Alert, screenAlerts: ScreenAlerts) {
+    val appliesTo = screenAlerts.appliesTo(alert)
+    if (appliesTo.isNotEmpty()) {
+        val shown = appliesTo.take(APPLIES_TO_LIMIT).joinToString(", ")
+        val more = if (appliesTo.size > APPLIES_TO_LIMIT) " +${appliesTo.size - APPLIES_TO_LIMIT} more" else ""
+        LightText(text = "Applies to: $shown$more", variant = LightTextVariant.Detail, lighten = true, modifier = Modifier.padding(bottom = 8.dp))
+    }
+    alert.displayPeriod(screenAlerts.now)?.let { period ->
+        LightText(
+            text = period.label(screenAlerts.zoneId, screenAlerts.now),
+            variant = LightTextVariant.Detail,
+            lighten = true,
+            modifier = Modifier.padding(bottom = 16.dp),
+        )
+    }
+    if (alert.cause != UNKNOWN_CAUSE) {
+        CAUSE_LABELS[alert.cause]?.let {
+            LightText(text = it, variant = LightTextVariant.Detail, lighten = true, modifier = Modifier.padding(bottom = 8.dp))
+        }
+    }
+    LightText(text = alert.header, variant = LightTextVariant.Copy, modifier = Modifier.padding(bottom = 16.dp))
+    alert.description.replace("\r\n", "\n").split(Regex("\n\\s*\n")).map { it.trim() }.filter { it.isNotEmpty() }.forEach {
+        LightText(text = it, variant = LightTextVariant.Detail, modifier = Modifier.padding(bottom = 12.dp))
+    }
+}
+
+/** Full alert details, with a page per alert and dots when there's more than one. */
+class AlertModal(private val alerts: List<Alert>, private val screenAlerts: ScreenAlerts) : LightModal {
+    private val dismissSignal = CompletableDeferred<Unit>()
+
+    @Composable
+    override fun Content() {
+        val themeColors by LightThemeController.colors.collectAsState()
+        LightTheme(colors = themeColors) {
+            Column(modifier = Modifier.fillMaxSize().background(LightThemeTokens.colors.background)) {
+                var page by remember { mutableIntStateOf(0) }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .alertSwipe(screenAlerts.swipe, alerts.size, page, onPage = { page = it }),
+                ) {
+                    AlertPage(alerts[page])
+                }
+                AlertPageControls(alerts.size, page, onPage = { page = it }, swipe = screenAlerts.swipe)
+                LightBottomBar(
+                    items = listOf(LightBarButton.LightIcon(icon = LightIcons.CLOSE, contentDescription = "Close", onClick = { dismiss() })),
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun AlertPage(alert: Alert) {
+        LightScrollView(modifier = Modifier.fillMaxSize().padding(32.dp)) {
+            AlertDetails(alert, screenAlerts)
+        }
+    }
+
+    override val onExpired: () -> Unit = {}
+
+    override fun dismiss() {
+        dismissSignal.complete(Unit)
+    }
+
+    override suspend fun awaitDismiss() = dismissSignal.await()
+}
