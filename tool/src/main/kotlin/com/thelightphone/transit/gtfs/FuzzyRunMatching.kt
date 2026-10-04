@@ -16,7 +16,7 @@ internal data class ScheduledTripCandidate(
 )
 
 /**
- * Ordinal rank-matching used by [MbtaGreenLineFuzzyRunSource] -- see [FuzzyRunTrips]'s own doc for
+ * Ordinal rank-matching used by [MbtaSubwayFuzzyRunSource] -- see [FuzzyRunTrips]'s own doc for
  * why this exists instead of a synthetic trip. Sorts both lists by their own soonest time and pairs
  * them up by position: 1st live run with 1st scheduled trip, 2nd with 2nd, and so on. Deliberately
  * rank-based, not a nearest-time-delta match -- a live run and a scheduled trip a few minutes apart
@@ -26,7 +26,7 @@ internal data class ScheduledTripCandidate(
  *
  * [liveRuns] and [scheduledTrips] must already be scoped to one (route_id, direction_id) group --
  * this function does no grouping itself, since MBTA's GTFS-RT entities are already filtered to
- * Green Line route_ids before reaching here.
+ * subway route_ids before reaching here.
  *
  * A caller with more live runs than scheduled trips (or vice versa) just gets fewer pairs -- the
  * extras are silently dropped rather than force-matched, the same "never force a link" rule every

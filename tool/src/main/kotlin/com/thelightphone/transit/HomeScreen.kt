@@ -621,7 +621,7 @@ class HomeScreenViewModel(
                 ?.takeIf { source -> trip.lineType != null && trip.lineType in source.coveredLineTypes }
             val stopPredictionSource = trip.agency.component<StopPredictionSource>()
             // Same architecture-gap reasoning as liveVehicleSource above, for CTA 'L' trains/MBTA
-            // Green Line vehicles that have no real trip to resolve to at all -- see FuzzyRunTrips's
+            // subway trains that have no real trip to resolve to at all -- see FuzzyRunTrips's
             // own doc, and TripDetailScreen's identical wiring for the same source.
             val fuzzyRunTrips = trip.agency.component<FuzzyRunTrips>()
             val routeId = (liveVehicleSource != null || fuzzyRunTrips != null)

@@ -272,8 +272,8 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                             "screen). \"Include longer trips in departures\" (on by default) widens a " +
                             "route/direction's departures list to also include any trip that runs at " +
                             "least as far as the direction you picked. \"Run selection\" (on by " +
-                            "default, with a nested \"Next/Previous run steppers\" toggle, off by " +
-                            "default) lets you correct a boarded CTA 'L' or MBTA Green Line trip's " +
+                            "default, with a nested \"Next and previous buttons\" toggle, off by " +
+                            "default) lets you correct a boarded CTA 'L' or MBTA subway trip's " +
                             "automatic closest-live-train match yourself. \"Stations list opens " +
                             "arrivals on tap\" (on by default) makes a plain tap in the Stations list " +
                             "jump straight to a station's live arrivals instead of its platform map -- " +

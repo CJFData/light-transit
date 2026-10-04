@@ -813,7 +813,7 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "On CTA 'L' and MBTA Green Line trips, the app guesses which live train " +
+                    text = "On CTA 'L' and MBTA subway trips, the app sometimes guesses which live train " +
                         "you're on. Select Run lets you pick the right one.",
                     variant = LightTextVariant.Detail,
                     lighten = true,

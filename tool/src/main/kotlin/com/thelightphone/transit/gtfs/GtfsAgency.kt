@@ -58,10 +58,8 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/mbta/vehiclepositions",
         realtimeAlertsUrl = "https://gtfs.picotransit.com/mbta/alerts",
         timeZoneId = "America/New_York",
-        // See MbtaGreenLineFuzzyRunSource's own doc -- Green Line's own live feed marks the vast
-        // majority of its running vehicles as ADDED trips with no real static trip to match to;
-        // Orange/Red/Blue aren't affected and keep using ordinary trip_id matching.
-        components = listOf(MbtaV3VehicleSource, MbtaGreenLineFuzzyRunSource),
+        // Subway trains running as ADDED trips get a closest match; see MbtaSubwayFuzzyRunSource.
+        components = listOf(MbtaV3VehicleSource, MbtaSubwayFuzzyRunSource),
     ),
     RIPTA(
         "ripta",

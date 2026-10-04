@@ -250,7 +250,7 @@ interface FuzzyRunTrips : AgencyComponent {
      * see [liveRunOptionsForTrip], which every real caller should use instead of this directly.
      * [repository] matches [matchedTripUpdates]/[tripUpdateForRun]'s own signatures -- unused by a
      * source with no need to query it (e.g. [CtaTrainTrackerSource], keyed entirely by run number),
-     * needed by one that has to resolve a trip_id itself (e.g. [MbtaGreenLineFuzzyRunSource] calling
+     * needed by one that has to resolve a trip_id itself (e.g. [MbtaSubwayFuzzyRunSource] calling
      * [GtfsAgency.fetchMergedTripUpdates]).
      */
     suspend fun liveRunOptions(routeId: String, agency: GtfsAgency, repository: GtfsRepository, zoneId: java.time.ZoneId): List<FuzzyRunOption>

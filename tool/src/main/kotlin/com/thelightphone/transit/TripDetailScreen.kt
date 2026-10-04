@@ -116,7 +116,7 @@ sealed class TripDetailState {
          * that row, always, independent of the Map screen's double-tap-to-station setting. */
         val stationStopIds: Set<String>,
         /** True only when [liveAtStopSequence]/[liveStatus] came from a [FuzzyRunTrips] source (CTA
-         * 'L' trains, MBTA Green Line) -- an approximate rank-matched pairing, never a certain match
+         * 'L' trains, MBTA subway) -- an approximate rank-matched pairing, never a certain match
          * (see [FuzzyRunTrips]'s own doc). Content() must render this distinctly ("Closest match",
          * not "Live") so a rider never mistakes an approximation for a confirmed prediction. */
         val isClosestMatch: Boolean = false,
@@ -247,7 +247,7 @@ class TripDetailViewModel(
                 val liveVehicleSource = agency?.component<LiveVehicleSource>()
                     ?.takeIf { source -> tripLineType != null && tripLineType in source.coveredLineTypes }
                 // Same architecture-gap reasoning as liveVehicleSource above, for CTA 'L' trains/MBTA
-                // Green Line vehicles that have no real trip to resolve to at all (see FuzzyRunTrips's
+                // subway trains that have no real trip to resolve to at all (see FuzzyRunTrips's
                 // own doc) -- checked here too so this trip isn't forced to a permanently-null live
                 // state just because it's a fuzzy-matched trip_id rather than a certain one.
                 val fuzzyRunTrips = agency?.component<FuzzyRunTrips>()
@@ -354,7 +354,7 @@ class TripDetailViewModel(
                         }
                     }
                     // The soonest remaining stop in the matched live run's own ordered stop list (see
-                    // CtaTrainTrackerSource/MbtaGreenLineFuzzyRunSource's own docs -- both build this list
+                    // CtaTrainTrackerSource/MbtaSubwayFuzzyRunSource's own docs -- both build this list
                     // in stop order already), the same "first entry is the next stop" precedent
                     // vehicleNextStop/matchedStopFromVehicle above already establishes for StopPredictionSource.
                     val matchedStopFromFuzzy = fuzzyTripUpdate?.stopTimeUpdate?.firstOrNull()?.stopId
@@ -886,14 +886,15 @@ class TripDetailScreen(
                                                     modifier = Modifier.padding(start = 8.dp),
                                                 )
                                             }
-                                            // Same size as the transfer-station icon, so they line up. While boarded,
-                                            // a tap on the row picks the alight stop, so the icon isn't tappable.
+                                            // Same size as the transfer-station icon, so they line up. While boarded
+                                            // with no alight stop yet, a tap on the row picks one, so the icon isn't
+                                            // tappable until an alight stop is set.
                                             alerts?.let {
                                                 AlertBadge(
                                                     it.byStop[stop.stopId].orEmpty(),
                                                     it.screenAlerts,
                                                     padding = PaddingValues(horizontal = 8.dp),
-                                                    tappable = !isBoardedHere,
+                                                    tappable = !isBoardedHere || alightStopId != null,
                                                 )
                                             }
                                         }

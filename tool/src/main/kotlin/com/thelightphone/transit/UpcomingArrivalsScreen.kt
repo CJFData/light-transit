@@ -83,7 +83,7 @@ data class ArrivalRow(
     val etaEpochSeconds: Long,
     val isLive: Boolean,
     /** True only when this row's live data came from a [FuzzyRunTrips] source (CTA 'L' trains, MBTA
-     * Green Line) -- an approximate pairing (soonest live run <-> soonest scheduled trip by rank,
+     * subway) -- an approximate pairing (soonest live run <-> soonest scheduled trip by rank,
      * see [FuzzyRunTrips]'s own doc), never a certain match the way every other live source is.
      * [statusLabel] must surface this distinctly ("Closest match", not "Live") so a rider never
      * reads an approximation as a confirmed prediction. */
