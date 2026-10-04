@@ -175,8 +175,8 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                     LightText(
-                        text = "New York City, Denver, the San Francisco Bay Area, and Puget Sound group " +
-                            "their agencies into regions. Add more of a region's schedules in Settings → " +
+                        text = "New York City, Southern New England, Philadelphia, Denver, the San " +
+                            "Francisco Bay Area, and Puget Sound group their agencies into regions. Add more of a region's schedules in Settings → " +
                             "Additional Schedules to browse them together; tap and hold one there to make " +
                             "it your main agency.",
                         variant = LightTextVariant.Detail,

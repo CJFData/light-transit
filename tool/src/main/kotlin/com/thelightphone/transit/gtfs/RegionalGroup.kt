@@ -18,7 +18,7 @@ import kotlinx.coroutines.coroutineScope
  * of that itself, it's the membership list those region-scoped behaviors, present and future, key
  * off of.
  *
- * An agency not listed under any group here (MBTA, RIPTA, every Colorado agency, etc.) has no
+ * An agency not listed under any group here (CTA, STM, every Colorado agency, etc.) has no
  * [RegionalGroup] at all -- [forAgency] returns null, and the picker just lists it individually.
  */
 enum class RegionalGroup(val id: String, val displayName: String, val members: List<GtfsAgency>) {
@@ -116,11 +116,14 @@ enum class RegionalGroup(val id: String, val displayName: String, val members: L
     ),
     /** SEPTA's two feeds: buses, Metro, and trolleys in one, Regional Rail in the other. */
     PHILADELPHIA("philadelphia", "Philadelphia", listOf(GtfsAgency.SEPTA_BUS, GtfsAgency.SEPTA_RAIL)),
-    /** Massachusetts regional transit authorities and ferries. */
-    MASSACHUSETTS(
-        "massachusetts",
-        "Massachusetts",
+    /** MBTA and RIPTA with Massachusetts' regional transit authorities and the area's ferries. MBTA
+     * comes first, so the region takes its place at the top of the agency picker. */
+    SOUTHERN_NEW_ENGLAND(
+        "southern_new_england",
+        "Southern New England",
         listOf(
+            GtfsAgency.MBTA,
+            GtfsAgency.RIPTA,
             GtfsAgency.SRTA,
             GtfsAgency.MERRIMACK_VALLEY_TRANSIT,
             GtfsAgency.BERKSHIRE_RTA,
@@ -140,6 +143,7 @@ enum class RegionalGroup(val id: String, val displayName: String, val members: L
             GtfsAgency.PATRIOT_PARTY_BOATS,
             GtfsAgency.SEASTREAK,
             GtfsAgency.VINEYARD_FAST_FERRY,
+            GtfsAgency.BLOCK_ISLAND_FERRY,
         ),
     ),
     ;

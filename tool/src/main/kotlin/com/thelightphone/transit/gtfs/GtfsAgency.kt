@@ -1104,9 +1104,10 @@ enum class GtfsAgency(
         timeZoneId = "America/New_York",
     ),
 
-    // Massachusetts region (see RegionalGroup.MASSACHUSETTS): the regional transit authorities and
-    // ferries from MassDOT's developer data list. Schedules only. GATRA, WRTA, and Martha's Vineyard
-    // are left out until their published schedules cover current dates.
+    // Southern New England region (see RegionalGroup.SOUTHERN_NEW_ENGLAND), with MBTA and RIPTA: the
+    // regional transit authorities and ferries from MassDOT's developer data list, plus Block Island
+    // Ferry. Schedules only. GATRA, WRTA, and Martha's Vineyard are left out until their published
+    // schedules cover current dates.
     SRTA(
         "srta",
         "SRTA (No Live)",
