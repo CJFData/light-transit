@@ -1,6 +1,6 @@
 """Command-line entry point invoked by the container's shell wrapper.
 
-Two subcommands:
+Subcommands:
 
 * ``prepare`` — given a checked-out dev repo on disk, run the whitelist
   extraction into the baked-in SDK's tool/ module. The SDK's Gradle plugin
@@ -12,9 +12,16 @@ Two subcommands:
   the output dir, and emit ``recipe.json`` with the SHA-256 and every input
   that fed the build.
 
-The split exists so the shell can run gradle between the two Python phases
-without Python managing subprocess lifecycle for a long-running JVM. This
-module never makes a network call.
+* ``image-inventory`` — at image build time, record the native libraries in
+  the warmed Gradle cache's AARs.
+
+* ``native-inventory`` — after a build, in a trusted container outside the
+  build network, add native libraries from allowlisted AARs the build-time
+  Maven proxy served, fetched directly from upstream (see ``native.py``).
+
+The prepare/collect split exists so the shell can run gradle between the two
+Python phases without Python managing subprocess lifecycle for a long-running
+JVM. Only ``native-inventory`` makes network calls.
 """
 
 from __future__ import annotations
@@ -28,7 +35,7 @@ from pathlib import Path
 
 import tomllib
 
-from . import extract, recipe
+from . import extract, native, recipe
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
@@ -122,6 +129,28 @@ def cmd_collect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_image_inventory(args: argparse.Namespace) -> int:
+    _write_json(args.output, native.image_inventory(args.cache))
+    return 0
+
+
+def cmd_native_inventory(args: argparse.Namespace) -> int:
+    with args.proxy_log.open(encoding="utf-8") as log:
+        served = native.served_aars(log)
+    result = native.build_inventory(
+        image=json.loads(args.image_inventory.read_text(encoding="utf-8")),
+        served=served,
+        allowlist=native.load_allowlist(args.allowlist),
+    )
+    _write_json(args.output, result)
+    return 0
+
+
+def _write_json(path: Path, document: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _find_unsigned_apk(workspace: Path) -> Path:
     candidate = workspace / "tool" / "build" / "outputs" / "apk" / "release"
     if not candidate.is_dir():
@@ -180,6 +209,16 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     coll.add_argument("--gradle-command", required=True, help="JSON-encoded argv array")
     coll.add_argument("--source-date-epoch", type=int, required=True)
 
+    img = sub.add_parser("image-inventory", help="inventory native libraries in the warmed cache")
+    img.add_argument("--cache", type=Path, required=True, help="Gradle modules-2/files-2.1 dir")
+    img.add_argument("--output", type=Path, required=True)
+
+    nat = sub.add_parser("native-inventory", help="approve native libraries for one build")
+    nat.add_argument("--proxy-log", type=Path, required=True)
+    nat.add_argument("--image-inventory", type=Path, required=True)
+    nat.add_argument("--allowlist", type=Path, required=True)
+    nat.add_argument("--output", type=Path, required=True)
+
     ns = p.parse_args(argv)
     for attr in ("dev_repo", "workspace_tool", "output_dir", "workspace"):
         if hasattr(ns, attr) and getattr(ns, attr) is not None:
@@ -193,6 +232,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_prepare(args)
     if args.cmd == "collect":
         return cmd_collect(args)
+    if args.cmd == "image-inventory":
+        return cmd_image_inventory(args)
+    if args.cmd == "native-inventory":
+        return cmd_native_inventory(args)
     return 1
 
 
