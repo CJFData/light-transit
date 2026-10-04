@@ -2,11 +2,17 @@
 
 Pico Transit is a friendly little companion for getting around on public transit: real schedules, live arrivals, connections at any stop, and a live map showing where your ride actually is. No ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-It covers **110 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, and the SF Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more). The rest have schedules only for now: about 40 Colorado agencies, 9 in the Puget Sound region, Metra, Pace, and LA Metro.
+It covers **110 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, the SF Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more), and all 9 **Puget Sound** agencies (King County Metro, Sound Transit, and more). The rest have schedules only for now: about 40 Colorado agencies, Metra, Pace, and LA Metro.
 
 Use it on its own or alongside the Light Phone's Directions tool. It's built on the [Light SDK](https://github.com/lightphone/light-sdk), so it stays as calm and un-distracting as the rest of your Light experience.
 
 ## 🔄 Recent updates
+
+**v0.4.1**
+- 🌲 **Puget Sound, live**: King County Metro, Sound Transit, Pierce Transit, Community Transit, Kitsap Transit, Intercity Transit, Everett Transit, Washington State Ferries, and the Seattle Center Monorail now show live arrivals and vehicles, through Sound Transit's OneBusAway API.
+- 🙏 **Clearer data credits**: King County Metro shows the credit King County asks for, and agencies whose data comes through Sound Transit or 511.org credit them alongside the agency.
+- ⚙️ **Tidier Settings**: Clear schedule cache and Only download over Wi-Fi now sit right after the agency picker.
+- ⌨️ **Keyboard update**: after typing a symbol or number, the keyboard switches back to letters, like the LightOS keyboard.
 
 **v0.4.0**
 - 🗺️ **Easier-to-read maps**: street names are drawn larger, and each map loads with about a quarter as many tile requests.
@@ -15,7 +21,6 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 - 🔒 **A new home for live data**: the proxy moved to `gtfs.picotransit.com` and now only accepts the kinds of requests the app actually makes.
 
 **Earlier**
-- 🌲 **9 Puget Sound agencies**: King County Metro, Sound Transit, Pierce Transit, Community Transit, Kitsap Transit, Intercity Transit, Everett Transit, Washington State Ferries, and the Seattle Center Monorail (schedules only for now).
 - 🐛 **Steadier live tracking** on feeds with infrequent GPS updates. RIPTA also follows each vehicle along its real route path, so it catches up even when several stops pass between updates.
 - 🎶 **Nashville's WeGo, live**: added in honor of Dolly Parton, with full live tracking from day one.
 
@@ -26,7 +31,6 @@ The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - 📍 **Real GPS for Explore**: built and working, but marked **(Testing)** until LightOS trusts non-Light-signed builds for location. Address search works in the meantime.
 - ⚠️ **Service alerts**: detours and service changes from GTFS-RT's Alerts feed.
 - 🗺️ **Route shapes on the map**: drawing the real path between stops instead of straight lines (RIPTA's shapes are already read).
-- 🌲 **Live tracking for Puget Sound**, once an API key is in place.
 - 🚏 **More agencies**, with help from the community.
 
 ## 🗺️ What can it do?
@@ -122,7 +126,7 @@ Until Pico Transit is available through Light's Tool Library, install it with AD
 1. Download the latest APK from [Releases](https://github.com/CJFData/light-transit/releases), or build one with `./gradlew :tool:assembleDebug`.
 2. Turn on Developer Options and USB debugging on your Light Phone III, plug it in, and run:
    ```bash
-   adb install -r pico-transit-<version>-pre.apk
+   adb install -r pico-transit-<version>.apk
    ```
 3. On the phone, allow "Any tools" in LightOS's tool settings. It'll warn you the tool isn't Light-vetted yet, which is expected for now. 🚧
 

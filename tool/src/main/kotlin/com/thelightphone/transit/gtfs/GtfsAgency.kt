@@ -31,6 +31,8 @@ enum class GtfsAgency(
     val feedUrl: String,
     val realtimeTripUpdatesUrl: String?,
     val realtimeVehiclePositionsUrl: String?,
+    /** This agency's GTFS-RT service alerts feed, or null if it doesn't publish one. */
+    val realtimeServiceAlertsUrl: String? = null,
     /** This agency's own IANA timezone, exactly as declared in its GTFS feed's agency.txt
      * `agency_timezone` column (verified against each agency's real feed, not assumed) -- every
      * GTFS scheduled time is only meaningful relative to the agency's own clock, not the rider's
@@ -476,7 +478,8 @@ enum class GtfsAgency(
     //
     // Static feeds also come from 511's datafeed API, because 511's realtime uses its own stop_id
     // catalog, which an agency's own static download wouldn't match. Feeds fetched through 511 use
-    // the region's America/Los_Angeles default timezone, except AC Transit's `US/Pacific`.
+    // the region's America/Los_Angeles default timezone, except AC Transit's `US/Pacific`. Each
+    // entry credits 511.org alongside itself (see [AttributionPartner]).
 
     /** BART publishes no VehiclePositions, so its vehicles don't move on the map. ETAs come from
      * TripUpdates, and Trip Detail's current stop comes from inferCurrentStopSequence(). */
@@ -487,7 +490,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFBA/tripupdates",
         "https://gtfs.picotransit.com/511SFBA/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "BA")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "BA"), AttributionPartner("511.org")),
     ),
     /** A large feed, handled by the streaming download and batched ingest commits. */
     SFMTA_MUNI(
@@ -497,7 +500,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSF/tripupdates",
         "https://gtfs.picotransit.com/511SFSF/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SF")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SF"), AttributionPartner("511.org")),
     ),
     /** timeZoneId is `US/Pacific`, as declared in this feed's agency.txt (a legacy alias that
      * ZoneId.of() accepts). */
@@ -508,7 +511,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFAC/tripupdates",
         "https://gtfs.picotransit.com/511SFAC/vehiclepositions",
         timeZoneId = "US/Pacific",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AC")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AC"), AttributionPartner("511.org")),
     ),
 
     CALTRAIN(
@@ -518,7 +521,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFCT/tripupdates",
         "https://gtfs.picotransit.com/511SFCT/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CT")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CT"), AttributionPartner("511.org")),
     ),
     /** Static comes from gtfs.vta.org (via the proxy) rather than 511, so realtime stop_ids go through
      * [RegionalStopIdPrefixBridge]. */
@@ -529,7 +532,11 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSC/tripupdates",
         "https://gtfs.picotransit.com/511SFSC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SC"), RegionalStopIdPrefixBridge("6")),
+        components = listOf(
+            RegionalGtfsFeed("511.org SF Bay Area", "SC"),
+            AttributionPartner("511.org"),
+            RegionalStopIdPrefixBridge("6"),
+        ),
     ),
 
     COUNTY_CONNECTION(
@@ -539,7 +546,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFCC/tripupdates",
         "https://gtfs.picotransit.com/511SFCC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CC")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CC"), AttributionPartner("511.org")),
     ),
     ACE(
         "ace",
@@ -548,7 +555,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFCE/tripupdates",
         "https://gtfs.picotransit.com/511SFCE/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CE")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CE"), AttributionPartner("511.org")),
     ),
     SANTA_CRUZ_METRO(
         "santa_cruz_metro",
@@ -557,7 +564,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFCR/tripupdates",
         "https://gtfs.picotransit.com/511SFCR/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CR")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CR"), AttributionPartner("511.org")),
     ),
     CAPITOL_CORRIDOR(
         "capitol_corridor",
@@ -566,7 +573,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFAM/tripupdates",
         "https://gtfs.picotransit.com/511SFAM/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AM")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AM"), AttributionPartner("511.org")),
     ),
     EMERY_GO_ROUND(
         "emery_go_round",
@@ -575,7 +582,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFEM/tripupdates",
         "https://gtfs.picotransit.com/511SFEM/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "EM")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "EM"), AttributionPartner("511.org")),
     ),
     /** Bus network only; Golden Gate Ferry is a separate operator ([GOLDEN_GATE_FERRY], 511 code GF). */
     GOLDEN_GATE_TRANSIT(
@@ -585,7 +592,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFGG/tripupdates",
         "https://gtfs.picotransit.com/511SFGG/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "GG")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "GG"), AttributionPartner("511.org")),
     ),
     MARIN_TRANSIT(
         "marin_transit",
@@ -594,7 +601,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFMA/tripupdates",
         "https://gtfs.picotransit.com/511SFMA/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MA")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MA"), AttributionPartner("511.org")),
     ),
     MISSION_BAY_TMA(
         "mission_bay_tma",
@@ -603,7 +610,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFMB/tripupdates",
         "https://gtfs.picotransit.com/511SFMB/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MB")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MB"), AttributionPartner("511.org")),
     ),
     MOUNTAIN_VIEW_COMMUNITY_SHUTTLE(
         "mountain_view_community_shuttle",
@@ -612,7 +619,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFMC/tripupdates",
         "https://gtfs.picotransit.com/511SFMC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MC")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MC"), AttributionPartner("511.org")),
     ),
     MVGO(
         "mvgo",
@@ -621,7 +628,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFMV/tripupdates",
         "https://gtfs.picotransit.com/511SFMV/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MV")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "MV"), AttributionPartner("511.org")),
     ),
     PETALUMA_TRANSIT(
         "petaluma_transit",
@@ -630,7 +637,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFPE/tripupdates",
         "https://gtfs.picotransit.com/511SFPE/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "PE")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "PE"), AttributionPartner("511.org")),
     ),
     RIO_VISTA_DELTA_BREEZE(
         "rio_vista_delta_breeze",
@@ -639,7 +646,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFRV/tripupdates",
         "https://gtfs.picotransit.com/511SFRV/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "RV")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "RV"), AttributionPartner("511.org")),
     ),
     SMART(
         "smart",
@@ -648,7 +655,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSA/tripupdates",
         "https://gtfs.picotransit.com/511SFSA/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SA")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SA"), AttributionPartner("511.org")),
     ),
     SF_BAY_FERRY(
         "sf_bay_ferry",
@@ -657,7 +664,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSB/tripupdates",
         "https://gtfs.picotransit.com/511SFSB/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SB")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SB"), AttributionPartner("511.org")),
     ),
     SAN_LEANDRO_LINKS(
         "san_leandro_links",
@@ -666,7 +673,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSL/tripupdates",
         "https://gtfs.picotransit.com/511SFSL/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SL")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SL"), AttributionPartner("511.org")),
     ),
     SAMTRANS(
         "samtrans",
@@ -675,7 +682,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSM/tripupdates",
         "https://gtfs.picotransit.com/511SFSM/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SM")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SM"), AttributionPartner("511.org")),
     ),
     SONOMA_COUNTY_TRANSIT(
         "sonoma_county_transit",
@@ -684,7 +691,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSO/tripupdates",
         "https://gtfs.picotransit.com/511SFSO/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SO")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SO"), AttributionPartner("511.org")),
     ),
     SANTA_ROSA_CITYBUS(
         "santa_rosa_citybus",
@@ -693,7 +700,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSR/tripupdates",
         "https://gtfs.picotransit.com/511SFSR/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SR")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SR"), AttributionPartner("511.org")),
     ),
     SOLTRANS(
         "soltrans",
@@ -702,7 +709,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFST/tripupdates",
         "https://gtfs.picotransit.com/511SFST/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "ST")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "ST"), AttributionPartner("511.org")),
     ),
     /** This feed has duplicate directions.txt rows and blank times at non-timepoint stops. */
     WESTCAT(
@@ -712,7 +719,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFWC/tripupdates",
         "https://gtfs.picotransit.com/511SFWC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "WC")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "WC"), AttributionPartner("511.org")),
     ),
     LAVTA_WHEELS(
         "lavta_wheels",
@@ -721,7 +728,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFWH/tripupdates",
         "https://gtfs.picotransit.com/511SFWH/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "WH")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "WH"), AttributionPartner("511.org")),
     ),
 
 
@@ -732,7 +739,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SF3D/tripupdates",
         "https://gtfs.picotransit.com/511SF3D/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "3D")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "3D"), AttributionPartner("511.org")),
     ),
     ANGEL_ISLAND_TIBURON_FERRY(
         "angel_island_tiburon_ferry",
@@ -741,7 +748,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFAF/tripupdates",
         "https://gtfs.picotransit.com/511SFAF/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AF")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "AF"), AttributionPartner("511.org")),
     ),
     COMMUTE_ORG_SHUTTLES(
         "commute_org_shuttles",
@@ -750,7 +757,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFCM/tripupdates",
         "https://gtfs.picotransit.com/511SFCM/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CM")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CM"), AttributionPartner("511.org")),
     ),
     /** Operated by WestCat, but published as a separate feed from [WESTCAT]. */
     DUMBARTON_EXPRESS(
@@ -760,7 +767,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFDE/tripupdates",
         "https://gtfs.picotransit.com/511SFDE/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "DE")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "DE"), AttributionPartner("511.org")),
     ),
     /** A separate 511 operator code from [EMERY_GO_ROUND]; served as whatever 511 publishes under it. */
     EMERY_EXPRESS(
@@ -770,7 +777,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFEE/tripupdates",
         "https://gtfs.picotransit.com/511SFEE/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "EE")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "EE"), AttributionPartner("511.org")),
     ),
     FAST_TRANSIT(
         "fast_transit",
@@ -779,7 +786,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFFS/tripupdates",
         "https://gtfs.picotransit.com/511SFFS/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "FS")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "FS"), AttributionPartner("511.org")),
     ),
     /** Separate operator from [GOLDEN_GATE_TRANSIT] (bus and ferry are distinct 511 codes). */
     GOLDEN_GATE_FERRY(
@@ -789,7 +796,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFGF/tripupdates",
         "https://gtfs.picotransit.com/511SFGF/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "GF")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "GF"), AttributionPartner("511.org")),
     ),
     PRESIDIO_GO(
         "presidio_go",
@@ -798,7 +805,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFPG/tripupdates",
         "https://gtfs.picotransit.com/511SFPG/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "PG")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "PG"), AttributionPartner("511.org")),
     ),
     SFO_AIRPORT(
         "sfo_airport",
@@ -807,7 +814,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSI/tripupdates",
         "https://gtfs.picotransit.com/511SFSI/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SI")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SI"), AttributionPartner("511.org")),
     ),
     SOUTH_SAN_FRANCISCO(
         "south_san_francisco",
@@ -816,7 +823,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFSS/tripupdates",
         "https://gtfs.picotransit.com/511SFSS/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SS")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "SS"), AttributionPartner("511.org")),
     ),
     TREASURE_ISLAND_FERRY(
         "treasure_island_ferry",
@@ -825,7 +832,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFTF/tripupdates",
         "https://gtfs.picotransit.com/511SFTF/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "TF")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "TF"), AttributionPartner("511.org")),
     ),
     UNION_CITY_TRANSIT(
         "union_city_transit",
@@ -834,7 +841,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFUC/tripupdates",
         "https://gtfs.picotransit.com/511SFUC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "UC")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "UC"), AttributionPartner("511.org")),
     ),
     VACAVILLE_CITY_COACH(
         "vacaville_city_coach",
@@ -843,7 +850,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFVC/tripupdates",
         "https://gtfs.picotransit.com/511SFVC/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "VC")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "VC"), AttributionPartner("511.org")),
     ),
     VINE_TRANSIT(
         "vine_transit",
@@ -852,7 +859,7 @@ enum class GtfsAgency(
         "https://gtfs.picotransit.com/511SFVN/tripupdates",
         "https://gtfs.picotransit.com/511SFVN/vehiclepositions",
         timeZoneId = "America/Los_Angeles",
-        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "VN")),
+        components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "VN"), AttributionPartner("511.org")),
     ),
 
     /** Bus (primary) + Rail ([LaMetroRailSecondaryFeed], see that file's own doc) -- LACMTA publishes
@@ -1034,85 +1041,109 @@ enum class GtfsAgency(
     ),
 
     // Puget Sound region, regionalized like NYC and the SF Bay Area (see RegionalGroup.PUGET_SOUND).
-    // Each agency uses its own static feed rather than the consolidated regional zip, which is far
-    // too large for the phone. Realtime exists per agency through OneBusAway's Puget Sound API but
-    // needs a production API key, so these are "(No Live)" for now. Amtrak and Solid Ground EZ Loop
-    // are left out as not regional; Seattle Streetcar has no standalone feed.
+    // Every agency here gets live data through OneBusAway's Puget Sound API, via the proxy's
+    // /puget_sound/ routes. Amtrak and Solid Ground EZ Loop are left out as not regional; Seattle
+    // Streetcar is included in King County Metro's feed.
+    //
+    // King County Metro shows the legend King County's terms require (see [AttributionLegend]). The
+    // others credit Sound Transit alongside themselves (see [AttributionPartner]), since their data
+    // comes through Sound Transit.
     //
     // King County Metro, Pierce Transit, Community Transit, and Sound Transit are hosted on
     // soundtransit.org, whose cert chain ends at a root some device trust stores lack, so they
     // route through pico-transit-proxy's /<id>/static routes. The other five fetch directly.
     KING_COUNTY_METRO(
         "kcm",
-        "King County Metro (No Live)",
+        "King County Metro",
         "https://gtfs.picotransit.com/kcm/static",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/kcm/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/kcm/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/kcm/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        // Required by King County's Transit Data Terms of Use.
+        components = listOf(
+            AttributionLegend("Transit scheduling, geographic, and real-time data provided by permission of King County"),
+        ),
     ),
     PIERCE_TRANSIT(
         "pierce_transit",
-        "Pierce Transit (No Live)",
+        "Pierce Transit",
         "https://gtfs.picotransit.com/pierce_transit/static",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/pierce_transit/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/pierce_transit/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/pierce_transit/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
     INTERCITY_TRANSIT(
         "intercity_transit",
-        "Intercity Transit (No Live)",
+        "Intercity Transit",
         "https://gtfs.sound.obaweb.org/prod/19_gtfs.zip",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/intercity_transit/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/intercity_transit/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/intercity_transit/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
     KITSAP_TRANSIT(
         "kitsap_transit",
-        "Kitsap Transit (No Live)",
+        "Kitsap Transit",
         "https://gtfs.sound.obaweb.org/prod/20_gtfs.zip",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/kitsap_transit/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/kitsap_transit/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/kitsap_transit/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
     COMMUNITY_TRANSIT(
         "community_transit",
-        "Community Transit (No Live)",
+        "Community Transit",
         "https://gtfs.picotransit.com/community_transit/static",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/community_transit/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/community_transit/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/community_transit/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
     SOUND_TRANSIT(
         "sound_transit",
-        "Sound Transit (No Live)",
+        "Sound Transit",
         "https://gtfs.picotransit.com/sound_transit/static",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/sound_transit/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/sound_transit/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/sound_transit/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
     WA_STATE_FERRIES(
         "wa_state_ferries",
-        "Washington State Ferries (No Live)",
+        "Washington State Ferries",
         "https://gtfs.sound.obaweb.org/prod/95_gtfs.zip",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/wa_state_ferries/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/wa_state_ferries/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/wa_state_ferries/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
     SEATTLE_MONORAIL(
         "seattle_monorail",
-        "Seattle Center Monorail (No Live)",
+        "Seattle Center Monorail",
         "https://gtfs.sound.obaweb.org/prod/96_gtfs.zip",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/seattle_monorail/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/seattle_monorail/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/seattle_monorail/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
     EVERETT_TRANSIT(
         "everett_transit",
-        "Everett Transit (No Live)",
+        "Everett Transit",
         "https://gtfs.sound.obaweb.org/prod/97_gtfs.zip",
-        null,
-        null,
+        "https://gtfs.picotransit.com/puget_sound/everett_transit/tripupdates",
+        "https://gtfs.picotransit.com/puget_sound/everett_transit/vehiclepositions",
+        realtimeServiceAlertsUrl = "https://gtfs.picotransit.com/puget_sound/everett_transit/servicealerts",
         timeZoneId = "America/Los_Angeles",
+        components = listOf(AttributionPartner("Sound Transit")),
     ),
 
     ;

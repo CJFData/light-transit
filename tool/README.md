@@ -2,7 +2,7 @@
 
 Pico Transit is a friendly little companion for getting around on public transit: real schedules, live arrivals, connections at any stop, and a live map showing where your ride actually is. No ads, no clutter, no infinite scroll. Just "when's my bus," answered nicely. 🚏✨
 
-It covers **110 feeds**, with live tracking for MBTA, RIPTA, RTD Denver (with Bustang), LTC, STM Montréal, CTA, NYC Subway, LIRR, Metro-North, NYC buses, Nashville's WeGo, and the SF Bay Area's 511.org agencies. Colorado, Puget Sound, Metra, Pace, and LA Metro have schedules only for now. It's built on the [Light SDK](../), so it stays as calm and un-distracting as the rest of your Light experience. Screenshots and recent updates are in the [main README](../README.md).
+It covers **110 feeds**, with live tracking for MBTA, RIPTA, RTD Denver (with Bustang), LTC, STM Montréal, CTA, NYC Subway, LIRR, Metro-North, NYC buses, Nashville's WeGo, the SF Bay Area's 511.org agencies, and the 9 Puget Sound agencies. Colorado, Metra, Pace, and LA Metro have schedules only for now. It's built on the [Light SDK](../), so it stays as calm and un-distracting as the rest of your Light experience. Screenshots and recent updates are in the [main README](../README.md).
 
 ## 🗺️ What can it do?
 

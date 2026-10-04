@@ -195,6 +195,19 @@ class RegionalGtfsFeed(
 class TripDirectionColumn(val columnName: String) : AgencyComponent
 
 /**
+ * The exact attribution wording an agency's data license requires, shown word for word in place of
+ * the usual "Transit data © <publisher>" credit. Add one to any agency whose terms of use spell out
+ * a required legend.
+ */
+class AttributionLegend(val text: String) : AgencyComponent
+
+/**
+ * Credits the organization this agency's data comes through alongside the agency itself, e.g.
+ * "Sound Transit & Pierce Transit". Agencies sharing the same [name] are listed together after it.
+ */
+class AttributionPartner(val name: String) : AgencyComponent
+
+/**
  * A **fuzzy-run trip** is a live run with no trip in the static schedule to resolve to, unlike a
  * **run-associated trip** (see [RunAssociatedTripSource]), which has a real scheduled trip that the
  * live feed just doesn't identify by trip_id. Examples: GTFS-RT `ADDED` trips with no static

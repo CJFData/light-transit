@@ -28,6 +28,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.transit.gtfs.AgencyPreferences
+import com.thelightphone.transit.gtfs.AttributionLegend
+import com.thelightphone.transit.gtfs.AttributionPartner
 import com.thelightphone.transit.gtfs.BoardedFuzzyRun
 import com.thelightphone.transit.gtfs.BoardedFuzzyRunPreferences
 import com.thelightphone.transit.gtfs.BoardedTrip
@@ -837,7 +839,13 @@ class HomeScreenViewModel(
         if (!dbFile.exists()) return emptyList()
         val repo = GtfsRepository(dbFile)
         return try {
-            listOfNotNull(repo.getFeedAttribution()) +
+            val legend = agency.component<AttributionLegend>()?.text
+            val partner = agency.component<AttributionPartner>()?.name
+            // An agency that is its own partner (e.g. Sound Transit) is credited once, as the partner.
+            val credit = repo.getFeedAttribution()?.let {
+                if (partner == agency.displayName) it.copy(name = partner) else it.copy(partner = partner)
+            }
+            listOfNotNull(credit?.copy(requiredLegend = legend)) +
                 agency.components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl != null }
                     .map { FeedAttribution(it.name, url = null) }
         } catch (e: CancellationException) {
@@ -1100,10 +1108,28 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                     // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's own doc for
                     // exactly which GTFS file this comes from, plus one name per MultiGtfsFeed component with its own
                     // static feed (e.g. "Bustang" alongside RTD Denver's own). Tied to whichever agency is currently selected, not
-                    // just "ready", so it reads correctly even mid-sync.
-                    if (feedAttribution.isNotEmpty()) {
+                    // just "ready", so it reads correctly even mid-sync. An agency with a required legend
+                    // (see AttributionLegend) gets its own line with that exact wording instead. Agencies
+                    // credited through a partner (see AttributionPartner) are grouped after it, e.g.
+                    // "Sound Transit & Pierce Transit, Community Transit".
+                    val credits = feedAttribution.filter { it.requiredLegend == null }
+                    val partners = credits.mapNotNull { it.partner }.toSet()
+                    val creditParts = credits.filter { it.partner == null && it.name !in partners }.map { it.name } +
+                        credits.filter { it.partner != null }.groupBy { it.partner!! }.map { (partner, group) ->
+                            val agencies = group.map { it.name }.filter { it != partner }
+                            if (agencies.isEmpty()) partner else "$partner & " + agencies.joinToString(", ")
+                        }
+                    if (creditParts.isNotEmpty()) {
                         LightText(
-                            text = "Transit data © " + feedAttribution.joinToString(", ") { it.name },
+                            text = "Transit data © " + creditParts.joinToString(", "),
+                            variant = LightTextVariant.Detail,
+                            lighten = true,
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
+                        )
+                    }
+                    feedAttribution.mapNotNull { it.requiredLegend }.distinct().forEach { legend ->
+                        LightText(
+                            text = legend,
                             variant = LightTextVariant.Detail,
                             lighten = true,
                             modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),

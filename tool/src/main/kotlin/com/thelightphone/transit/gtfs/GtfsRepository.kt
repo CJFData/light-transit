@@ -132,8 +132,15 @@ data class StopLocation(
 
 /** The one line of required-by-convention attribution for wherever this agency's GTFS data came
  * from -- see [GtfsRepository.getFeedAttribution]'s own doc for the fallback chain that produces
- * this. [url] is informational only today (no screen renders it as a tappable link). */
-data class FeedAttribution(val name: String, val url: String?)
+ * this. [url] is informational only today (no screen renders it as a tappable link).
+ * [requiredLegend], when set (see [AttributionLegend]), is shown word for word instead of [name].
+ * [partner], when set (see [AttributionPartner]), is credited ahead of [name]. */
+data class FeedAttribution(
+    val name: String,
+    val url: String?,
+    val requiredLegend: String? = null,
+    val partner: String? = null,
+)
 
 data class ScheduledArrival(
     val tripId: String,

@@ -532,6 +532,55 @@ class SettingsScreen(
                 }
 
                 LightText(
+                    text = "Clear schedule cache",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "Deletes every agency's downloaded schedule from this device to free up " +
+                        "space. Your current agency starts re-downloading right away, in the " +
+                        "background.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .lightClickable {
+                            LightModalManager.show(
+                                modal = ClearCacheConfirmModal(onConfirm = { viewModel.clearScheduleCache() }),
+                                duration = Duration.INFINITE,
+                            )
+                        }
+                        .padding(vertical = 12.dp),
+                ) {
+                    LightText(
+                        text = "Clear cache",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                LightText(
+                    text = "Only download over Wi-Fi",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+                LightText(
+                    text = "When on, schedule downloads and update checks wait for Wi-Fi -- some " +
+                        "agencies' schedules are large enough to be a real cellular data cost. Your " +
+                        "last-downloaded schedule keeps working in the meantime.",
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 16.dp),
+                )
+                ToggleRow("Only download over Wi-Fi", wifiOnlyDownloadsEnabled, viewModel::setWifiOnlyDownloadsEnabled)
+
+                LightText(
                     text = "Location (Testing)",
                     variant = LightTextVariant.Copy,
                     lighten = true,
@@ -566,55 +615,6 @@ class SettingsScreen(
                                 .padding(bottom = 16.dp),
                         )
                     }
-                }
-
-                LightText(
-                    text = "Only download over Wi-Fi",
-                    variant = LightTextVariant.Copy,
-                    lighten = true,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
-                LightText(
-                    text = "When on, schedule downloads and update checks wait for Wi-Fi -- some " +
-                        "agencies' schedules are large enough to be a real cellular data cost. Your " +
-                        "last-downloaded schedule keeps working in the meantime.",
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(bottom = 16.dp),
-                )
-                ToggleRow("Only download over Wi-Fi", wifiOnlyDownloadsEnabled, viewModel::setWifiOnlyDownloadsEnabled)
-
-                LightText(
-                    text = "Clear schedule cache",
-                    variant = LightTextVariant.Copy,
-                    lighten = true,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
-                LightText(
-                    text = "Deletes every agency's downloaded schedule from this device to free up " +
-                        "space. Your current agency starts re-downloading right away, in the " +
-                        "background.",
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(bottom = 16.dp),
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .lightClickable {
-                            LightModalManager.show(
-                                modal = ClearCacheConfirmModal(onConfirm = { viewModel.clearScheduleCache() }),
-                                duration = Duration.INFINITE,
-                            )
-                        }
-                        .padding(vertical = 12.dp),
-                ) {
-                    LightText(
-                        text = "Clear cache",
-                        variant = LightTextVariant.Copy,
-                        modifier = Modifier.weight(1f),
-                    )
                 }
 
                 LightText(
