@@ -8,19 +8,24 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 
 ## 🔄 Recent updates
 
+**v0.5.0**
+- ⚠️ **Service alerts** (optional, turn on in Settings): detours, closures, and other service changes for MBTA, RTD, LTC, NYC Subway, NYC buses, LIRR, Metro-North, the SF Bay Area, and Puget Sound. See them on the home screen, as an alert icon on routes, stops, and trips, and as pop-ups when new ones arrive.
+- 🚇 **Closest match for every MBTA subway line**: trains Pico Transit can't match to a scheduled trip now get a closest match on all subway lines, not just the Green Line.
+- 🗺️ **More places**: SEPTA in Philadelphia, and a Southern New England region joining MBTA and RIPTA with 12 Massachusetts transit authorities and 8 ferries. 132 feeds in all.
+- 🙏 **Clearer data credits**: agencies whose data comes through 511.org or Sound Transit are now credited by their own names.
+- ✨ **Simpler Settings and About screens**, with short, plain descriptions.
+
 **v0.4.1**
 - 🌲 **Puget Sound, live**: King County Metro, Sound Transit, Pierce Transit, Community Transit, Kitsap Transit, Intercity Transit, Everett Transit, Washington State Ferries, and the Seattle Center Monorail now show live arrivals and vehicles, through Sound Transit's OneBusAway API.
 - 🙏 **Clearer data credits**: King County Metro shows the credit King County asks for, and agencies whose data comes through Sound Transit or 511.org credit them alongside the agency.
 - ⚙️ **Tidier Settings**: Clear schedule cache and Only download over Wi-Fi now sit right after the agency picker.
 - ⌨️ **Keyboard update**: after typing a symbol or number, the keyboard switches back to letters, like the LightOS keyboard.
 
-**v0.4.0**
+**Earlier**
 - 🗺️ **Easier-to-read maps**: street names are drawn larger, and each map loads with about a quarter as many tile requests.
 - 🚌 **CTA bus trips load much faster**: matching live buses to their scheduled trips no longer scans the whole schedule for every bus.
 - 🔍 **Explore search stays put**: typing an address is no longer interrupted when the background location lookup finishes.
 - 🔒 **A new home for live data**: the proxy moved to `gtfs.picotransit.com` and now only accepts the kinds of requests the app actually makes.
-
-**Earlier**
 - 🐛 **Steadier live tracking** on feeds with infrequent GPS updates. RIPTA also follows each vehicle along its real route path, so it catches up even when several stops pass between updates.
 - 🎶 **Nashville's WeGo, live**: added in honor of Dolly Parton, with full live tracking from day one.
 
@@ -28,7 +33,7 @@ The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## 🔭 Coming up
 
-- 📍 **Real GPS for Explore**: built and working, but marked **(Testing)** until LightOS trusts non-Light-signed builds for location. Address search works in the meantime.
+- 📍 **Real GPS for Explore**: built, but it needs a LightOS update before it can work, so it's marked **(Testing)** for now. Address search works in the meantime.
 - 🗺️ **Route shapes on the map**: drawing the real path between stops instead of straight lines (RIPTA's shapes are already read).
 - 🚏 **More agencies**, with help from the community.
 
@@ -252,7 +257,7 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
   ![alt text](docs/screenshots/Screenshot_20260801_211241.png)
 
-- 📍 **Explore**: the closest stops to you, nearest first (**Testing**, see above). Search for a different address or landmark any time, and Recenter to come back to your own location.
+- 📍 **Explore**: the closest stops to an address or landmark, nearest first. Finding stops near you with GPS is marked **Testing**, since it needs a LightOS update to work; once it does, Recenter brings you back to your own location.
 
   ![alt text](docs/screenshots/explore_nearby_stops.png)
   ![alt text](docs/screenshots/Screenshot_20260801_214943.png)
@@ -299,7 +304,7 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
   ![alt text](docs/screenshots/Screenshot_20260801_212013.png)
 
-- ⚙️ **Settings**: switch agencies, pick a light or dark map, choose gestures, turn Select Run options on or off, manage location, download only over Wi-Fi (on by default), or clear the schedule cache.
+- ⚙️ **Settings**: switch agencies, turn on service alerts (off by default) and choose where they show, pick a light or dark map, choose gestures, turn Select Run options on or off, manage location, download only over Wi-Fi (on by default), or clear the schedule cache.
 
   ![alt text](docs/screenshots/Screenshot_20260810_172700.png)
   ![alt text](docs/screenshots/Screenshot_20260801_215602.png)
@@ -333,7 +338,7 @@ That's it, happy transit-ing! 🚏🚌🚆
 
 - **Live data goes through `pico-transit-proxy`**, a small Cloudflare Worker at `gtfs.picotransit.com` (in its own repo). It only fetches a fixed list of upstream URLs, keeps every API key server-side, caches responses so riders share upstream requests, and accepts only the kinds of requests the app makes.
 - **Feeds fetched over plain HTTP** (RIPTA, LTC) reach the app over HTTPS through the proxy, so the app never uses cleartext.
-- **Explore's GPS** uses the Light SDK's location APIs. Address search uses Nominatim (OpenStreetMap), so please be kind to their free API! 🙏
+- **Explore's GPS** uses the Light SDK's location APIs and needs a LightOS update to work. Address search uses Nominatim (OpenStreetMap), so please be kind to their free API! 🙏
 - **Stations are grouped by GTFS `parent_station`**, so a big hub shows up once. Entrances, elevators, and escalators are left out of its platform map.
 - **Boarding is a saved reference, not a background tracker.** Live feeds are only polled while Trip Detail or the home screen is on screen.
 - **Agency APIs alongside GTFS-RT**: Pico Transit uses MBTA's V3 API for commuter rail tracks and positions, and matches CTA Bus Tracker data to scheduled trips by route and scheduled start time.
