@@ -36,12 +36,12 @@ private data class IconLegendEntry(val icon: LightIconConfiguration, val label: 
  * settings, search, this screen's own entry point) aren't map/data indicators, so they're left out
  * per the same reasoning that excluded them from the request this screen was built for. */
 private val ICON_LEGEND = listOf(
-    IconLegendEntry(LightIcons.DIRECTIONS_SUBWAY, "Subway / Light Rail vehicle"),
-    IconLegendEntry(LightIcons.DIRECTIONS_BUS, "Bus vehicle"),
-    IconLegendEntry(LightIcons.DIRECTIONS_TRAIN, "Commuter Rail vehicle"),
-    IconLegendEntry(LightIcons.DIRECTIONS_FERRY, "Ferry vehicle"),
-    IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Multi-platform station (tap to see all its platforms)"),
-    IconLegendEntry(LightIcons.DIRECTIONS_ARRIVAL, "Selected stop (large) / nearby stop (small) on the map"),
+    IconLegendEntry(LightIcons.DIRECTIONS_SUBWAY, "Subway or light rail"),
+    IconLegendEntry(LightIcons.DIRECTIONS_BUS, "Bus"),
+    IconLegendEntry(LightIcons.DIRECTIONS_TRAIN, "Commuter rail"),
+    IconLegendEntry(LightIcons.DIRECTIONS_FERRY, "Ferry"),
+    IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Station with several platforms; tap to see them"),
+    IconLegendEntry(LightIcons.DIRECTIONS_ARRIVAL, "Your selected stop (large) or a nearby stop (small)"),
 )
 
 /** Icons that show up around schedule selection/download, not on the map or HomeScreen's own
@@ -50,31 +50,31 @@ private val ICON_LEGEND = listOf(
  * picker and Additional Schedules; [LightIcons.REFRESH] appears inline next to the agency name on
  * HomeScreen while its schedule is being checked/downloaded. */
 private val SCHEDULE_ICON_LEGEND = listOf(
-    IconLegendEntry(LightIcons.DOWNLOAD_ARROW, "Agency schedule not yet downloaded (Transit Agency picker, Additional Schedules)"),
-    IconLegendEntry(LightIcons.REFRESH, "Checking for schedule updates (next to the agency name on the home screen)"),
+    IconLegendEntry(LightIcons.DOWNLOAD_ARROW, "Schedule not downloaded yet"),
+    IconLegendEntry(LightIcons.REFRESH, "Schedule downloading or checking for updates"),
 )
 
 /** HomeScreen's own bottom icon rows -- kept as a single list for the same reason as [ICON_LEGEND],
  * verified against HomeScreen.kt's own LightBottomBar item lists. */
 private val MENU_ICON_LEGEND = listOf(
-    IconLegendEntry(LightIcons.ELLIPSES, "About (this screen)"),
+    IconLegendEntry(LightIcons.ELLIPSES, "About"),
     IconLegendEntry(LightIcons.SETTINGS, "Settings"),
-    IconLegendEntry(LightIcons.LIST, "Schedule: browse today's static route schedule"),
-    IconLegendEntry(LightIcons.DIRECTIONS_PEDESTRIAN, "Explore: find nearby stops and live upcoming arrivals"),
-    IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Station: browse a transit authority's multi-platform stations"),
-    IconLegendEntry(LightIcons.PLAY, "Play/Board: on a Trip Detail screen, boards that trip. Everywhere else, shown once a trip's boarded, to jump back to its live tracking"),
-    IconLegendEntry(LightIcons.STOP, "Stop/Alight: Trip Detail's header, shown in place of Play while that trip is the one you've boarded; taps end tracking"),
-    IconLegendEntry(LightIcons.DELETE, "Trip switch warning: Trip Detail's header, shown next to Play when a DIFFERENT trip is already boarded; pressing play will board the currently viewed trip and end tracking of the previously boarded trip"),
-    IconLegendEntry(LightIcons.CIRCLE, "Home: every other screen's own footer button; jumps back to the Pico Transit HomeScreen"),
-    IconLegendEntry(LightIcons.EMERGENCY, "Alert: a service alert applies here; tap it to read the details"),
+    IconLegendEntry(LightIcons.LIST, "Schedule: browse routes and departure times"),
+    IconLegendEntry(LightIcons.DIRECTIONS_PEDESTRIAN, "Explore: nearby stops and live arrivals"),
+    IconLegendEntry(LightIcons.DIRECTIONS_MIDDLE_FORK, "Station: browse stations and their platforms"),
+    IconLegendEntry(LightIcons.PLAY, "Board this trip, or jump back to the trip you're on"),
+    IconLegendEntry(LightIcons.STOP, "Get off: stop tracking this trip"),
+    IconLegendEntry(LightIcons.DELETE, "You're on another trip; boarding this one ends it"),
+    IconLegendEntry(LightIcons.CIRCLE, "Back to the home screen"),
+    IconLegendEntry(LightIcons.EMERGENCY, "Service alert; tap to read it"),
 )
 
 /** Settings screen's own on/off toggles -- every one of them renders as one of these two icons
  * next to their label, per SettingsScreen's own ToggleRow. See SettingsScreen.kt for the current
  * list of toggles. */
 private val TOGGLE_ICON_LEGEND = listOf(
-    IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "Setting is on: tap the row to turn it off"),
-    IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Setting is off: tap the row to turn it on"),
+    IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "On; tap to turn off"),
+    IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Off; tap to turn on"),
 )
 
 class InfoScreenViewModel : LightViewModel<Unit>()
@@ -113,8 +113,7 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                     LightText(
-                        text = "A transit companion for the Light Phone III -- live arrivals, " +
-                            "schedules, and station maps.",
+                        text = "Schedules, live arrivals, and maps for public transit on the Light Phone III.",
                         variant = LightTextVariant.Copy,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 24.dp),
@@ -132,8 +131,7 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
                     LightText(
-                        text = "More coming soon. HomeScreen always credits whichever agency's GTFS " +
-                            "feed the data actually came from, near the bottom of the screen.",
+                        text = "More coming soon. Data credits are at the bottom of the home screen.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 24.dp),
@@ -146,21 +144,15 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     )
                     ModeEntry(
                         name = "Schedule",
-                        description = "Browse today's static route schedule: route, then direction, " +
-                            "then stop, then departure times, then the full trip's stop list.",
+                        description = "Pick a route, direction, and stop to see departure times and each trip's stops.",
                     )
                     ModeEntry(
                         name = "Explore",
-                        description = "Find nearby stops by your current location and see live " +
-                            "upcoming arrivals with status -- on time, early, or late.",
+                        description = "Find stops near an address and see live arrivals: on time, early, or late.",
                     )
                     ModeEntry(
                         name = "Station",
-                        description = "Browse every real multi-platform station an agency has (with a " +
-                            "live-filter search box once the list gets long enough to need one), and " +
-                            "view a zoomed-in map of a station's individual real platforms and gates. " +
-                            "For MBTA commuter rail, a vehicle shows up on its assigned track once " +
-                            "MBTA decides one.",
+                        description = "Browse stations, search them, and see a map of each station's platforms.",
                     )
 
                     LightText(
@@ -169,17 +161,9 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                     LightText(
-                        text = "Board a trip from its Trip Detail screen (Play/Stop icon, top right) to " +
-                            "make it your current trip. While boarded, HomeScreen replaces \"Choose " +
-                            "Transit Agency\" with your route, live ETA, and stops remaining to your " +
-                            "designated alight stop, and hides the agency list until you alight. If " +
-                            "the \"Trip progress bar\" setting is on, a bar with a vehicle-type marker " +
-                            "also shows live progress between your boarding and alight stops. Tap a " +
-                            "stop on Trip Detail to set (or clear) it as your alight stop -- reaching " +
-                            "it shows a \"You've reached your stop!\" message and ends tracking " +
-                            "automatically, whether you're on Trip Detail or HomeScreen at the time. " +
-                            "Boarding a trip from a downloaded schedule that isn't already your primary " +
-                            "agency (see Regional Schedules below) makes it your new primary.",
+                        text = "Tap Play on a trip to board it. The home screen then shows your route, " +
+                            "arrival time, and progress. Tap a stop in the trip to mark where you'll get " +
+                            "off; when you get there, you'll see a message and tracking ends.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 24.dp),
@@ -191,17 +175,23 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                         modifier = Modifier.padding(bottom = 8.dp),
                     )
                     LightText(
-                        text = "Some agencies belong to a region: New York City, Denver, and the San Francisco " +
-                            "Bay Area today. Regionalized feeds can be downloaded together instead of one at a " +
-                            "time for simpler cross-agency travel. Picking an agency that belongs to one from the \"Transit Agency\" " +
-                            "picker (first time, or Settings) first shows that region's own member " +
-                            "list to choose your primary feed. If your primary is regionalized, " +
-                            "Settings' \"Additional Schedules\" will be available to turn on any other schedule " +
-                            "in that same region to browse alongside it. Tap and hold another agency in the region there to " +
-                            "make it your new primary feed instead. HomeScreen's Schedule button opens a " +
-                            "\"Choose Schedule\" picker first whenever more than one of a region's " +
-                            "schedules is downloaded, going straight to the route list when there's " +
-                            "only one.",
+                        text = "New York City, Denver, the San Francisco Bay Area, and Puget Sound group " +
+                            "their agencies into regions. Add more of a region's schedules in Settings → " +
+                            "Additional Schedules to browse them together; tap and hold one there to make " +
+                            "it your main agency.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 24.dp),
+                    )
+
+                    LightText(
+                        text = "Service alerts",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    LightText(
+                        text = "Turn on Service alerts in Settings to see detours and closures, for " +
+                            "agencies that publish them. Look for the alert icon on routes, stops, and trips.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 24.dp),
@@ -253,41 +243,12 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     }
 
                     LightText(
-                        text = "Settings Toggles",
+                        text = "Settings",
                         variant = LightTextVariant.Copy,
                         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
                     )
                     LightText(
-                        text = "\"Only download over Wi-Fi\" (on by default) waits for Wi-Fi before " +
-                            "downloading or updating a schedule, so a large agency's schedule never " +
-                            "becomes a surprise cellular cost. Your last-downloaded schedule keeps " +
-                            "working meanwhile. \"Merge feed stations\" (on by default) folds a " +
-                            "MultiGtfsFeed secondary's own stops into the same physical station as its " +
-                            "parent agency's, e.g. Bustang's gates at RTD Denver's Union Station, " +
-                            "rather than showing them as a separate station of their own. \"Track " +
-                            "tapped stops\" (a tapped-open stop on the Map screen also contributes its " +
-                            "own live vehicles) lives here too, alongside \"Tap and hold a stop\", " +
-                            "\"Double-tap to open a station\", \"Trip progress bar\", and \"Daily " +
-                            "message\" (the small rotating message near the bottom of the home " +
-                            "screen). \"Include longer trips in departures\" (on by default) widens a " +
-                            "route/direction's departures list to also include any trip that runs at " +
-                            "least as far as the direction you picked. \"Run selection\" (on by " +
-                            "default, with a nested \"Next and previous buttons\" toggle, off by " +
-                            "default) lets you correct a boarded CTA 'L' or MBTA subway trip's " +
-                            "automatic closest-live-train match yourself. \"Stations list opens " +
-                            "arrivals on tap\" (on by default) makes a plain tap in the Stations list " +
-                            "jump straight to a station's live arrivals instead of its platform map -- " +
-                            "tap and hold opens the platform map instead. \"See everything\" shows " +
-                            "every live vehicle in view on the Map/Station map, each labeled with just " +
-                            "its route until tapped; \"Filter by stop\" and per-mode \"Modes shown\" " +
-                            "toggles refine it further and only appear once it's on. \"Tap and hold -- " +
-                            "Schedules\" and \"Tap and hold -- Stations\" (both on by default) add the " +
-                            "same tap-and-hold-for-arrivals gesture to the Schedule stop list and the " +
-                            "Stations list. \"Tap and hold -- Vehicles\" (on by default) opens a live " +
-                            "vehicle's own Trip Detail when tapped and held on the Map screen or a " +
-                            "Station map. \"Randomize daily message\" (off by default) only appears " +
-                            "once \"Daily message\" itself is on, and picks a fresh message at random " +
-                            "each time you return to the home screen instead of once per calendar day.",
+                        text = "Each setting describes what it does on the Settings screen.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 8.dp),
