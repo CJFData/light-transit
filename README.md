@@ -34,7 +34,7 @@ The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## 🚏 Agencies and live data
 
-Everything Pico Transit covers, and what each agency publishes live.
+Everything Pico Transit covers, and which live data it uses for each. A dash means Pico Transit doesn't use that data for the agency yet.
 
 **Southern New England**
 
@@ -218,11 +218,11 @@ Everything Pico Transit covers, and what each agency publishes live.
 | Washington State Ferries | ✓ | ✓ | ✓ | ✓ |
 | Seattle Center Monorail | ✓ | ✓ | ✓ | ✓ |
 
-¹ MBTA Green Line trains are matched to the schedule as a "closest match", since most run as unscheduled added trips. Commuter rail positions and track numbers come from MBTA's V3 API.  
+¹ MBTA subway trains that Pico Transit can't match to a scheduled trip are shown as a "closest match". Commuter rail positions and track numbers come from MBTA's V3 API.  
 ² RTD Denver includes Bustang's routes and live vehicles.  
-³ CTA doesn't publish standard GTFS-RT. Buses use CTA Bus Tracker (predicted arrivals and positions, matched to scheduled trips). 'L' trains use Train Tracker as a "closest match" for live arrivals and boarded trips, and aren't drawn on the map yet.  
-⁴ BART publishes no vehicle positions; arrivals come from trip updates.  
-⁵ NYC Subway trains have no GPS, so they're shown at their current stop.  
+³ For CTA, Pico Transit uses CTA Bus Tracker for buses (predicted arrivals and positions, matched to scheduled trips) and Train Tracker for 'L' trains, shown as a "closest match" for live arrivals and boarded trips. 'L' trains aren't drawn on the map yet.  
+⁴ Pico Transit doesn't show live BART vehicle positions; BART arrivals come from trip updates.  
+⁵ Pico Transit shows NYC Subway trains at their current stop rather than at a GPS position.  
 ⁶ Service alerts are optional. Turn them on in Settings → Service alerts.
 
 ## 🗺️ What can it do?
@@ -281,7 +281,7 @@ Everything Pico Transit covers, and what each agency publishes live.
 
   ![alt text](docs/screenshots/pre-arrival.png)
 
-- 🚋 **Select Run**, for CTA 'L' trains and MBTA Green Line: their live feeds can't be matched to a scheduled trip for certain, so Pico Transit shows a "Closest match". Select Run lets you confirm or correct it by tapping the vehicle you're actually on.
+- 🚋 **Select Run**, for CTA 'L' trains and MBTA subway lines: when Pico Transit can't match a live train to a scheduled trip for certain, it shows a "Closest match". Select Run lets you confirm or correct it by tapping the vehicle you're actually on.
 
   ![alt text](docs/screenshots/fuzzy_runs.png)
 
@@ -289,6 +289,11 @@ Everything Pico Transit covers, and what each agency publishes live.
 
   ![alt text](docs/screenshots/Screenshot_20260810_172500.png)  ![alt text](docs/screenshots/Screenshot_20260801_212055.png)
   ![alt text](docs/screenshots/Screenshot_20260817_233823.png)  ![alt text](docs/screenshots/Screenshot_20260820_003442.png)
+
+- ⚠️ **Service alerts** (optional, turn on in Settings): detours, closures, and other service changes, for agencies with an alerts feed. The home screen shows your trip's alerts while you're on one. An alert icon marks affected routes, stops, and trips, and tapping it opens the full alert: what it affects, how long it lasts, and the details. New alerts can also pop up as they come in.
+
+  ![Home screen showing an alert under the trip progress bar](docs/screenshots/alerts_home.png)  ![Route list with alert icons](docs/screenshots/alerts_routes.png)
+  ![Trip Detail with alert icons at the top and beside a stop](docs/screenshots/alerts_trip.png)  ![An open service alert](docs/screenshots/alerts_modal.png)
 
 - ↩️ **Jump back anytime**: a Play icon in the corner takes you back to your trip from any screen, and the footer circle takes you home.
 
@@ -327,14 +332,14 @@ That's it, happy transit-ing! 🚏🚌🚆
 ## 🧪 A few nerdy notes
 
 - **Live data goes through `pico-transit-proxy`**, a small Cloudflare Worker at `gtfs.picotransit.com` (in its own repo). It only fetches a fixed list of upstream URLs, keeps every API key server-side, caches responses so riders share upstream requests, and accepts only the kinds of requests the app makes.
-- **HTTP-only feeds** (RIPTA, LTC) reach the app over HTTPS through the proxy, so the app never uses cleartext.
+- **Feeds fetched over plain HTTP** (RIPTA, LTC) reach the app over HTTPS through the proxy, so the app never uses cleartext.
 - **Explore's GPS** uses the Light SDK's location APIs. Address search uses Nominatim (OpenStreetMap), so please be kind to their free API! 🙏
 - **Stations are grouped by GTFS `parent_station`**, so a big hub shows up once. Entrances, elevators, and escalators are left out of its platform map.
 - **Boarding is a saved reference, not a background tracker.** Live feeds are only polled while Trip Detail or the home screen is on screen.
-- **Agency APIs fill gaps in GTFS-RT**: MBTA's V3 API provides commuter rail tracks and positions, and CTA's Bus Tracker is matched to scheduled trips by route and scheduled start time.
-- **"Closest match"** pairs live CTA 'L' runs and MBTA Green Line trips with the nearest scheduled trip in order, since neither can be matched exactly. These aren't plotted on the map yet.
+- **Agency APIs alongside GTFS-RT**: Pico Transit uses MBTA's V3 API for commuter rail tracks and positions, and matches CTA Bus Tracker data to scheduled trips by route and scheduled start time.
+- **"Closest match"** pairs live CTA 'L' runs and MBTA subway trains that Pico Transit can't match exactly with the nearest scheduled trip, in order. These aren't plotted on the map yet.
 - **NYC Subway's 8 line-group feeds** are merged by the proxy into one, and their trip IDs are decoded back to real scheduled trips.
-- **The SF Bay Area shares one upstream feed**: 511.org publishes one regional feed, which the proxy fetches once and slices per agency.
+- **One upstream feed for the SF Bay Area**: the proxy fetches 511.org's regional feed once and slices it per agency.
 - **Map tiles** come from CARTO through the proxy. Each 512px tile is cut into four, which keeps requests down and makes street names easier to read.
 
 ## 🙌 Credits
