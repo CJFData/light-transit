@@ -603,9 +603,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "Deletes every agency's downloaded schedule from this device to free up " +
-                        "space. Your current agency starts re-downloading right away, in the " +
-                        "background.",
+                    text = "Deletes downloaded schedules to free up space. Your current agency " +
+                        "downloads again right away.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -636,9 +635,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, schedule downloads and update checks wait for Wi-Fi -- some " +
-                        "agencies' schedules are large enough to be a real cellular data cost. Your " +
-                        "last-downloaded schedule keeps working in the meantime.",
+                    text = "Schedule downloads and updates wait for Wi-Fi. Your current schedule " +
+                        "keeps working until then.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -652,7 +650,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "Shows detours, closures, and other service changes, for agencies that publish them.",
+                    text = "Detours, closures, and other service changes, for agencies that publish " +
+                        "them. Show in menus adds an alert icon to routes, stops, and trips.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -672,7 +671,7 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "Lets Explore rank stops by distance from where you are, instead of only by a searched address.",
+                    text = "Explore sorts nearby stops by where you are, not just by an address you search.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -709,9 +708,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, a merged secondary feed's stops at the same physical station as " +
-                        "one of its parent agency's own are grouped into that station -- e.g. Bustang's " +
-                        "gates at RTD Denver's Union Station.",
+                    text = "Groups a partner service's stops into the main agency's stations, like " +
+                        "Bustang's gates at Denver's Union Station.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -725,7 +723,7 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "Choose which map tiles the Map screen uses.",
+                    text = "Light or dark map.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -760,14 +758,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on (the default for all three below), tap and hold a stop or station to " +
-                        "jump straight to its live upcoming arrivals instead of whatever a plain tap would " +
-                        "open there. Three separate toggles since each covers a different screen: Map (any " +
-                        "stop marker, or a station's own name while already viewing its platform map), " +
-                        "Schedules (a stop while choosing where to board, after picking a route and " +
-                        "direction -- a plain tap there still shows that route's scheduled times either " +
-                        "way), and Stations (a row in the Stations list -- see the toggle just below for " +
-                        "why a plain tap there might already open arrivals instead).",
+                    text = "Tap and hold a stop or station to see its live arrivals. Choose where " +
+                        "this works: on the map, in schedule stop lists, and in the Stations list.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -777,10 +769,8 @@ class SettingsScreen(
                 ToggleRow("Stations", tapHoldStationArrivalsEnabled, viewModel::setTapHoldStationArrivalsEnabled)
 
                 LightText(
-                    text = "On by default -- in the Stations list only, a plain tap opens a station's live " +
-                        "upcoming arrivals directly (its platform map is still one tap away from there), " +
-                        "and the \"Stations\" toggle above switches instead to gating tap-and-hold. Off, " +
-                        "a plain tap there goes back to opening the platform map.",
+                    text = "In the Stations list, a tap opens live arrivals and tap and hold opens " +
+                        "the platform map. Turn off to swap them.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -794,14 +784,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on (the default), a route/direction's departures list also includes " +
-                        "any trip that runs at least as far as the direction you picked -- e.g. picking " +
-                        "\"Toward Readville\" on MBTA's Franklin/Foxboro Line also shows \"Toward South " +
-                        "Station\" departures at a stop they share, since either one gets you to " +
-                        "Readville. It never works the other way around: picking \"Toward South Station\" " +
-                        "never shows a Readville-only departure, since that trip doesn't reach that far. " +
-                        "When off, departures match the picked direction exactly, with no broader trips " +
-                        "mixed in either way.",
+                    text = "Also lists trips that go past your destination, since they still get you " +
+                        "there. Turn off to see only trips that end where you picked.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -809,19 +793,18 @@ class SettingsScreen(
                 ToggleRow("Include longer trips in departures", includeLongerTripsEnabled, viewModel::setIncludeLongerTripsEnabled)
 
                 LightText(
-                    text = "Tap and hold -- Vehicles",
+                    text = "Tap and hold vehicles",
                     variant = LightTextVariant.Copy,
                     lighten = true,
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, tap and hold a live vehicle on the Map screen or a Station map to " +
-                        "open that vehicle's own Trip Detail.",
+                    text = "Tap and hold a live vehicle on a map to open its trip.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
-                ToggleRow("Tap and hold -- Vehicles", tapHoldVehicleEnabled, viewModel::setTapHoldVehicleEnabled)
+                ToggleRow("Tap and hold vehicles", tapHoldVehicleEnabled, viewModel::setTapHoldVehicleEnabled)
 
                 LightText(
                     text = "Run selection",
@@ -830,12 +813,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "On a boarded CTA 'L' or MBTA Green Line trip, the app matches your trip to " +
-                        "the closest live train automatically, but that match is only ever an " +
-                        "approximation -- this lets you correct it yourself. When on (the default), a " +
-                        "\"Select Run\" row appears under a boarded trip's own header that opens a full " +
-                        "list of every live run in your direction -- each shown on the trip's own stop " +
-                        "list with its current stop and status -- to pick from directly.",
+                    text = "On CTA 'L' and MBTA Green Line trips, the app guesses which live train " +
+                        "you're on. Select Run lets you pick the right one.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -847,15 +826,13 @@ class SettingsScreen(
                 // setting, so it's nested here rather than always visible.
                 if (runSelectionEnabled) {
                     LightText(
-                        text = "When on, fast-forward/rewind icons also flank the \"Select Run\" label " +
-                            "itself, for a one-tap nudge through the same live runs without opening the " +
-                            "full list. Off by default -- the label alone (tap to open the list) is the " +
-                            "default experience.",
+                        text = "Adds next and previous buttons beside Select Run to switch trains " +
+                            "with one tap.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
                     )
-                    ToggleRow("Next/Previous run steppers", runStepperEnabled, viewModel::setRunStepperEnabled)
+                    ToggleRow("Next and previous buttons", runStepperEnabled, viewModel::setRunStepperEnabled)
                 }
 
                 LightText(
@@ -865,9 +842,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, a boarded trip's own stop list also shows the stops before where " +
-                        "you got on, greyed out, so you can see the vehicle's live position as it " +
-                        "approaches your stop instead of only after it arrives. Off by default.",
+                    text = "On a boarded trip, also shows the stops before yours, so you can watch " +
+                        "your ride approach.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -875,16 +851,14 @@ class SettingsScreen(
                 ToggleRow("Show earlier stops", showStopsBeforeBoardingEnabled, viewModel::setShowStopsBeforeBoardingEnabled)
 
                 LightText(
-                    text = "Double-tap to zoom station maps, tap and hold for arrivals",
+                    text = "Double-tap stations",
                     variant = LightTextVariant.Copy,
                     lighten = true,
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "On the Map screen: double-tap a multi-platform station to zoom into its own " +
-                        "platforms, then double-tap its name to zoom back out (toggle below). Tap and " +
-                        "hold a stop or station name instead for its live upcoming arrivals (\"Map\" " +
-                        "toggle above).",
+                    text = "On the map, double-tap a station to see its platforms. Double-tap its " +
+                        "name to zoom back out.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -898,8 +872,7 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, a nearby stop you've tapped open on the Map screen also contributes its " +
-                        "own live vehicles to the map, not just its name label.",
+                    text = "When you tap a stop on the map, its live vehicles show too.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -913,12 +886,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on (the default), the Map screen and Station map show every live vehicle " +
-                        "in view, not just ones actually relevant to the stop you're looking at -- each " +
-                        "labeled with just its route until tapped, which shows its full details. When off, " +
-                        "the map shows only vehicles whose own trip is scheduled to serve a stop currently " +
-                        "in view, matched against that stop's own upcoming departures -- fewer markers, but " +
-                        "each one is guaranteed relevant to a stop on screen.",
+                    text = "Shows every live vehicle on the map. Turn off to see only vehicles " +
+                        "headed to stops on screen.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -933,9 +902,7 @@ class SettingsScreen(
                         modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                     )
                     LightText(
-                        text = "When on, tap a stop on the map to narrow \"See everything\" down to just " +
-                            "vehicles heading to, arrived at, or departed from it -- labeled e.g. \"SL1-TO\", " +
-                            "\"SL1-AT\", \"SL1-FROM\".",
+                        text = "Tap a stop to show only vehicles heading to, at, or leaving it.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 16.dp),
@@ -949,7 +916,7 @@ class SettingsScreen(
                         modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                     )
                     LightText(
-                        text = "Which vehicle types \"See everything\" plots -- all three on by default.",
+                        text = "Which vehicle types to show.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 16.dp),
@@ -966,8 +933,7 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, HomeScreen shows a progress bar from your boarding stop to your alight " +
-                        "stop while a trip is boarded.",
+                    text = "While you're on a trip, the home screen shows how far you've gone.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -981,7 +947,7 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When on, HomeScreen shows a small rotating message near the bottom of the screen.",
+                    text = "A short message on the home screen that changes each day.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -996,8 +962,7 @@ class SettingsScreen(
                         modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                     )
                     LightText(
-                        text = "When on, the message is picked at random every time you return to " +
-                            "the home screen, instead of once per calendar day.",
+                        text = "A new message each time you open the home screen.",
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         modifier = Modifier.padding(bottom = 16.dp),
