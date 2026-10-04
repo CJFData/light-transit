@@ -114,6 +114,34 @@ enum class RegionalGroup(val id: String, val displayName: String, val members: L
             GtfsAgency.SEATTLE_MONORAIL,
         ),
     ),
+    /** SEPTA's two feeds: buses, Metro, and trolleys in one, Regional Rail in the other. */
+    PHILADELPHIA("philadelphia", "Philadelphia", listOf(GtfsAgency.SEPTA_BUS, GtfsAgency.SEPTA_RAIL)),
+    /** Massachusetts regional transit authorities and ferries. */
+    MASSACHUSETTS(
+        "massachusetts",
+        "Massachusetts",
+        listOf(
+            GtfsAgency.SRTA,
+            GtfsAgency.MERRIMACK_VALLEY_TRANSIT,
+            GtfsAgency.BERKSHIRE_RTA,
+            GtfsAgency.BROCKTON_AREA_TRANSIT,
+            GtfsAgency.CAPE_ANN_TRANSPORTATION,
+            GtfsAgency.CAPE_COD_RTA,
+            GtfsAgency.FRANKLIN_RTA,
+            GtfsAgency.LOWELL_RTA,
+            GtfsAgency.METROWEST_RTA,
+            GtfsAgency.MONTACHUSETT_RTA,
+            GtfsAgency.NANTUCKET_WAVE,
+            GtfsAgency.PIONEER_VALLEY_TRANSIT,
+            GtfsAgency.BAY_STATE_CRUISE,
+            GtfsAgency.CUTTYHUNK_FERRY,
+            GtfsAgency.FREEDOM_CRUISE_LINE,
+            GtfsAgency.HY_LINE_CRUISES,
+            GtfsAgency.PATRIOT_PARTY_BOATS,
+            GtfsAgency.SEASTREAK,
+            GtfsAgency.VINEYARD_FAST_FERRY,
+        ),
+    ),
     ;
 
     companion object {

@@ -2,7 +2,7 @@
 
 Pico Transit is a friendly little companion for getting around on public transit: real schedules, live arrivals, connections at any stop, and a live map showing where your ride actually is. No ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-It covers **110 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, the SF Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more), and all 9 **Puget Sound** agencies (King County Metro, Sound Transit, and more). The rest have schedules only for now: about 40 Colorado agencies, Metra, Pace, and LA Metro.
+It covers **132 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, the SF Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more), and all 9 **Puget Sound** agencies (King County Metro, Sound Transit, and more). The rest have schedules only for now: about 40 Colorado agencies, SEPTA, 19 Massachusetts transit authorities and ferries, Block Island Ferry, Metra, Pace, and LA Metro.
 
 Use it on its own or alongside the Light Phone's Directions tool. It's built on the [Light SDK](https://github.com/lightphone/light-sdk), so it stays as calm and un-distracting as the rest of your Light experience.
 
@@ -44,6 +44,7 @@ Everything Pico Transit covers, and what each agency publishes live.
 | RIPTA | ✓ | ✓ | ✓ | — |
 | LTC Ontario | ✓ | ✓ | ✓ | ✓ |
 | STM Montréal | ✓ | ✓ | ✓ | — |
+| Block Island Ferry | ✓ | — | — | — |
 
 **New York City**
 
@@ -159,6 +160,37 @@ Everything Pico Transit covers, and what each agency publishes live.
 | Union City Transit | ✓ | ✓ | ✓ | ✓ |
 | Vacaville City Coach | ✓ | ✓ | ✓ | ✓ |
 | VINE Transit | ✓ | ✓ | ✓ | ✓ |
+
+**Massachusetts**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| SRTA | ✓ | — | — | — |
+| Merrimack Valley Transit | ✓ | — | — | — |
+| Berkshire RTA | ✓ | — | — | — |
+| Brockton Area Transit | ✓ | — | — | — |
+| Cape Ann Transportation | ✓ | — | — | — |
+| Cape Cod RTA | ✓ | — | — | — |
+| Franklin RTA | ✓ | — | — | — |
+| Lowell RTA | ✓ | — | — | — |
+| MetroWest RTA | ✓ | — | — | — |
+| Montachusett RTA | ✓ | — | — | — |
+| Nantucket - The WAVE | ✓ | — | — | — |
+| Pioneer Valley Transit | ✓ | — | — | — |
+| Bay State Cruise Company | ✓ | — | — | — |
+| Cuttyhunk Ferry | ✓ | — | — | — |
+| Freedom Cruise Line | ✓ | — | — | — |
+| Hy-Line Cruises | ✓ | — | — | — |
+| Patriot Party Boats | ✓ | — | — | — |
+| Seastreak | ✓ | — | — | — |
+| Vineyard Fast Ferry | ✓ | — | — | — |
+
+**Philadelphia**
+
+| Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|---|:-:|:-:|:-:|:-:|
+| SEPTA Bus & Metro | ✓ | — | — | — |
+| SEPTA Regional Rail | ✓ | — | — | — |
 
 **Nashville**
 

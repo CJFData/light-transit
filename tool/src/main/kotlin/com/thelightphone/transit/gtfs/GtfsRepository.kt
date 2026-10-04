@@ -29,7 +29,8 @@ data class RouteOption(
 enum class LineType(val gtfsRouteTypes: Set<Int>, val label: String, val emoji: String) {
     SUBWAY(setOf(0, 1), "Subway/Light Rail", "🚇"),
     COMMUTER_RAIL(setOf(2), "Commuter Rail", "🚆"),
-    BUS(setOf(3), "Bus", "🚌"),
+    // 11 is a trackless trolley (trolleybus), which riders treat as a bus.
+    BUS(setOf(3, 11), "Bus", "🚌"),
     FERRY(setOf(4), "Ferry", "⛴️");
 
     companion object {
