@@ -91,10 +91,17 @@ fun normalizeAlerts(feed: GtfsRtAlertFeedMessage, agencyId: String): List<Alert>
         )
     }
 
-/** Rewrites each selector's stop_id with [bridge], for agencies whose realtime stop_ids differ from
- * their schedule's. A stop_id the bridge can't convert is kept as it is. */
-fun List<Alert>.bridgeStopIds(bridge: (String) -> String?): List<Alert> = map { alert ->
-    alert.copy(selectors = alert.selectors.map { s -> s.stopId?.let(bridge)?.let { s.copy(stopId = it) } ?: s })
+/** Rewrites each selector's stop_id and route_id, for agencies whose realtime ids differ from their
+ * schedule's. An id the bridge can't convert is kept as it is. */
+fun List<Alert>.bridgeIds(stopId: (String) -> String?, routeId: (String) -> String?): List<Alert> = map { alert ->
+    alert.copy(
+        selectors = alert.selectors.map { s ->
+            s.copy(
+                stopId = s.stopId?.let { raw -> stopId(raw) ?: raw },
+                routeId = s.routeId?.let { raw -> routeId(raw) ?: raw },
+            )
+        },
+    )
 }
 
 /** The English translation, falling back to the first one. */

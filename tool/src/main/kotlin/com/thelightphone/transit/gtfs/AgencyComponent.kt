@@ -128,30 +128,41 @@ interface RealtimeTripIdBridge : AgencyComponent {
 }
 
 /**
- * An agency whose realtime feed's own StopTimeUpdate.stop_id values don't match its static
- * schedule's stop_id space. Applied by [fetchTripUpdate] the same way [RealtimeTripIdBridge] is:
- * each StopTimeUpdate's own raw stop_id is rewritten to the matching local static stop_id right
- * after parsing, so every existing downstream consumer ([GtfsRtTripUpdate.updateFor], etc.) keeps
- * reading a plain, already-real stop_id with zero awareness this agency needed bridging at all. Not
- * wired into [fetchVehiclePosition] -- [GtfsRtVehiclePosition] carries no stop_id field of its own,
- * only [GtfsRtVehiclePosition.currentStopSequence], which this mismatch never touches.
+ * An agency whose realtime feeds use different stop_ids or route_ids from its static schedule.
+ * Trip updates ([fetchTripUpdate]) have each StopTimeUpdate's stop_id rewritten right after
+ * parsing, so downstream consumers ([GtfsRtTripUpdate.updateFor], etc.) see real stop_ids. Alerts
+ * have both their stop_ids and route_ids rewritten. Not wired into [fetchVehiclePosition]:
+ * [GtfsRtVehiclePosition] carries no stop_id, and vehicles are matched by trip_id.
  */
-interface RealtimeStopIdBridge : AgencyComponent {
+interface RealtimeIdBridge : AgencyComponent {
     /** Converts one raw stop_id from the realtime feed into this agency's own static schedule's
      * stop_id space, or null if it doesn't match this agency's expected format -- treated the same
      * as any other "no match" case, never guessed. */
     fun bridgeStopId(rawStopId: String): String?
+
+    /** Converts one raw route_id from the realtime feed into the static schedule's route_id, or
+     * null when there's no match. [routeIdsByShortName] maps the schedule's route_short_name to its
+     * route_id. */
+    fun bridgeRouteId(rawRouteId: String, routeIdsByShortName: Map<String, String>): String? = null
 }
 
 /**
- * [RealtimeStopIdBridge] for 511.org's SF Bay Area regional feed: each operator's stop_ids get a
- * fixed leading-digit [prefix] plus the native stop_id zero-padded to 4 digits (VTA's prefix is
- * "6"). Copy [prefix] from a real feed sample, never guess it. Returns null for a stop_id without
- * [prefix], or one that isn't numeric after stripping it.
+ * [RealtimeIdBridge] for an agency whose realtime comes from 511.org's SF Bay Area regional feed
+ * while its schedule comes from the agency itself (VTA).
+ *
+ * Stops: 511 gives each operator's stop_ids a fixed leading-digit [stopIdPrefix] plus the native
+ * stop_id zero-padded to 4 digits (VTA's prefix is "6"). Copy [stopIdPrefix] from a real feed
+ * sample, never guess it. A stop_id without the prefix, or not numeric after it, returns null.
+ *
+ * Routes: 511 uses the operator's route_short_name as its route_id (VTA's "Blue Line" is route_id
+ * "Blue", "Rapid 522" is "522"), verified against a live VTA sample on 2026-10-04.
  */
-class RegionalStopIdPrefixBridge(private val prefix: String) : RealtimeStopIdBridge {
+class RegionalIdBridge(private val stopIdPrefix: String) : RealtimeIdBridge {
     override fun bridgeStopId(rawStopId: String): String? =
-        rawStopId.removePrefix(prefix).takeIf { it != rawStopId }?.toIntOrNull()?.toString()
+        rawStopId.removePrefix(stopIdPrefix).takeIf { it != rawStopId }?.toIntOrNull()?.toString()
+
+    override fun bridgeRouteId(rawRouteId: String, routeIdsByShortName: Map<String, String>): String? =
+        routeIdsByShortName[rawRouteId]
 }
 
 /**

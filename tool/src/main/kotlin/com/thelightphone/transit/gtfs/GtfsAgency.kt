@@ -522,8 +522,8 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(RegionalGtfsFeed("511.org SF Bay Area", "CT"), AttributionPartner("511.org")),
     ),
-    /** Static comes from gtfs.vta.org (via the proxy) rather than 511, so realtime stop_ids go through
-     * [RegionalStopIdPrefixBridge]. */
+    /** Static comes from gtfs.vta.org (via the proxy) rather than 511, so realtime stop_ids and
+     * route_ids go through [RegionalIdBridge]. */
     VTA(
         "vta",
         "VTA",
@@ -535,7 +535,7 @@ enum class GtfsAgency(
         components = listOf(
             RegionalGtfsFeed("511.org SF Bay Area", "SC"),
             AttributionPartner("511.org"),
-            RegionalStopIdPrefixBridge("6"),
+            RegionalIdBridge(stopIdPrefix = "6"),
         ),
     ),
 

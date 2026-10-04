@@ -250,11 +250,14 @@ class AlertsTest {
     }
 
     @Test
-    fun stopIdBridgeRewritesOnlyStopsItRecognizes() {
-        val bridge = RegionalStopIdPrefixBridge("6")
-        val bridged = listOf(alert(selectors = arrayOf(sel(stop = "60123"), sel(stop = "14658"), sel(route = "22"))))
-            .bridgeStopIds(bridge::bridgeStopId)
+    fun idBridgeRewritesOnlyIdsItRecognizes() {
+        val bridge = RegionalIdBridge(stopIdPrefix = "6")
+        val routes = mapOf("Blue Line" to "Blue", "22" to "22")
+        val bridged = listOf(alert(selectors = arrayOf(sel(stop = "60123"), sel(stop = "14658"), sel(route = "Blue Line"), sel(route = "Mystery"))))
+            .bridgeIds(bridge::bridgeStopId) { bridge.bridgeRouteId(it, routes) }
             .single()
-        assertEquals(listOf("123", "14658", null), bridged.selectors.map { it.stopId })
+        assertEquals(listOf("123", "14658", null, null), bridged.selectors.map { it.stopId })
+        assertEquals(listOf(null, null, "Blue", "Mystery"), bridged.selectors.map { it.routeId })
+        assertEquals(1, AlertIndex(listOf(bridged), noStations, 72, 0).forRoute("Blue").size)
     }
 }

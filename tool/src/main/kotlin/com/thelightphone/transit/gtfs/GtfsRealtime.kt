@@ -337,6 +337,17 @@ private fun matchesOwnRoute(rawRouteId: String?, prefixedTripId: String, prefix:
     return repository.getRouteIdForTrip(prefixedTripId) == "$prefix$rawRouteId"
 }
 
+/** Rewrites a live route_id into the schedule's, for an agency with a [RealtimeIdBridge]; null
+ * for every other agency. Built once per fetch. */
+private fun GtfsAgency.realtimeRouteIdBridge(repository: GtfsRepository): ((String) -> String?)? {
+    val bridge = components.filterIsInstance<RealtimeIdBridge>().firstOrNull() ?: return null
+    val routeIdsByShortName = repository.getRouteIdsByShortName()
+    return { raw -> bridge.bridgeRouteId(raw, routeIdsByShortName) }
+}
+
+private fun GtfsRtTripDescriptor.withBridgedRouteId(bridge: ((String) -> String?)?): GtfsRtTripDescriptor =
+    bridge?.let { b -> routeId?.let(b)?.let { copy(routeId = it) } } ?: this
+
 /**
  * Looks up a single trip's live TripUpdate from whichever of this agency's realtime feeds owns
  * [tripId] -- its own primary feed for an unprefixed id, the matching prefixed [MultiGtfsFeed]'s
@@ -354,11 +365,13 @@ private fun matchesOwnRoute(rawRouteId: String?, prefixedTripId: String, prefix:
 suspend fun GtfsAgency.fetchTripUpdate(tripId: String, repository: GtfsRepository): GtfsRtTripUpdate? {
     // Rewrites every StopTimeUpdate's own raw stop_id into this agency's static stop_id space right
     // before the result leaves this function, whichever of the return points below produced it --
-    // see RealtimeStopIdBridge's own doc.
-    val stopIdBridge = components.filterIsInstance<RealtimeStopIdBridge>().firstOrNull()
+    // see RealtimeIdBridge's own doc.
+    val stopIdBridge = components.filterIsInstance<RealtimeIdBridge>().firstOrNull()
+    val routeIdBridge = realtimeRouteIdBridge(repository)
     fun bridged(update: GtfsRtTripUpdate?): GtfsRtTripUpdate? {
         if (stopIdBridge == null || update == null) return update
         return update.copy(
+            trip = update.trip.withBridgedRouteId(routeIdBridge),
             stopTimeUpdate = update.stopTimeUpdate.map { stopTimeUpdate ->
                 val rawStopId = stopTimeUpdate.stopId ?: return@map stopTimeUpdate
                 stopIdBridge.bridgeStopId(rawStopId)?.let { stopTimeUpdate.copy(stopId = it) } ?: stopTimeUpdate
@@ -474,6 +487,10 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String, repository: GtfsRepo
             entities[tripId]
         }
 
+    val routeIdBridge = realtimeRouteIdBridge(repository)
+    fun bridged(position: GtfsRtVehiclePosition?): GtfsRtVehiclePosition? =
+        position?.copy(trip = position.trip.withBridgedRouteId(routeIdBridge))
+
     val url = realtimeVehiclePositionsUrl
     val primaryMatch = url?.let {
         try {
@@ -485,7 +502,7 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String, repository: GtfsRepo
             null
         }
     }
-    if (primaryMatch != null) return primaryMatch
+    if (primaryMatch != null) return bridged(primaryMatch)
     // See fetchTripUpdate's identical loop for why this exists.
     for (feed in components.filterIsInstance<MultiGtfsFeed>().filter { it.feedUrl == null }) {
         val additionalUrl = feed.realtimeVehiclePositionsUrl ?: continue
@@ -497,7 +514,7 @@ suspend fun GtfsAgency.fetchVehiclePosition(tripId: String, repository: GtfsRepo
             Log.e("GtfsRealtime", "VehiclePositions fetch failed for $displayName's additional feed", e)
             null
         }
-        if (match != null) return match
+        if (match != null) return bridged(match)
     }
     return null
 }
@@ -538,6 +555,7 @@ private suspend fun <T> GtfsAgency.fetchMerged(
     byTripId: (GtfsRtFeedMessage) -> Map<String, T>,
     routeIdOf: (T) -> String?,
     withResolvedTripId: (T, String) -> T,
+    withBridgedRouteId: (T, (String) -> String?) -> T,
     repository: GtfsRepository,
     logTag: String,
 ): MergedRealtimeFeed<T> {
@@ -555,6 +573,8 @@ private suspend fun <T> GtfsAgency.fetchMerged(
     // Computed once per poll, not per entity: a per-entity lookup is too slow for feeds with
     // thousands of entities (see scheduledStartTimesByRoute).
     val scheduleMap = if (bridge != null) repository.scheduledStartTimesByRoute(todayForGtfs(zoneId)) else null
+    val routeIdBridge = realtimeRouteIdBridge(repository)
+    fun bridgedRoute(value: T): T = routeIdBridge?.let { withBridgedRouteId(value, it) } ?: value
     // Resolves and aliases every entity's raw trip_id to its real static trip_id before it's put in
     // the map, so every downstream consumer still sees a plain real-trip_id-keyed entity -- applied
     // to the PRIMARY feed's own entities too, not just unprefixed MultiGtfsFeed ones below, since a
@@ -567,10 +587,10 @@ private suspend fun <T> GtfsAgency.fetchMerged(
                 val routeId = routeIdOf(value) ?: return@forEach
                 val startTime = bridge.scheduledStartTime(rawTripId) ?: return@forEach
                 val resolvedId = scheduleMap[routeId to startTime] ?: return@forEach
-                put(resolvedId, withResolvedTripId(value, resolvedId))
+                put(resolvedId, bridgedRoute(withResolvedTripId(value, resolvedId)))
             }
         } else {
-            putAll(entities)
+            entities.forEach { (tripId, value) -> put(tripId, bridgedRoute(value)) }
         }
     }
     val merged = buildMap {
@@ -621,6 +641,7 @@ suspend fun GtfsAgency.fetchMergedTripUpdates(repository: GtfsRepository, logTag
         { it.tripUpdatesByTripId },
         { it.trip.routeId },
         { update, resolvedId -> update.copy(trip = update.trip.copy(tripId = resolvedId)) },
+        { update, bridge -> update.copy(trip = update.trip.withBridgedRouteId(bridge)) },
         repository,
         logTag,
     )
@@ -633,6 +654,7 @@ suspend fun GtfsAgency.fetchMergedVehiclePositions(repository: GtfsRepository, l
         { it.vehiclePositionsByTripId },
         { it.trip.routeId },
         { position, resolvedId -> position.copy(trip = position.trip.copy(tripId = resolvedId)) },
+        { position, bridge -> position.copy(trip = position.trip.withBridgedRouteId(bridge)) },
         repository,
         logTag,
     )

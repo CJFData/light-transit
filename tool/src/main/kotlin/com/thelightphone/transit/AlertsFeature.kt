@@ -45,8 +45,8 @@ import com.thelightphone.transit.gtfs.AlertsStore
 import com.thelightphone.transit.gtfs.BoardedTrip
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
-import com.thelightphone.transit.gtfs.RealtimeStopIdBridge
-import com.thelightphone.transit.gtfs.bridgeStopIds
+import com.thelightphone.transit.gtfs.RealtimeIdBridge
+import com.thelightphone.transit.gtfs.bridgeIds
 import com.thelightphone.transit.gtfs.StopGraph
 import com.thelightphone.transit.gtfs.UNKNOWN_CAUSE
 import com.thelightphone.transit.gtfs.gtfsDbFile
@@ -97,9 +97,12 @@ suspend fun loadScreenAlerts(
     }
     if (!shown) return null
     val agency = GtfsAgency.forDbFile(dbFile) ?: return null
-    val stopIdBridge = agency.component<RealtimeStopIdBridge>()
-    val alerts = AlertsStore.shared.alertsFor(agency.id, agency.realtimeAlertsUrl, enabled = true)
-        .let { fetched -> stopIdBridge?.let { fetched.bridgeStopIds(it::bridgeStopId) } ?: fetched }
+    val idBridge = agency.component<RealtimeIdBridge>()
+    val alerts = AlertsStore.shared.alertsFor(agency.id, agency.realtimeAlertsUrl, enabled = true).let { fetched ->
+        if (idBridge == null) return@let fetched
+        val routeIdsByShortName = repository?.getRouteIdsByShortName().orEmpty()
+        fetched.bridgeIds(idBridge::bridgeStopId) { idBridge.bridgeRouteId(it, routeIdsByShortName) }
+    }
     if (alerts.isEmpty()) return null
 
     val now = System.currentTimeMillis() / 1000

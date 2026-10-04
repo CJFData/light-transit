@@ -967,6 +967,12 @@ class GtfsRepository(dbFile: File) {
             }
         }.toMap()
 
+    /** Every route's route_id, keyed by its route_short_name (routes without one are left out). */
+    fun getRouteIdsByShortName(): Map<String, String> =
+        db.rawQuery("SELECT route_short_name, route_id FROM routes WHERE route_short_name IS NOT NULL AND route_short_name != ''", null)
+            .use { cursor -> cursor.mapRows { getString(0) to getString(1) } }
+            .toMap()
+
     /** Stop names for the given stop_ids. */
     fun getStopNames(stopIds: Collection<String>): Map<String, String> =
         stopIds.distinct().chunked(500).flatMap { chunk ->
