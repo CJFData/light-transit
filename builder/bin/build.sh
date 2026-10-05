@@ -84,6 +84,11 @@ capture_proxy_log() {
 }
 
 cleanup() {
+    local status=$?
+    if (( status != 0 )); then
+        docker inspect --format 'proxy exit status: {{.State.ExitCode}} ({{.State.Status}})' "$PROXY" >&2 || true
+        docker logs --tail 100 "$PROXY" >&2 || true
+    fi
     capture_proxy_log || true
     docker rm -f "$PROXY" >/dev/null 2>&1 || true
     docker network rm "$NETWORK" >/dev/null 2>&1 || true
