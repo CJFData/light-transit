@@ -915,7 +915,7 @@ enum class GtfsAgency(
     ),
 
     //cleveland
-    GCRTD(
+    GCRTA(
         "gcrta",
         "GCRTA",
         feedUrl = "https://www.riderta.com/sites/default/files/gtfs/latest/google_transit.zip",
