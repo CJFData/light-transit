@@ -203,7 +203,13 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
 | Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
 |---|:-:|:-:|:-:|:-:|
-| Nashville - WeGo Public Transit | ✓ | ✓ | ✓ | — |
+| Nashville - WeGo Public Transit | ✓ | ✓ | ✓ | ✓ |
+
+**Cleveland**
+
+| Agency                      | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|-----------------------------|:-:|:-:|:-:|:-:|
+| GCRTA | ✓ | ✓ | ✓ | ✓ |
 
 **Los Angeles**
 
@@ -286,7 +292,7 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
 - 🚦 **Home screen trip status**: while you're on a trip, the home screen shows your route, live ETA, stops remaining, and an optional progress bar.
 
-  <img src="docs/screenshots/Screenshot_20260810_172500.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_212055.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260817_233823.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260820_003442.png" alt="Pico Transit screenshot" width="220">
+  <img src="docs/screenshots/Screenshot_20260810_172500.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260817_233823.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260820_003442.png" alt="Pico Transit screenshot" width="220">
 
 - ⚠️ **Service alerts** (optional, turn on in Settings): detours, closures, and other service changes, for agencies with an alerts feed. The home screen shows your trip's alerts while you're on one. An alert icon marks affected routes, stops, and trips, and tapping it opens the full alert: what it affects, how long it lasts, and the details. New alerts can also pop up as they come in.
 

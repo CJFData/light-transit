@@ -913,6 +913,17 @@ enum class GtfsAgency(
         timeZoneId = "America/Los_Angeles",
         components = listOf(LaMetroRailSecondaryFeed),
     ),
+
+    //cleveland
+    GCRTD(
+        "gcrta",
+        "GCRTA",
+        feedUrl = "https://www.riderta.com/sites/default/files/gtfs/latest/google_transit.zip",
+        realtimeTripUpdatesUrl = "https://gtfs.picotransit.com/gcrta/tripupdates",
+        realtimeVehiclePositionsUrl ="https://gtfs.picotransit.com/gcrta/vehiclepositions" ,
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/gcrta/alerts",
+        timeZoneId = "America/New_York",
+    ),
     /** No standard GTFS-RT feed used here -- CTA's own undocumented
      * transitdata.transitchicago.com/GtfsRealtime/{TripUpdates,VehiclePositions}.pb endpoint sits
      * behind Cloudflare bot-protection and is unverified against GtfsRealtime.kt's schema, so
@@ -1082,6 +1093,7 @@ enum class GtfsAgency(
         "https://www.wegotransit.com/GoogleExport/google_transit.zip",
         "https://gtfs.picotransit.com/wego_nashville/tripupdates",
         "https://gtfs.picotransit.com/wego_nashville/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/wego_nashville/alerts",
         timeZoneId = "America/Chicago",
     ),
 

@@ -57,6 +57,13 @@ class AlertsTest {
     }
 
     @Test
+    fun decodesWegoFeedWithItsExtension() {
+        val alerts = normalizeAlerts(feed("wego_alerts.pb"), "wego_nashville")
+        assertEquals(25, alerts.size)
+        assertTrue(alerts.any { it.header.startsWith("Detour in effect on route 95") })
+    }
+
+    @Test
     fun picksEnglishAndAllowsEmptyDescriptions() {
         val alerts = normalizeAlerts(feed("mbta_alerts.pb"), "mbta")
         assertTrue(alerts.all { it.header.isNotBlank() })
