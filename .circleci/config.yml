@@ -143,6 +143,12 @@ jobs:
               builder/
 
       - run:
+          name: proxy starts without network access
+          command: |
+            set -euo pipefail
+            bash builder/tests/check_proxy_startup.sh light-sdk-builder:verify
+
+      - run:
           name: build sample tool and fixtures behind the Maven proxy
           no_output_timeout: 60m
           command: |
