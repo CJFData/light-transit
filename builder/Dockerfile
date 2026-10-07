@@ -136,7 +136,7 @@ RUN python3 -m lightbuilder image-inventory \
         --output /opt/light-builder/image-native-libraries.json
 
 RUN useradd --create-home --shell /bin/bash builder \
-    && chown -R builder:builder /opt/light-sdk /opt/gradle-cache /opt/light-builder
+    && chown -R builder:builder /opt/light-sdk /opt/gradle-cache /opt/light-builder /tmp/nginx
 
 USER builder
 WORKDIR /home/builder

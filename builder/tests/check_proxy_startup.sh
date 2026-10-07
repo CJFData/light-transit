@@ -7,7 +7,7 @@ image="$1"
 proxy="light-proxy-offline-$$"
 trap 'docker rm -f "$proxy" >/dev/null 2>&1 || true' EXIT
 
-docker run --rm -d --platform=linux/amd64 --network none --name "$proxy" \
+docker run -d --platform=linux/amd64 --network none --name "$proxy" \
     --entrypoint /opt/light-builder/bin/maven-proxy.sh "$image" >/dev/null
 
 for _ in $(seq 1 30); do
