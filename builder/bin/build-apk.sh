@@ -190,10 +190,10 @@ export SOURCE_DATE_EPOCH="$DEV_COMMIT_EPOCH"
 # is used as normal.
 GRADLE_ARGS=(
     ":tool:assembleRelease"
-    "--no-daemon"
     "--no-build-cache"
-    "--stacktrace"
+    "--console=plain"
     "-DlightSdk.unsigned=true"
+    "-DlightSdk.toolOnly=true"
 )
 if [[ -n "$ABI_FILTERS" ]]; then
     GRADLE_ARGS+=("-DlightSdk.abiFilters=$ABI_FILTERS")

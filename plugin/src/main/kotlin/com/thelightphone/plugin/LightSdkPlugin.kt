@@ -8,7 +8,6 @@ import org.gradle.api.artifacts.Dependency
 import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.FileCollectionDependency
 import org.gradle.api.artifacts.ProjectDependency
-import org.gradle.api.artifacts.ResolvedDependency
 import java.io.File
 
 class LightSdkPlugin : Plugin<Project> {
@@ -37,7 +36,30 @@ class LightSdkPlugin : Plugin<Project> {
                 }
             }
 
-        private val DYNAMIC_VERSION_MARKERS = listOf("+", "[", "]", "(", ")", ",")
+        fun isAllowedKspProcessor(group: String, name: String): Boolean =
+            "$group:$name" in ALLOWED_KSP_PROCESSORS
+
+        fun isTestConfig(name: String): Boolean = name.startsWith("test") || "Test" in name
+
+        /**
+         * Builds the failure message, or null when there is nothing to report.
+         * The allowlist is only useful next to dependency violations.
+         */
+        fun formatViolations(violations: List<String>, dependencyViolations: List<String>): String? {
+            if (violations.isEmpty() && dependencyViolations.isEmpty()) return null
+            return buildString {
+                appendLine("Light SDK: build configuration violations detected:")
+                appendLine()
+                (violations + dependencyViolations).forEach { appendLine(it) }
+                if (dependencyViolations.isNotEmpty()) {
+                    appendLine()
+                    appendLine("Allowed dependencies:")
+                    ALLOWED_DEPENDENCIES.sorted().forEach { appendLine("  $it") }
+                }
+            }
+        }
+
+        private val DYNAMIC_VERSION_MARKERS =listOf("+", "[", "]", "(", ")", ",")
 
         /**
          * Returns why [version] is not an exact version, or null if it is (or
@@ -335,7 +357,7 @@ class LightSdkPlugin : Plugin<Project> {
             if (System.getProperty("lightSdk.unsigned") == "true") {
                 ext.buildTypes.configureEach { bt ->
                     if (bt.signingConfig != null) {
-                        project.logger.lifecycle(
+                        project.logger.info(
                             "Light SDK: clearing signingConfig on buildType ${bt.name}"
                         )
                         bt.signingConfig = null
@@ -347,26 +369,19 @@ class LightSdkPlugin : Plugin<Project> {
 
     private fun validate(project: Project) {
         val violations = mutableListOf<String>()
+        val dependencyViolations = DependencyViolations()
 
         validateBuildScript(project, violations)
         validateSourceFiles(project, violations)
-        validateDeclaredDependencies(project, violations)
-        validateResolvedDependencies(project, violations)
+        validateDeclaredDependencies(project, dependencyViolations)
         if (project.name !in SDK_MODULES) {
             validateNoUserManifest(project, violations)
             validateNoJavaSources(project, violations)
         }
 
-        if (violations.isNotEmpty()) {
-            throw GradleException(buildString {
-                appendLine("Light SDK: build configuration violations detected:")
-                appendLine()
-                violations.forEach { appendLine(it) }
-                appendLine()
-                appendLine("Allowed dependencies:")
-                ALLOWED_DEPENDENCIES.sorted().forEach { appendLine("  $it") }
-            })
-        }
+        formatViolations(violations, dependencyViolations.lines())?.let { throw GradleException(it) }
+
+        registerResolvedDependencyCheck(project)
     }
 
     /**
@@ -437,12 +452,6 @@ class LightSdkPlugin : Plugin<Project> {
      */
     private fun isKspConfig(name: String): Boolean = name.startsWith("ksp")
 
-    private fun isAllowed(group: String, name: String): Boolean = isAllowedCoordinate(group, name)
-
-    private fun isAllowedKspProcessor(group: String, name: String): Boolean {
-        return "$group:$name" in ALLOWED_KSP_PROCESSORS
-    }
-
     /**
      * Returns the on-disk location of this plugin jar (or classes dir during
      * dev/test). Used to allowlist the file dep we self-add to `ksp(...)`.
@@ -458,7 +467,7 @@ class LightSdkPlugin : Plugin<Project> {
      * Check all declarable configurations for disallowed dependencies.
      * Catches: direct disallowed deps, file/jar deps, custom configurations.
      */
-    private fun validateDeclaredDependencies(project: Project, violations: MutableList<String>) {
+    private fun validateDeclaredDependencies(project: Project, violations: DependencyViolations) {
         val pluginJar = ownPluginJar()
 
         project.configurations
@@ -475,7 +484,7 @@ class LightSdkPlugin : Plugin<Project> {
                         ) {
                             return@forEach
                         }
-                        violations.add("  ${config.name}: file dependency not allowed (${dep.files.files.joinToString { it.name }})")
+                        violations.add(config.name, "file dependency not allowed (${dep.files.files.joinToString { it.name }})")
                         return@forEach
                     }
 
@@ -484,16 +493,16 @@ class LightSdkPlugin : Plugin<Project> {
                     val group = dep.group ?: return@forEach
                     if (isKsp) {
                         if (!isAllowedKspProcessor(group, dep.name)) {
-                            violations.add("  ${config.name}: ${group}:${dep.name}:${dep.version ?: "?"} (KSP processor not allowed)")
+                            violations.add(config.name, "${group}:${dep.name}:${dep.version ?: "?"} (KSP processor not allowed)")
                         }
                     } else {
-                        if (!isAllowed(group, dep.name)) {
-                            violations.add("  ${config.name}: ${group}:${dep.name}:${dep.version ?: "?"}")
+                        if (!isAllowedCoordinate(group, dep.name)) {
+                            violations.add(config.name, "${group}:${dep.name}:${dep.version ?: "?"}")
                         }
                     }
 
                     declaredVersions(dep).mapNotNull(::findVersionViolation).distinct().forEach {
-                        violations.add("  ${config.name}: ${group}:${dep.name}: $it")
+                        violations.add(config.name, "${group}:${dep.name}: $it")
                     }
                 }
             }
@@ -508,62 +517,18 @@ class LightSdkPlugin : Plugin<Project> {
 
     /**
      * Validate resolved dependency graphs to detect substitution attacks.
-     * Compares what was declared vs what actually resolved, flagging any
-     * unexpected artifacts that aren't transitives of allowed dependencies.
+     * Runs as a task so resolution happens at execution time, not while
+     * configuring. Test configurations never reach the APK and are skipped.
      */
-    private fun isProjectDependency(dep: ResolvedDependency, project: Project): Boolean {
-        if (dep.moduleGroup == project.rootProject.name) return true
-        return project.rootProject.allprojects.any {
-            it.group.toString() == dep.moduleGroup && it.name == dep.moduleName
+    private fun registerResolvedDependencyCheck(project: Project) {
+        val task = project.tasks.register(
+            "lightSdkValidateDependencies",
+            ValidateResolvedDependenciesTask::class.java,
+        ) { task ->
+            project.configurations
+                .filter { it.isCanBeResolved && !isInternalConfig(it.name) && !isTestConfig(it.name) }
+                .forEach { task.resolutionRoots[it.name] = it.incoming.resolutionResult.rootComponent }
         }
-    }
-
-    private fun validateResolvedDependencies(project: Project, violations: MutableList<String>) {
-        project.configurations
-            .filter { it.isCanBeResolved && !isInternalConfig(it.name) }
-            .forEach { config ->
-                val resolved = try {
-                    config.resolvedConfiguration.firstLevelModuleDependencies
-                } catch (_: Exception) {
-                    return@forEach
-                }
-
-                val isKsp = isKspConfig(config.name)
-                val allowPredicate: (String, String) -> Boolean =
-                    if (isKsp) ::isAllowedKspProcessor else ::isAllowed
-
-                // Collect coordinates that are transitives of allowed first-level deps.
-                // Only trust transitives of allowed module deps — not project deps,
-                // since project dep transitives may themselves be substituted.
-                val allowedTransitives = mutableSetOf<String>()
-                fun collectTransitives(dep: ResolvedDependency) {
-                    dep.children.forEach { child ->
-                        val coord = "${child.moduleGroup}:${child.moduleName}"
-                        if (allowedTransitives.add(coord)) {
-                            collectTransitives(child)
-                        }
-                    }
-                }
-
-                resolved.forEach { dep ->
-                    if (isProjectDependency(dep, project)) return@forEach
-                    if (allowPredicate(dep.moduleGroup, dep.moduleName)) {
-                        collectTransitives(dep)
-                    }
-                }
-
-                resolved.forEach { dep ->
-                    if (isProjectDependency(dep, project)) return@forEach
-
-                    val resolvedCoord = "${dep.moduleGroup}:${dep.moduleName}"
-
-                    if (resolvedCoord in allowedTransitives) return@forEach
-                    if (allowPredicate(dep.moduleGroup, dep.moduleName)) return@forEach
-
-                    val tag =
-                        if (isKsp) "unexpected resolved KSP dependency" else "unexpected resolved dependency — possible substitution"
-                    violations.add("  ${config.name}: $resolvedCoord:${dep.moduleVersion} ($tag)")
-                }
-            }
+        project.tasks.matching { it.name == "preBuild" }.configureEach { it.dependsOn(task) }
     }
 }
