@@ -146,8 +146,8 @@ def build_inventory(
 
 
 def check_document(document: dict) -> None:
-    if document.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(f"unsupported inventory schema: {document.get('schema_version')!r}")
+    if document.get("schemaVersion") != SCHEMA_VERSION:
+        raise ValueError(f"unsupported inventory schema: {document.get('schemaVersion')!r}")
     libraries = document.get("libraries")
     if not isinstance(libraries, dict):
         raise ValueError("inventory libraries must be an object")
@@ -162,6 +162,6 @@ def check_document(document: dict) -> None:
 
 def _document(libraries: dict[str, set[str]]) -> dict:
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schemaVersion": SCHEMA_VERSION,
         "libraries": {path: sorted(digests) for path, digests in sorted(libraries.items())},
     }

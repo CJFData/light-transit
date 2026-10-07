@@ -23,7 +23,7 @@ def _files(tmp_path: Path, entries: list[tuple[str, bytes]]) -> tuple[Path, Path
             archive.writestr(path, data)
     inventory = tmp_path / "native-libraries.json"
     inventory.write_text(json.dumps({
-        "schema_version": 1,
+        "schemaVersion": 1,
         "libraries": {"lib/arm64-v8a/libok.so": [hashlib.sha256(b"ok").hexdigest()]},
     }))
     return apk, inventory
@@ -47,7 +47,7 @@ def test_unapproved_library_fails(tmp_path: Path) -> None:
 def test_wrong_abi_fails(tmp_path: Path) -> None:
     apk, inventory = _files(tmp_path, [("lib/x86/libok.so", b"ok")])
     inventory.write_text(json.dumps({
-        "schema_version": 1,
+        "schemaVersion": 1,
         "libraries": {"lib/x86/libok.so": [hashlib.sha256(b"ok").hexdigest()]},
     }))
 
