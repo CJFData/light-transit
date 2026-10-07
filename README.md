@@ -46,10 +46,10 @@ You're free to build and share privately, but LightOS won't let you install tool
 We won't block users from performing these "dangerous" sideloads, but we're not going to encourage it either. 
 Using the Dashboard, developers are able to queue up a build of your tool on our servers, and if it follows our guidelines and compiles cleanly, we will hand you back a signed, shareable APK.
 
-1. Review the [Tool Guidelines]()
+1. Review the [Tool Guidelines](TOOL_GUIDELINES.md) to get a sense of the kind of tools we're hoping to showcase
 2. Ensure your tool is built with the latest Light SDK version and is accessible via a public github repo.
 3. Enable developer mode on the [dashboard](https://dashboard.thelightphone.com/): Settings -> Account -> Developer Account.
-4. In the Dashboard, create your tool: Settings -> Account -> Developer Account -> Manage Custom Tools -> Submit New Tool:
+4. From there, you can create your tool: Settings -> Account -> Developer Account -> Manage Custom Tools -> Submit New Tool:
   - The package name is unique for all tools and can't be changed later. It is pulled from the default branch of the github repo submitted upon registering the tool.
   - You'll then have the opportunity to add images. You can add them later on as well, but we'll require at least one for a tool to be approved.
 5. Now go in the tool detail page and press "submit build":
@@ -58,8 +58,9 @@ Using the Dashboard, developers are able to queue up a build of your tool on our
   - The `versionCode` of the submitted build should be higher than the one of the last version listed in the Tool page.
 6. Wait for the build to finish:
   - In case of an error, use the "view details" button on the "Builds" section of the Tool page to check the error message. The "retry build" can be used to re-attempt building from the same git ref if necessary.
+  - If you believe the build error is due to an issue on our end (e.g. with light-sdk or our infrastructure), please feel free to open an Issue on this repo!
   - In case of success, the "download apk" button should appear. A new "Version" entry will be created with "pending approval" status.
-7. Our team will review the builds and reach out to you via e-mail if we have any feedback
+7. Our team will review the builds and reach out to you via e-mail if we have any feedback regarding the approval process
 
 ### Sharing Your Tool
 Once we release a version of LightOS that supports community tools, users will have an option to choose what kind of tools they want to be able to run on their device:
