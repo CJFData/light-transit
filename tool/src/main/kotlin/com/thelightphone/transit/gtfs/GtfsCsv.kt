@@ -5,11 +5,8 @@ import android.database.sqlite.SQLiteStatement
 import java.io.BufferedReader
 
 /**
- * Minimal RFC 4180 line splitter: handles quoted fields, embedded commas, and "" as an escaped
- * quote. No CSV library is in the SDK's allowed-dependency list, and GTFS fields like
- * route_long_name/stop_name routinely contain commas, so a plain split(",") would corrupt rows.
- * Internal (not private) so a reader that isn't writing into SQLite at all -- e.g.
- * [TripShapeSource]'s own on-demand shapes.txt scan -- can reuse it without duplicating this parser.
+ * A minimal RFC 4180 line splitter: quoted fields, embedded commas, and "" escapes. Internal so the
+ * shapes.txt reader can use it too.
  */
 internal fun parseCsvLine(line: String): List<String> {
     val fields = mutableListOf<String>()
@@ -40,10 +37,7 @@ internal fun parseCsvLine(line: String): List<String> {
     return fields
 }
 
-/**
- * Maps a GTFS CSV row to column values by header name. GTFS doesn't guarantee column order or
- * that optional columns are present, so lookups go by name rather than fixed index.
- */
+/** Looks up a row's values by column name, since GTFS doesn't fix column order. */
 internal class GtfsCsvHeader(header: List<String>) {
     private val columnIndex: Map<String, Int> = header
         .mapIndexed { index, name -> name.trim().removePrefix("\uFEFF") to index }
@@ -55,22 +49,14 @@ internal class GtfsCsvHeader(header: List<String>) {
     }
 }
 
-/** Rows committed per transaction while reading a table — see [readCsvEntry]'s own doc for why
- * this exists. Picked as a round number comfortably under what's been observed to strain memory
- * on real hardware for a table the size of STM Montreal's ~5.1M-row stop_times.txt, while still
- * large enough that the commit overhead itself stays negligible next to the parsing work. */
+/** Rows committed per transaction while reading a table. */
 private const val COMMIT_BATCH_SIZE = 50_000
 
 /**
- * Reads the header line from [reader] then invokes [onRow] for each data row until the current
- * zip entry ends, committing to [db] every [COMMIT_BATCH_SIZE] rows rather than holding one
- * transaction open for the whole table. A single transaction spanning an entire large table (STM
- * Montreal's stop_times.txt alone is ~5.1M rows) was confirmed to crash on a real Light Phone III,
- * though it never reproduced in the emulator -- SQLite keeps that transaction's journal live until
- * it commits, and each row's bind/insert call crosses the JNI boundary, so memory scales with the
- * table's size rather than staying bounded.
+ * Reads the header, then calls [onRow] for each row, committing every [COMMIT_BATCH_SIZE] rows. One
+ * transaction for a very large table ran out of memory on the phone.
  *
- * [reader] is never closed here -- closing it would close the shared ZipInputStream it wraps.
+ * [reader] isn't closed here, since that would close the shared zip stream.
  */
 internal inline fun readCsvEntry(db: SQLiteDatabase, reader: BufferedReader, onRow: (GtfsCsvHeader, List<String>) -> Unit) {
     val headerLine = reader.readLine() ?: return

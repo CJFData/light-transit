@@ -58,8 +58,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** Search is only worth surfacing once scrolling to find a station gets tedious -- most agencies
- * (RIPTA) have well under this many stations and never show it at all. */
+/** Search is offered once there are this many stations. */
 private const val STATION_SEARCH_MIN_COUNT = 10
 
 fun StopLocation.displayLabel(): String = stopName?.takeIf { it.isNotBlank() } ?: "Station $stopId"
@@ -81,14 +80,12 @@ class StationListViewModel(
     private val _state = MutableStateFlow<StationListState>(StationListState.Loading)
     val state: StateFlow<StationListState> = _state
 
-    /** Settings screen's "Tap and hold" toggle for this screen specifically (on by default) -- see
-     * TapHoldPreferences.tapHoldStationArrivalsEnabledFlow. Read once at screen-open, same as every
-     * other one-shot Settings read in this app. */
+    /** Whether tap and hold opens a station's arrivals. Read once when the screen opens. */
     val tapHoldArrivalsEnabled = MutableStateFlow(true)
 
-    /** See TapHoldPreferences.stationTapArrivalsEnabledFlow -- on by default, swaps this screen's
-     * tap/tap-and-hold gestures so a plain tap opens arrivals directly. Read once at screen-open,
-     * same as [tapHoldArrivalsEnabled] above. */
+    /**
+     * Whether a tap opens arrivals and tap and hold opens the platform map, instead of the reverse.
+     */
     val stationTapArrivalsEnabled = MutableStateFlow(true)
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -115,10 +112,8 @@ class StationListViewModel(
 }
 
 /**
- * HomeScreen's "Station" entry point: every real multi-platform station this agency has, listed
- * directly (see GtfsRepository.getAllStations) -- unlike "Explore", this never asks the rider to
- * search a location first, since a rider looking for a specific station already knows its name.
- * Tapping one opens its Map-Station sub-map directly (see MapStationScreen).
+ * Home's Station button: every multi-platform station, listed by name. Tapping one opens its
+ * platform map (or its arrivals; see [stationTapArrivalsEnabled]).
  */
 class StationListScreen(
     sealedActivity: SealedLightActivity,
@@ -137,13 +132,9 @@ class StationListScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // With stationTapArrivalsEnabled (on by default, this screen only -- see
-                // TapHoldPreferences.stationTapArrivalsEnabledFlow), a short tap jumps straight to the
-                // station's live upcoming arrivals across every platform, and tap-and-hold opens the
-                // platform map instead (still one tap away from there via Upcoming Arrivals' own
-                // "Selected stop" row). Off, gestures revert to the original assignment: a short tap
-                // opens the platform map, and tapHoldArrivalsEnabled gates whether tap-and-hold opens
-                // arrivals.
+                // With "Tap opens arrivals" on, tap opens the station's arrivals and tap and hold
+                // opens the platform map. Off, tap opens the map and tap and hold opens arrivals
+                // when that's enabled.
                 .pointerInput(station.stopId, stationTapArrivalsEnabled, tapHoldArrivalsEnabled) {
                     detectTapGestures(
                         onTap = {
@@ -174,9 +165,7 @@ class StationListScreen(
                 .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Weighted so a long station name wraps within its own bounded share of the row, leaving
-            // guaranteed room for the icon, instead of first greedily measuring against the row's full
-            // width -- see NearbyStopsScreen's identical fix for the same Compose behavior.
+            // Weighted so a long station name wraps instead of pushing out the icon.
             LightText(
                 text = station.displayLabel(),
                 variant = LightTextVariant.Copy,
@@ -192,19 +181,12 @@ class StationListScreen(
     }
 
     /**
-     * Inline live-filter search, shown only once scrolling the full list gets tedious (see
-     * STATION_SEARCH_MIN_COUNT). Docks Light's own public `light-keyboard` library directly (see
-     * [InlineTextFieldKeyboardCallback]'s own doc) alongside a live-filtered [LazyColumn], instead of
-     * sdk/ui's full-screen `LightTextInputEditor` (which has no room for a results list of its own).
+     * Inline search, shown once the list is long enough (see STATION_SEARCH_MIN_COUNT): the
+     * light-keyboard library docked under a live-filtered list.
      *
-     * [textFieldState] is passed in (hoisted to [Content], not created here) rather than via its
-     * own `rememberTextFieldState` -- this composable is only ever in composition while search is
-     * active, so a locally-created state would be a fresh instance every time search reopens.
-     * `viewModel(key = "StationSearchKeyboard", ...)` below only calls its factory the very first
-     * time this screen's ViewModelStore sees that key, so a local state would silently keep typing
-     * into the first session's already-discarded instance on every later reopen. Hoisting the
-     * state keeps it the same single instance across every reopen, so the callback captured on the
-     * first open stays correctly wired for the screen's entire lifetime.
+     * [textFieldState] is hoisted to [Content]. The keyboard's `viewModel(key = ...)` keeps its
+     * first callback for the screen's lifetime, so a fresh state on each reopen would stop
+     * receiving input.
      */
     @Composable
     private fun SearchContent(
@@ -271,8 +253,7 @@ class StationListScreen(
         val stationTapArrivalsEnabled by viewModel.stationTapArrivalsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
         var searchActive by remember { mutableStateOf(false) }
-        // See SearchContent's own doc -- hoisted here (not created inside SearchContent) so it
-        // stays the same instance across every close/reopen of search, not a fresh one each time.
+        // Hoisted so it stays the same instance across reopening search; see SearchContent.
         val searchTextFieldState = rememberTextFieldState("")
 
         LightTheme(colors = themeColors) {

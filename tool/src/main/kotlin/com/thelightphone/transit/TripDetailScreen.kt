@@ -86,39 +86,32 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// Matches MapScreen's own polling cadence -- see its own comment on this same constant.
+// Same polling interval as the map.
 private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
 
 sealed class TripDetailState {
     object Loading : TripDetailState()
 
     /**
-     * [liveAtStopSequence] is non-null whenever a live position is available, from GTFS-RT's
-     * current_stop_sequence, GPS-proximity matching, or inference from TripUpdates. It is not itself
-     * filtered against [stops]: if the live sequence falls outside that trimmed range, it stays
-     * non-null even though no row in [stops] will ever match it, so the live indicator just never
-     * renders. Per the GTFS-realtime spec, current_stop_sequence means "at, arriving at, or en route
-     * to" that stop regardless of current_status, so matching it against a row's stopSequence is
-     * enough to place the indicator even between stops. This trip's vehicle type (for that
-     * indicator's icon) comes from [TripDetailViewModel.lineType] separately, since it's known as
-     * soon as the trip loads.
+     * [liveAtStopSequence] is set whenever the vehicle's position is known, from
+     * current_stop_sequence, shape or GPS matching, or the trip update. It isn't checked against
+     * [stops], so when it falls outside them no row shows the vehicle. current_stop_sequence means
+     * "at, arriving at, or heading to" that stop, so it places the vehicle between stops too.
      *
-     * [liveStatus] is the same On Time/Late/Early comparison the other live screens show, computed
-     * against the matched stop's scheduled time. It's null whenever there's no TripUpdates
-     * prediction yet, which is a normal case, not an error.
+     * [liveStatus] is On Time/Late/Early at the matched stop; null when there's no prediction yet.
      */
     data class Loaded(
         val stops: List<TripStopRow>,
         val liveAtStopSequence: Int?,
         val liveStatus: ArrivalStatus?,
-        /** Every stop_id along this trip that's part of a real, qualifying multi-platform station
-         * (see GtfsRepository.getMultiPlatformStationStopIds) -- shows the transfer icon next to
-         * that row, always, independent of the Map screen's double-tap-to-station setting. */
+        /**
+         * Stops on this trip that belong to a multi-platform station, which get the transfer icon.
+         */
         val stationStopIds: Set<String>,
-        /** True only when [liveAtStopSequence]/[liveStatus] came from a [FuzzyRunTrips] source (CTA
-         * 'L' trains, MBTA subway) -- an approximate rank-matched pairing, never a certain match
-         * (see [FuzzyRunTrips]'s own doc). Content() must render this distinctly ("Closest match",
-         * not "Live") so a rider never mistakes an approximation for a confirmed prediction. */
+        /**
+         * True when the position came from a closest match rather than a confirmed one; shown as
+         * "Closest match", not "Live".
+         */
         val isClosestMatch: Boolean = false,
     ) : TripDetailState()
 
@@ -146,68 +139,63 @@ class TripDetailViewModel(
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
-    // See GtfsAgency.forDbFile -- recovered from the db path rather than threaded through every
-    // screen between here and wherever the agency was originally selected.
     private val agency = GtfsAgency.forDbFile(dbFile)
 
     private val _state = MutableStateFlow<TripDetailState>(TripDetailState.Loading)
     val state: StateFlow<TripDetailState> = _state
 
-    /** This trip's own vehicle mode -- set once as soon as the trip's route loads, independent of
-     * live-position availability (see [TripDetailState.Loaded]'s own doc). Used for both the
-     * live-row icon and the Board/Alight row's vehicle-type icon, and threaded into [BoardedTrip]
-     * so HomeScreen can show it too without its own repository lookup. */
+    /**
+     * This trip's vehicle type, set once the route loads. Used for the live-row and Board/Alight
+     * icons, and saved with [BoardedTrip] for Home.
+     */
     val lineType = MutableStateFlow<LineType?>(null)
 
-    /** Collected for this ViewModel's whole lifetime (not just while visible) so Board/Alight/
-     * alight-stop taps reflect immediately, and so the poll loop below can check it every cycle. */
+    /**
+     * Collected for the ViewModel's lifetime so Board/Alight taps show right away and the poll loop
+     * sees changes.
+     */
     val boardedTrip = MutableStateFlow<BoardedTrip?>(null)
 
-    /** One-shot signal: non-null exactly when the rider has just dismissed the "you've arrived"
-     * modal for this trip's designated alight stop -- Content() observes this to navigate to that
-     * stop's Upcoming Arrivals, then calls [clearReachedAlightStop] to consume it. */
+    /**
+     * Set when the rider dismisses the "you've arrived" message for the alight stop; Content()
+     * opens that stop's arrivals, then calls [clearReachedAlightStop].
+     */
     val reachedAlightStop = MutableStateFlow<TripStopRow?>(null)
 
-    /** This trip's own real route_id, set only once it's confirmed [FuzzyRunTrips]-eligible (see
-     * onScreenShow's own `scopedFuzzyRunTrips` resolution) -- Content() uses non-null as the whole
-     * gate for showing the Select Run row at all, and as the value passed to [SelectRunScreen].
-     * Null for the vast majority of trips (any agency/route without a FuzzyRunTrips component). */
+    /**
+     * This trip's route_id when closest-match runs are available for it; null otherwise. Shows the
+     * Select Run row and is passed to [SelectRunScreen].
+     */
     val fuzzyRouteId = MutableStateFlow<String?>(null)
 
-    /** The rider's own explicit Select Run pick, collected for this ViewModel's whole lifetime (not
-     * just while visible) so both the poll loop and Content()'s "Select Run"/"Run {id} - Change" row
-     * label reflect a change made on [SelectRunScreen] immediately upon returning here. Only ever
-     * meaningful when it matches this screen's own [tripId] -- see [BoardedFuzzyRun]'s own doc. */
+    /**
+     * The rider's Select Run pick, kept current so the poll loop and the row label update on
+     * return. Only applies when it matches [tripId].
+     */
     val boardedFuzzyRun = MutableStateFlow<BoardedFuzzyRun?>(null)
 
-    /** Settings gates for the run-selection row -- see [RunSelectionPreferences]'s own doc for why
-     * [runStepperEnabled] is a second, nested toggle (off by default) rather than folded into
-     * [runSelectionEnabled] (on by default): the label alone is the default experience, the
-     * flanking Next/Previous icons are opt-in on top of it. */
+    /** Settings for the Select Run row and its Next/Previous icons. */
     val runSelectionEnabled = MutableStateFlow(true)
     val runStepperEnabled = MutableStateFlow(false)
 
-    /** Whether Content()'s footer has somewhere to step to/from -- null while not boarded on a
-     * [FuzzyRunTrips] route at all (Content() must gate on this being non-null, not just check
-     * hasNext/hasPrevious, so the icons don't flash briefly true before the first poll resolves). */
+    /**
+     * Whether the run stepper can go forward or back; null until the first poll, so the icons don't
+     * flash.
+     */
     data class RunStepperState(val hasNext: Boolean, val hasPrevious: Boolean)
     val runStepperState = MutableStateFlow<RunStepperState?>(null)
 
-    /** The poll loop's own last-fetched, direction-filtered, time-sorted run list -- [nextRun]/
-     * [previousRun] step through this snapshot directly rather than re-fetching on tap, the same
-     * "at most one poll interval stale" tradeoff every other poll-driven control on this screen
-     * already accepts. */
+    /** The last polled runs in this direction, soonest first, for [nextRun] and [previousRun]. */
     private var lastRunOptions: List<FuzzyRunOption> = emptyList()
 
     private var pollJob: Job? = null
 
-    /** Alerts for the trip as a whole (the header icon) and for each listed stop. */
     class TripAlerts(val trip: List<Alert>, val byStop: Map<String, List<Alert>>, val screenAlerts: ScreenAlerts)
     val alerts = MutableStateFlow<TripAlerts?>(null)
 
     init {
-        // Reloaded when boarding changes, since a boarded trip shows alerts even with "Show in menus"
-        // off, and when the listed stops change.
+        // Reloaded when boarding changes (a boarded trip shows alerts even with "Show in menus"
+        // off) and when the listed stops change.
         viewModelScope.launch(Dispatchers.IO) {
             combine(
                 boardedTrip.map { it?.tripId == tripId }.distinctUntilChanged(),
@@ -226,30 +214,21 @@ class TripDetailViewModel(
         pollJob?.cancel()
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                // See TripDetailPreferences: widens the fetched range back to the trip's first stop so a vehicle
-                // still approaching the boarding stop has a row to match (see TripDetailState.Loaded's
-                // liveAtStopSequence). Read once with .first() rather than collected: Settings isn't visible at
-                // the same time, and a collector started in init{} could deliver its first value after this
-                // poll loop had already read the default.
+                // "Show earlier stops" starts the list at the trip's first stop, so a vehicle still
+                // approaching the boarding stop has a row. Read once, so a collector can't deliver
+                // the setting after the first poll.
                 val showEarlierStops = tripDetailPreferences.showStopsBeforeBoardingEnabledFlow.first()
                 val stops = repository.getTripStops(tripId, if (showEarlierStops) 0 else fromStopSequence)
                 val tripLineType = repository.getRouteTypeForTrip(tripId)?.let { LineType.forGtfsRouteType(it) }
                 lineType.value = tripLineType
                 val stationStopIds = repository.getMultiPlatformStationStopIds()
                 val vehiclePositionsUrl = agency?.realtimeVehiclePositionsUrl
-                // A richer live source (e.g. CTA Bus Tracker's RunAssociatedTripSource) can locate this
-                // trip's vehicle even when the agency has no standard GTFS-RT feed at all -- the same
-                // architecture gap Upcoming Arrivals and the Map screen had before LiveVehicleSource/
-                // StopPredictionSource were wired into them. Checked here, before the early-return below,
-                // so CTA (both realtimeVehiclePositionsUrl and realtimeTripUpdatesUrl null) isn't forced
-                // to a permanently-null live state just because the standard feed doesn't exist. Scoped
-                // to this trip's own LineType, same coveredLineTypes rule MapScreen/Arrivals already use.
+                // An agency's own live source can locate the vehicle even without GTFS-RT, so it's
+                // checked before the early return below. Limited to the modes it covers.
                 val liveVehicleSource = agency?.component<LiveVehicleSource>()
                     ?.takeIf { source -> tripLineType != null && tripLineType in source.coveredLineTypes }
-                // Same architecture-gap reasoning as liveVehicleSource above, for CTA 'L' trains/MBTA
-                // subway trains that have no real trip to resolve to at all (see FuzzyRunTrips's
-                // own doc) -- checked here too so this trip isn't forced to a permanently-null live
-                // state just because it's a fuzzy-matched trip_id rather than a certain one.
+                // Closest-match runs can also locate a vehicle without GTFS-RT, so they're checked
+                // here too.
                 val fuzzyRunTrips = agency?.component<FuzzyRunTrips>()
                 if (stops.isEmpty() || (vehiclePositionsUrl == null && liveVehicleSource == null && fuzzyRunTrips == null)) {
                     _state.value = TripDetailState.Loaded(
@@ -257,51 +236,30 @@ class TripDetailViewModel(
                     )
                     return@launch
                 }
-                // Real predicted-time source (e.g. CTA Bus Tracker's getpredictions) for a genuine
-                // delay status once a stop is matched below -- see its own resolution order note further
-                // down for why this can only be queried after the current stop is known, unlike
-                // liveVehicleSource which is route-scoped and available up front.
+                // Predicted times from the agency's own API, queried once the current stop is
+                // known.
                 val stopPredictionSource = agency.component<StopPredictionSource>()
-                // Only resolved when a LiveVehicleSource or FuzzyRunTrips component actually exists to
-                // use it -- getRoutesForTrips is a heavier query (joins routes + a last-stop subquery)
-                // than the plain getRouteTypeForTrip above, so a standard GTFS agency (neither
-                // component, the vast majority) never pays for it; only CTA/MBTA-like agencies need
-                // routeId at all.
+                // Only looked up when one of those sources needs it, since it's a heavier query.
                 val routeId = (liveVehicleSource != null || fuzzyRunTrips != null)
                     .takeIf { it }
                     ?.let { repository.getRoutesForTrips(setOf(tripId))[tripId]?.route?.routeId }
-                // fuzzyRunTrips is scoped to specific route_ids (e.g. CTA's 'L' lines only, not its
-                // buses) -- this trip's own routeId has to actually be in that set for the component to
-                // be usable for it, the same routeId-scoping every matchedTripUpdates call requires.
+                // Closest-match runs only cover certain routes.
                 val scopedFuzzyRunTrips = fuzzyRunTrips?.takeIf { source -> routeId != null && routeId in source.routeIds }
                 fuzzyRouteId.value = scopedFuzzyRunTrips?.let { routeId }
-                // Fetched once (not per-poll) since a trip's own stop locations never change --
-                // feeds the GPS-proximity fallback below (see matchCurrentStopByProximity's own doc).
-                // Same showEarlierStops-widened range as `stops` above -- otherwise a vehicle still
-                // approaching from before the boarding stop would have a row to match in `stops`
-                // but no coordinates here for GPS-proximity matching (e.g. RIPTA, which never
-                // populates current_stop_sequence) to ever find it.
+                // Stop locations for GPS matching, fetched once over the same range as the stops.
                 val stopLocations = repository.getTripStopLocations(tripId, if (showEarlierStops) 0 else fromStopSequence)
-                // Path-aware alternative to matchCurrentStopByProximity -- see
-                // matchCurrentStopByShapeProjection's own doc. Resolved once (an agency's own
-                // components never change), same as agency/liveVehicleSource above; null for every
-                // agency but RIPTA today, in which case matchViaShape below is a cheap no-op and the
-                // existing point-radius tier runs exactly as before. gtfsZip is [dbFile]'s own sibling
-                // (see gtfsZipFile's own doc -- same per-agency directory, just no filesDir available
-                // here to call that helper directly the way HomeScreenViewModel does).
+                // Shape-based matching, for agencies with a [TripShapeSource]. The GTFS zip sits
+                // next to the database.
                 val shapeSource = agency.component<TripShapeSource>()
                 val gtfsZip = dbFile.parentFile?.let { File(it, "gtfs.zip") }
 
                 while (isActive) {
-                    // Recomputed every poll so a screen left open past midnight uses the new service day.
+                    // Recomputed every poll so a screen left open past midnight uses the new
+                    // service day.
                     val today = todayForGtfs(agency.zoneId)
                     val vehiclePosition = agency.fetchVehiclePosition(tripId, repository)
-                    // Fetched unconditionally now (not just once a matched stop is already in hand)
-                    // since it also feeds the current-stop fallback below, not just the ETA lookup.
+                    // Fetched every poll, since it also helps find the current stop.
                     val tripUpdate = agency.fetchTripUpdate(tripId, repository)
-                    // liveVehicleSource is route-scoped (see its own doc), so this trip's routeId must
-                    // resolve for it to be usable at all -- a trip missing its route (shouldn't happen in
-                    // practice) just falls through to the standard vehiclePosition chain below.
                     val liveVehicleInfo = liveVehicleSource
                         ?.takeIf { routeId != null }
                         ?.let { source ->
@@ -315,8 +273,8 @@ class TripDetailViewModel(
                             }
                         }
 
-                    // Try vehicle-id predictions first for an authoritative next stop (GPS proximity can
-                    // misjudge looping routes); otherwise fall back to the position-based matching below.
+                    // The vehicle's own predictions give the most reliable next stop (GPS can
+                    // misjudge looping routes); otherwise position matching below.
                     val vehicleNextStop = stopPredictionSource?.let { source ->
                         liveVehicleInfo?.vehicleId?.let { vehicleId ->
                             try {
@@ -331,13 +289,8 @@ class TripDetailViewModel(
                     }
                     val matchedStopFromVehicle = vehicleNextStop?.let { next -> stops.find { it.stopId == next.stopId } }
 
-                    // Least certain of every source checked here (see FuzzyRunTrips's own doc), so it's
-                    // only ever consulted once liveVehicleInfo/vehiclePosition/tripUpdate have all come
-                    // up empty below -- an approximate rank-matched pairing should never override a
-                    // certain match. A rider's own explicit Select Run pick (see BoardedFuzzyRun's own
-                    // doc) is a genuinely different, higher-authority lookup -- no ranking at all, just
-                    // that one pinned run's current live data -- checked first so it always wins over
-                    // the automatic (if sticky) match once a rider has actually chosen.
+                    // A closest match is only used when nothing else locates the vehicle. The
+                    // rider's Select Run pick is checked first and always wins.
                     val pinnedRun = boardedFuzzyRun.value?.takeIf { it.tripId == tripId }
                     val fuzzyTripUpdate = scopedFuzzyRunTrips?.let { source ->
                         try {
@@ -353,16 +306,11 @@ class TripDetailViewModel(
                             null
                         }
                     }
-                    // The soonest remaining stop in the matched live run's own ordered stop list (see
-                    // CtaTrainTrackerSource/MbtaSubwayFuzzyRunSource's own docs -- both build this list
-                    // in stop order already), the same "first entry is the next stop" precedent
-                    // vehicleNextStop/matchedStopFromVehicle above already establishes for StopPredictionSource.
+                    // The matched run's next stop.
                     val matchedStopFromFuzzy = fuzzyTripUpdate?.stopTimeUpdate?.firstOrNull()?.stopId
                         ?.let { stopId -> stops.find { it.stopId == stopId } }
 
-                    // Feeds the footer's own Next/Previous stepper -- independent of pinnedRun/
-                    // fuzzyTripUpdate above (which only fetch this ONE trip's own matched data); this
-                    // is every same-direction live run on the route, so a rider can step through them.
+                    // Every live run in this direction, for the Next/Previous stepper.
                     if (scopedFuzzyRunTrips != null) {
                         val currentAlightStopId = boardedTrip.value?.takeIf { it.tripId == tripId }?.alightStopId
                         val runOptions = try {
@@ -385,21 +333,13 @@ class TripDetailViewModel(
                         lastRunOptions = emptyList()
                         runStepperState.value = null
                     }
-                    // Computed once, reused both in the fallback chain below and in isClosestMatch's own
-                    // check, so the two can never drift out of sync with each other.
+                    // Shared by the fallback chain and isClosestMatch so they agree.
                     val tripUpdateInferredSequence = tripUpdate?.inferCurrentStopSequence()
 
-                    // liveVehicleInfo (a richer source, e.g. CTA Bus Tracker) is preferred over the
-                    // standard VehiclePositions match when present, same precedence Upcoming
-                    // Arrivals/MapScreen already give it. VehiclePositions' own current_stop_sequence is
-                    // preferred when present; falls back to shape-aware matching, then GPS-proximity
-                    // matching, and only as a last resort to inferring it from TripUpdates' own
-                    // remaining stops (see GtfsRtTripUpdate.inferCurrentStopSequence) -- same fallback
-                    // chain as HomeScreen's poll loop. The two geometric tiers are both gated by
-                    // shapeSource (i.e. TripShapeSource attachment, RIPTA today) rather than running for
-                    // any agency current_stop_sequence happens to be missing for -- see
-                    // matchCurrentStopByProximity's own doc for why this is an explicit per-agency
-                    // opt-in rather than an automatic fallback.
+                    // Current stop, in order of preference: the agency's own live source, the
+                    // vehicle's reported stop, shape matching, GPS proximity, then the trip
+                    // update's remaining stops. The two geometric matches only run for agencies
+                    // with a [TripShapeSource].
                     val anchorBefore = TripPositionAnchor.get(tripId)
                     suspend fun matchViaShape(lat: Double, lon: Double, bearing: Float?): Int? {
                         val source = shapeSource ?: return null
@@ -441,25 +381,17 @@ class TripDetailViewModel(
 
                     val matchedStop = matchedStopFromVehicle
                         ?: liveStopSequence?.let { seq -> stops.find { it.stopSequence == seq } }
-                    // True only when nothing above this point resolved a stop -- matchedStopFromFuzzy is
-                    // exactly what filled liveStopSequence's last fallback slot, so this stays in sync
-                    // with the priority chain above by construction rather than re-deriving it. A
-                    // rider's own pinned run is never "closest match" -- they confirmed it themselves.
+                    // A closest match only when nothing else found the stop. The rider's own pick
+                    // never counts as one.
                     val isClosestMatch = pinnedRun == null && matchedStopFromVehicle == null &&
                         liveVehicleInfo == null && vehiclePosition == null &&
                         tripUpdateInferredSequence == null && matchedStopFromFuzzy != null
                     val liveStatus = matchedStop?.let { stop ->
                         val scheduledTime = stop.departureTime ?: stop.arrivalTime ?: return@let null
                         val rtStopUpdate = tripUpdate?.updateFor(stop.stopId, stop.stopSequence)
-                        // vehicleNextStop's own predicted time is reused directly when it's the one that
-                        // resolved this exact stop (the common case for CTA -- no extra network call
-                        // needed). Otherwise falls back to a stop-scoped prediction lookup, same as
-                        // before -- StopPredictionSource is stop-scoped (see its own doc), so there's no
-                        // stop_id to ask about until the current stop is known some other way. A real
-                        // prediction here is preferred over a standard TripUpdates match, same "real
-                        // predicted time beats trust-the-schedule" priority Upcoming Arrivals already
-                        // gives StopPredictionSource. fuzzyTripUpdate's own per-stop time is the last
-                        // resort, same priority as matchedStopFromFuzzy above.
+                        // Predicted time at the stop, in order of preference: the vehicle's
+                        // next-stop prediction, a stop prediction from the agency's API, the trip
+                        // update, then the closest match.
                         val predictedTime = vehicleNextStop?.takeIf { it.stopId == stop.stopId }?.predictedEpochSeconds
                             ?: stopPredictionSource?.let { source ->
                                 try {
@@ -498,8 +430,7 @@ class TripDetailViewModel(
         }
     }
 
-    /** Only checks while THIS trip is the boarded one -- see the shared [checkReachedAlightStop]
-     * (used identically by HomeScreenViewModel) for the actual reached/alight/celebration logic. */
+    /** Only checks while this trip is the boarded one; see the shared [checkReachedAlightStop]. */
     private suspend fun checkReachedAlightStop(stops: List<TripStopRow>, liveStopSequence: Int?) {
         val boarded = boardedTrip.value ?: return
         if (boarded.tripId != tripId) return
@@ -532,11 +463,11 @@ class TripDetailViewModel(
         pollJob = null
     }
 
-    /** Boarding a trip from a schedule that isn't already primary promotes it -- a rider actively
-     * riding it is a stronger signal than whatever was primary before, and the home screen's own
-     * clock/attribution/Schedule button should reflect the trip actually being ridden. Shares the
-     * same swap [AgencyPreferences.promoteToPrimary] as Additional Schedules' own tap+hold; a no-op
-     * there when [currentAgency] is already primary. */
+    /**
+     * Boarding a trip from an additional schedule makes that agency primary, so Home's clock,
+     * credits, and Schedule button match the trip being ridden. Does nothing when it's already
+     * primary.
+     */
     fun board() {
         val currentAgency = agency ?: return
         viewModelScope.launch {
@@ -548,17 +479,15 @@ class TripDetailViewModel(
     fun alight() {
         viewModelScope.launch {
             boardedTripPreferences.alight()
-            // Meaningless without a boarded trip to attach it to -- see BoardedFuzzyRun's own doc.
+            // A run pick only applies to a boarded trip.
             boardedFuzzyRunPreferences.clear()
         }
     }
 
-    /** Steps the pinned run one position forward/backward through [lastRunOptions] -- see
-     * [RunStepperState]'s own doc. Unpinned (still on the automatic match) always lands on index 0
-     * regardless of direction, since Content() only ever shows the Previous icon once a pin already
-     * exists (hasPrevious requires currentIndex > 0), so a Previous tap from unpinned can't happen
-     * in practice; Next tapped from unpinned establishing a baseline at the soonest option is the
-     * only real case. */
+    /**
+     * Steps the pinned run forward or back through [lastRunOptions]. Without a pin, starts at the
+     * soonest run.
+     */
     fun nextRun() = shiftRun(1)
     fun previousRun() = shiftRun(-1)
 
@@ -571,8 +500,7 @@ class TripDetailViewModel(
         viewModelScope.launch { boardedFuzzyRunPreferences.selectRun(tripId, target.runId) }
     }
 
-    /** Only meaningful while this screen's own trip is the boarded one. Tapping the already-
-     * designated stop clears it, same toggle convention as Settings' default-agency row. */
+    /** Only while this trip is boarded. Tapping the current alight stop clears it. */
     fun toggleAlightStop(stopId: String) {
         val boarded = boardedTrip.value ?: return
         if (boarded.tripId != tripId) return
@@ -620,9 +548,8 @@ class TripDetailScreen(
         val alerts by viewModel.alerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
-        // Fires once the "you've arrived" modal has been dismissed (manually or by timeout) --
-        // see ReachedStopModal. Navigates to that stop's own Upcoming Arrivals, matching "the stop
-        // they just alighted at" from the feature spec.
+        // After the "you've arrived" message is dismissed, open the arrivals for the stop the rider
+        // got off at.
         LaunchedEffect(reachedAlightStop) {
             val stop = reachedAlightStop ?: return@LaunchedEffect
             val agency = GtfsAgency.forDbFile(dbFile)
@@ -646,14 +573,9 @@ class TripDetailScreen(
                     .background(LightThemeTokens.colors.background)
             ) {
                 Box {
-                    // This screen's own Board/Alight toggle -- Play when this trip isn't the
-                    // boarded one (tap to board it), Stop when it is (tap to alight). Distinct from
-                    // every other screen's currentTripTopBarButton "return to trip" button (which
-                    // never changes state, just navigates) -- Trip Detail always shows its own
-                    // toggle, even while a different trip is boarded elsewhere. No rightButton here
-                    // (LightTopBar only takes one) since a trip switch also needs its own warning
-                    // icon alongside the toggle, so a plain Row is stacked on top instead, matching
-                    // HomeScreen's own two-icon corner.
+                    // The Board/Alight toggle: Play to board this trip, Stop to alight. A Row
+                    // instead of LightTopBar's single right button, since the alerts and
+                    // switch-warning icons sit beside it.
                     LightTopBar(
                         leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                         center = LightTopBarCenter.Text("Trip Detail"),
@@ -666,11 +588,11 @@ class TripDetailScreen(
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Spaced away from Board/Alight so a tap meant for it doesn't open the alerts.
+                        // Spaced away from Board/Alight so a tap meant for it doesn't open the
+                        // alerts.
                         alerts?.let { AlertBadge(it.trip, it.screenAlerts, Modifier.padding(end = 16.dp)) }
-                        // A different trip is already boarded -- tapping Play here would end that
-                        // one and start tracking this one instead, so it's flagged before the tap
-                        // rather than silently swapping.
+                        // Another trip is boarded, so Play would replace it; flagged before the
+                        // tap.
                         if (boardedTrip != null && !isBoardedHere) {
                             LightIcon(
                                 icon = LightIcons.DELETE,
@@ -689,16 +611,8 @@ class TripDetailScreen(
                         )
                     }
                 }
-                // Select Run + the Next/Previous stepper, combined into one centered row right
-                // under the header -- ties the whole concept to the boarding/progress-tracking use
-                // case (see BoardedFuzzyRun's own doc), not general Trip Detail browsing, and only
-                // for a route FuzzyRunTrips actually covers -- fuzzyRouteId is null for every
-                // standard-GTFS trip, the vast majority, so this row never renders for them at all.
-                // A Row with Arrangement.Center, not a Box with edge alignments -- keeps the icons
-                // sitting close to the label they flank instead of pinned out at the screen's own
-                // edges. runSelectionEnabled gates the whole row; runStepperEnabled (nested under
-                // it in Settings -- see RunSelectionPreferences' own doc) additionally gates just
-                // the icons, so the tap-to-open-list label alone is the default experience.
+                // Select Run with its Next/Previous icons, centered under the header. Only while
+                // boarded on a route with closest-match runs. The icons have their own setting.
                 if (isBoardedHere && fuzzyRouteId != null && agency != null && runSelectionEnabled) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -716,8 +630,7 @@ class TripDetailScreen(
                             )
                         }
                         LightText(
-                            // Not the run's own id -- some sources hand back genuinely ugly ones
-                            // (e.g. MBTA's "ADDED-1584870162"), not fit for a rider-facing label.
+                            // Not the run's id, which can be unreadable (e.g. "ADDED-1584870162").
                             text = boardedFuzzyRun?.takeIf { it.tripId == tripId }
                                 ?.let { "Run Selected - tap to change" }
                                 ?: "Select Run",
@@ -749,9 +662,7 @@ class TripDetailScreen(
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
 
-                // Once an alight stop is actually picked, the underlined stop below already shows
-                // it -- this instruction has done its job and would just be stale clutter from
-                // here on (tap-and-hold still works for connections, just no longer called out).
+                // Hidden once an alight stop is picked, since the underlined stop shows it.
                 if (isBoardedHere && alightStopId == null) {
                     LightText(
                         text = "Tap a stop below to mark where you're getting off. Tap and hold a " +
@@ -785,9 +696,8 @@ class TripDetailScreen(
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.stops) { stop ->
                                 val isLive = s.liveAtStopSequence != null && stop.stopSequence == s.liveAtStopSequence
-                                // Only ever true when Settings' "Show earlier stops" widened the
-                                // fetched range back past fromStopSequence -- see SelectRunScreen's
-                                // identical isPriorToTripStart for the same greyed-out convention.
+                                // Only true when "Show earlier stops" is on. Greyed out like
+                                // SelectRunScreen.
                                 val isPriorToBoarding = stop.stopSequence < fromStopSequence
 
                                 fun openConnections() {
@@ -818,19 +728,13 @@ class TripDetailScreen(
                                         .fillMaxWidth()
                                         .alpha(if (isPriorToBoarding) 0.5f else 1f)
                                         .let { base ->
-                                            // A stop before the boarding point can never be the alight stop, so it
-                                            // always falls into the not-boarded gesture split below, regardless of
-                                            // isBoardedHere -- otherwise a short tap here would designate/clear an
-                                            // alight stop earlier in the trip than where the rider actually got on.
+                                            // A stop before boarding can't be the alight stop, so
+                                            // it gets the not-boarded gestures.
                                             if (isBoardedHere && !isPriorToBoarding) {
-                                                // While boarded, a short tap designates/clears this stop as the alight stop
-                                                // instead -- tap-and-hold still reaches its connections, same as the
-                                                // not-boarded case below. Uses detectTapGestures specifically, not a
-                                                // hand-rolled awaitEachGesture loop: an unconditional
-                                                // awaitFirstDown().consume() claims every touch starting on a row, including
-                                                // the start of a swipe, before LazyColumn's own scroll gesture gets a chance
-                                                // to recognize the drag. detectTapGestures respects touch slop, so a real
-                                                // swipe still falls through to the list's scrolling.
+                                                // Boarded: tap picks or clears the alight stop, tap
+                                                // and hold opens connections. detectTapGestures
+                                                // respects touch slop, so a swipe still scrolls the
+                                                // list.
                                                 base.pointerInput(stop.stopId) {
                                                     detectTapGestures(
                                                         onTap = { viewModel.toggleAlightStop(stop.stopId) },
@@ -838,10 +742,8 @@ class TripDetailScreen(
                                                     )
                                                 }
                                             } else {
-                                                // Not boarded: a short tap keeps opening this stop's connections, same as
-                                                // always; tap-and-hold newly opens its live upcoming arrivals instead -- same
-                                                // gesture split as the boarded branch above, just with arrivals in the
-                                                // long-press slot since connections already has the short tap here.
+                                                // Not boarded: tap opens connections, tap and hold
+                                                // opens upcoming arrivals.
                                                 base.pointerInput(stop.stopId) {
                                                     detectTapGestures(
                                                         onTap = { openConnections() },
@@ -864,10 +766,8 @@ class TripDetailScreen(
                                                 modifier = Modifier.padding(end = 8.dp),
                                             )
                                         }
-                                        // Weighted so a long stop name wraps within its own share of the row instead
-                                        // of first greedily measuring against the row's full width and only then
-                                        // discovering there's no room for the trailing time -- see NearbyStopsScreen's
-                                        // identical fix for the same Compose behavior.
+                                        // Weighted so a long stop name wraps instead of pushing out
+                                        // the time.
                                         Row(
                                             modifier = Modifier.weight(1f),
                                             verticalAlignment = Alignment.Top,
@@ -886,9 +786,10 @@ class TripDetailScreen(
                                                     modifier = Modifier.padding(start = 8.dp),
                                                 )
                                             }
-                                            // Same size as the transfer-station icon, so they line up. While boarded
-                                            // with no alight stop yet, a tap on the row picks one, so the icon isn't
-                                            // tappable until an alight stop is set.
+                                            // Same size as the transfer-station icon, so they line
+                                            // up. While boarded with no alight stop yet, a tap on
+                                            // the row picks one, so the icon isn't tappable until
+                                            // an alight stop is set.
                                             alerts?.let {
                                                 AlertBadge(
                                                     it.byStop[stop.stopId].orEmpty(),
@@ -906,11 +807,8 @@ class TripDetailScreen(
                                         )
                                     }
                                     if (isLive) {
-                                        // See TripDetailState.Loaded.isClosestMatch's own doc -- an
-                                        // approximate FuzzyRunTrips pairing must never read as a
-                                        // confirmed "Live" prediction, so it keeps its own prefix even
-                                        // when a status label is present (unlike the plain "Live" case,
-                                        // which shows the bare status label with no prefix).
+                                        // A closest match keeps its prefix even with a status
+                                        // label, so it never reads as "Live".
                                         val text = when {
                                             s.isClosestMatch -> s.liveStatus?.label()?.let { "Closest match - $it" } ?: "Closest match"
                                             else -> s.liveStatus?.label() ?: "Live"
@@ -919,9 +817,8 @@ class TripDetailScreen(
                                             text = text,
                                             variant = LightTextVariant.Detail,
                                             lighten = true,
-                                            // Indented to align under the stop name, not the vehicle icon before it
-                                            // (1.2f size + the icon's own 8dp end padding) -- a sibling of that Row, not
-                                            // a child of it, so it needs its own matching start padding.
+                                            // Lines up under the stop name, past the vehicle icon
+                                            // and its padding.
                                             modifier = Modifier.padding(start = 1.2f.gridUnitsAsDp() + 8.dp),
                                         )
                                     }

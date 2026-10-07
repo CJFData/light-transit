@@ -18,33 +18,22 @@ private val boardedLineTypeKey = stringPreferencesKey("BOARDED_LINE_TYPE")
 private val boardedAlightStopIdKey = stringPreferencesKey("BOARDED_ALIGHT_STOP_ID")
 private val progressBarVisibleKey = booleanPreferencesKey("TRIP_PROGRESS_BAR_VISIBLE")
 
-/** Everything needed to reopen TripDetailScreen for the trip the rider is currently on, from
- * anywhere in the app (see HomeScreen's "Current Trip" entry) -- not just the trip id, since
- * reopening that screen needs the exact same constructor arguments the original navigation used. */
+/** Everything needed to reopen Trip Detail for the boarded trip from anywhere in the app. */
 data class BoardedTrip(
     val tripId: String,
     val agency: GtfsAgency,
     val fromStopSequence: Int,
     val routeLabel: String,
     val directionLabel: String,
-    /** This trip's own vehicle mode (bus/subway/commuter rail) -- null only if the route's
-     * route_type couldn't be resolved. Carried here (not re-looked-up) so HomeScreen can show the
-     * matching vehicle icon next to the Current Trip entry without opening its own repository
-     * connection just for this. */
+    /** The trip's vehicle type, saved so Home can show its icon without a lookup. */
     val lineType: LineType?,
-    /** The stop the rider tapped to mark as where they're getting off -- null until they've
-     * chosen one. See TripDetailScreen's tap-to-designate / tap-hold-for-connections gesture. */
+    /** The stop the rider picked to get off at; null until chosen. */
     val alightStopId: String?,
 )
 
 /**
- * Tracks "the current trip" (Trip Detail's Board/Alight feature) -- persisted via the SDK's
- * Preferences DataStore, the same mechanism [AgencyPreferences] uses, so it survives navigating
- * away and even an app restart. Deliberately a saved reference back to Trip Detail rather than a
- * background tracker: real-time "have we reached the alight stop" detection only ever happens
- * while that screen is open (its existing live-position poll), matching how live tracking already
- * works everywhere else in this app -- there's no SDK mechanism for meaningfully-real-time
- * background work (WorkManager's periodic floor is 15 minutes, confirmed via LightWork.kt).
+ * The boarded trip, saved in DataStore so it survives navigation and restarts. Arrival at the
+ * alight stop is only checked while Home or Trip Detail is open and polling.
  */
 class BoardedTripPreferences(private val dataStore: DataStore<Preferences>) {
 
@@ -100,7 +89,7 @@ class BoardedTripPreferences(private val dataStore: DataStore<Preferences>) {
         }
     }
 
-    /** On by default -- HomeScreen's board-to-alight progress bar (Settings screen toggle). */
+    /** On by default: Home's progress bar for the boarded trip. */
     val progressBarVisibleFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[progressBarVisibleKey] ?: true }
 
     suspend fun setProgressBarVisible(visible: Boolean) {

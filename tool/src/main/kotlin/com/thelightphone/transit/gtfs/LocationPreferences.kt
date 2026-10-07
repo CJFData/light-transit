@@ -10,15 +10,13 @@ import kotlinx.coroutines.flow.map
 private val locationEnabledKey = booleanPreferencesKey("LOCATION_ENABLED")
 
 /**
- * Settings' "Use my location" toggle for Explore -- separate from (and layered on top of) the
- * OS/LightOS location permission grant itself, which this app has no way to revoke programmatically.
- * Turning this off tells NearbyStopsScreen not to touch GPS at all, regardless of whether the
- * permission is actually granted; turning it back on doesn't re-request the permission by itself,
- * that still happens the normal way (Home priming/prompt, or NearbyStopsScreen's own retry).
+ * Settings' "Use my location" toggle for Explore, on top of the system permission, which the app
+ * can't revoke. Off, Explore doesn't use GPS at all. Turning it on doesn't request the permission
+ * by itself.
  */
 class LocationPreferences(private val dataStore: DataStore<Preferences>) {
 
-    /** On by default -- matches every other Explore-adjacent default in this app. */
+    /** On by default. */
     val locationEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[locationEnabledKey] ?: true }
 
     suspend fun setLocationEnabled(enabled: Boolean) {

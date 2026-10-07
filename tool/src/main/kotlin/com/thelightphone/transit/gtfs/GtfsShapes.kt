@@ -6,29 +6,16 @@ import java.io.IOException
 import java.util.zip.ZipFile
 
 /**
- * Reads a trip's shape points directly out of its agency's already-downloaded static feed zip (see
- * [gtfsZipFile]), entirely separate from [GtfsIngestor]'s bulk SQLite pipeline -- deliberately so.
- * Adding a `shapes` table there would mean parsing shapes.txt (some agencies' are comparable in row
- * count to stop_times.txt) for every agency's ordinary ingest, and bumping [GTFS_SCHEMA_VERSION]
- * would force a full re-ingest for every already-cached agency, not just whichever one this is
- * piloted on. Reading on demand from the zip already sitting on disk, scoped to one shape_id at a
- * time, costs nothing for any agency that doesn't attach [TripShapeSource] at all, and no ingestion
- * or schema change for the one that does.
- *
- * Same shape as [MbtaV3VehicleSource]/CTA's `RunAssociatedTripSource` (see [AgencyComponent]'s own
- * doc) -- a component doing its own independent data access rather than hooking into the shared
- * ingestion pipeline. Generic (not RIPTA-specific): shapes.txt's format is standard GTFS, so this one
- * object is meant to be reused by any agency that opts in, not reimplemented per agency.
+ * Reads a trip's shape from the agency's downloaded schedule zip (see [gtfsZipFile]) instead of
+ * ingesting shapes.txt, so agencies that don't use shapes pay nothing and no schema change is
+ * needed. Works for any agency that adds it.
  */
 object StaticGtfsShapeSource : TripShapeSource {
 
-    /** One trip's worth of cache -- a trip's shape never changes mid-boarding, so re-reading the zip
-     * on every poll would be pure waste. Keyed by tripId (not shapeId) since every caller already has
-     * tripId on hand; @Volatile/@Synchronized mirrors [TripPositionAnchor]'s own single-trip-at-a-time
-     * shape, appropriate for the same reason -- a rider only ever tracks one boarded trip at a time.
-     * [cachedStopDistances] is a second, separate cache (see [stopDistancesAlongShape]'s own doc) --
-     * kept alongside rather than merged into one object since it depends on stop locations the caller
-     * supplies, not just the trip id. */
+    /**
+     * Caches one trip's shape, since it doesn't change while boarded. [cachedStopDistances] is
+     * cached separately because it also depends on the caller's stop locations.
+     */
     @Volatile private var cachedTripId: String? = null
     @Volatile private var cachedPoints: List<ShapePoint>? = null
     @Volatile private var cachedStopDistancesTripId: String? = null
@@ -47,15 +34,11 @@ object StaticGtfsShapeSource : TripShapeSource {
         return points
     }
 
-    /** Each of [stops]' own position along [tripId]'s shape (stopSequence -> distanceAlongShapeMeters),
-     * found by projecting each stop's own coordinates (from [stopLocations], the same map every caller
-     * already builds via [GtfsRepository.getTripStopLocations] for the point-radius fallback -- reused
-     * here rather than re-queried) onto the *whole* shape once, unconstrained (a stop's position never
-     * changes, so this global search only ever needs to run once per boarded trip, not once per poll,
-     * unlike [projectOntoShape]'s own windowed steady-state calls). Null when [shapePoints] has no
-     * shape for this trip at all; a stop whose own coordinates are missing from [stopLocations] is
-     * simply absent from the returned map (matches every other "missing data, not an error" case in
-     * this app), not a reason to fail the whole lookup. */
+    /**
+     * Each stop's distance along [tripId]'s shape (stopSequence to meters), found once per trip by
+     * projecting the stop onto the whole shape. Null when the trip has no shape; stops without a
+     * location are left out.
+     */
     override suspend fun stopDistancesAlongShape(
         tripId: String,
         repository: GtfsRepository,
@@ -78,10 +61,7 @@ object StaticGtfsShapeSource : TripShapeSource {
         return distances
     }
 
-    /** Mirrors [GtfsIngestor.loadEntryWithRetry]'s own `ZipFile.getEntry`/`getInputStream` idiom, minus
-     * its retry-on-`ZipException` behavior -- this is a one-shot on-demand read, not a bulk ingest a
-     * rider is actively waiting on, so a transient failure just means no shape data this time, the same
-     * "never force a link" fallback every other component in this app already follows. */
+    /** Reads one shape from the zip. A failure just means no shape this time. */
     private fun readShapePoints(zipFile: File, shapeId: String): List<ShapePoint>? {
         if (!zipFile.exists()) return null
         return try {
@@ -104,10 +84,8 @@ object StaticGtfsShapeSource : TripShapeSource {
                     }
                     val sorted = rawPoints.sortedBy { it.sequence }
                     if (sorted.isEmpty()) return null
-                    // Cumulative distance computed here, once, rather than by a caller on every poll --
-                    // RIPTA's real feed confirmed to have no shape_dist_traveled column in either
-                    // shapes.txt or stop_times.txt (checked directly against its cached zip), so this
-                    // can't just be read off the feed the way that GTFS-optional column is meant to.
+                    // Cumulative distance is computed here, since shape_dist_traveled is optional
+                    // and not every feed has it.
                     var cumulative = 0.0
                     val points = mutableListOf<ShapePoint>()
                     sorted.forEachIndexed { index, raw ->

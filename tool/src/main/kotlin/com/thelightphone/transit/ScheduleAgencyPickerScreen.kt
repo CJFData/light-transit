@@ -28,19 +28,11 @@ import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.gtfsDbFile
 import java.io.File
 
-/** Nothing reactive here -- [agencies] is a fixed snapshot passed in at construction (Home's own
- * "Schedule" button already computed it fresh), so this just needs to be a [LightViewModel] to fit
- * [LightScreen]'s own shape, same as every other screen in this app. */
 class ScheduleAgencyPickerViewModel : LightViewModel<Unit>()
 
 /**
- * Home's "Schedule" bottom-bar button lands here instead of going straight to
- * [LineTypeSelectionScreen] whenever a rider has more than one schedule downloaded at once (a
- * primary plus one or more [AgencyPreferences.additionalDownloadsFlow] extras, see
- * [ScheduleSelectionScreen]'s own doc) -- picking one here is exactly "which schedule am I looking
- * at right now," then [LineTypeSelectionScreen]/[RouteSelectionScreen] proceed as normal for that
- * one agency's own database. The common single-schedule case skips this screen entirely (see
- * HomeScreen's own bottom-bar wiring) -- it only exists once there's a real choice to make.
+ * Home's Schedule button opens this when the rider has more than one schedule downloaded in the
+ * region, to pick which one to browse. With only one, it goes straight to that schedule.
  */
 class ScheduleAgencyPickerScreen(
     sealedActivity: SealedLightActivity,

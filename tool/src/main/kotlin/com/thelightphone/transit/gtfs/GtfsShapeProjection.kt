@@ -5,30 +5,23 @@ import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sqrt
 
-/** How far ahead a stalled position walk can look to catch up. It's much larger than
- * [PROXIMITY_ARRIVAL_RADIUS_METERS] because a vehicle can pass several stops between infrequent
- * GPS updates or missed polls. Too large and it could match across a route that loops back near
- * its start, so 3km is a practical middle ground for city routes. */
+/**
+ * How far ahead along the shape a steady-state match can look. Large enough to catch a vehicle that
+ * passed several stops between updates, small enough not to match across a route that loops back
+ * near itself.
+ */
 private const val FORWARD_SEARCH_WINDOW_METERS = 3_000.0
 
-/** How close a cold-start hint's own windowed match must be to the shape before it's trusted --
- * mirrors [COLD_START_HINT_SANITY_RADIUS_METERS]'s own role for the point-radius matcher (reject an
- * implausible hint, don't blindly trust it), but arguably a stronger check here: a genuinely
- * on-route vehicle's GPS should sit within ordinary GPS-accuracy/map-inaccuracy distance of the
- * shape's own path (tens of meters), not just "somewhere near a stop." Kept as its own constant
- * rather than reusing that one directly -- distance-to-a-continuous-path and distance-to-a-single-
- * point are different enough measures to warrant their own tuned value. */
+/** How close a cold-start match must sit to the shape to be trusted. */
 private const val SHAPE_HINT_SANITY_RADIUS_METERS = 500.0
 
-/** Only lets bearing break a genuine near-tie between two candidate segments at similar distance from
- * the shape -- never lets it override a segment that's meaningfully closer than the rest. See
- * [projectOntoShape]'s own doc. */
+/** Bearing only breaks near-ties between segments within this distance of the closest. */
 private const val BEARING_TIEBREAK_MARGIN_METERS = 15.0
 
-/** Initial compass bearing (0-360, degrees) from (lat1,lon1) to (lat2,lon2) -- standard great-circle
- * bearing formula. Used to compare a shape segment's own local heading against a vehicle's reported
- * [com.thelightphone.transit.gtfs.GtfsRtPosition.bearing] (confirmed populated by RIPTA's live feed,
- * though unused anywhere in this app before [projectOntoShape]). */
+/**
+ * Initial compass bearing (0-360) from (lat1, lon1) to (lat2, lon2), compared against the vehicle's
+ * reported bearing.
+ */
 fun bearingDegrees(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val phi1 = Math.toRadians(lat1)
     val phi2 = Math.toRadians(lat2)
@@ -44,12 +37,10 @@ private fun circularDiffDegrees(a: Double, b: Double): Double {
     return if (diff > 180.0) 360.0 - diff else diff
 }
 
-/** Closest point on a single short segment (p1->p2) to (lat,lon), as (fraction along the segment in
- * [0,1], distance from (lat,lon) to that projected point in meters). Approximates the local area as
- * flat -- degrees scaled to meters by a per-latitude conversion factor -- which is accurate enough
- * for this purpose since GTFS shape segments (consecutive shape points) are always short; every
- * actual reported distance elsewhere in this app still goes through the exact great-circle
- * [haversineMeters], this projection only ever decides WHERE on the segment is closest. */
+/**
+ * The closest point on segment p1-p2 to (lat, lon), as (fraction along the segment, distance in
+ * meters). Treats the short segment as flat.
+ */
 private fun closestPointOnSegment(
     lat: Double, lon: Double,
     lat1: Double, lon1: Double, lat2: Double, lon2: Double,
@@ -68,30 +59,19 @@ private fun closestPointOnSegment(
     return t to distanceMeters
 }
 
-/** [distanceAlongShapeMeters] is how far along the shape's own polyline the projected point sits
- * (from the shape's first point); [distanceFromShapeMeters] is how far the raw (lat, lon) sat from
- * that projected point -- the plausibility signal cold-start validation checks against
- * [SHAPE_HINT_SANITY_RADIUS_METERS]. */
+/**
+ * [distanceAlongShapeMeters] is how far along the shape the projected point is;
+ * [distanceFromShapeMeters] is how far the position is from the shape.
+ */
 data class ShapeProjection(val distanceAlongShapeMeters: Double, val distanceFromShapeMeters: Double)
 
 /**
- * Closest point on [shapePoints]' own polyline to (lat, lon) -- the path-aware analog of
- * [matchCurrentStopByProximity]'s point-radius matching, for any agency with a [TripShapeSource]
- * attached. [searchFromMeters]/[searchWindowMeters] restrict the search to segments whose own
- * [ShapePoint.cumulativeMeters] falls within that range -- null [searchFromMeters] searches the whole
- * shape (cold start only, mirroring [matchCurrentStopByProximity]'s own global-nearest cold-start
- * fallback and its same loop/backtrack risk); a steady-state caller always supplies a forward-only
- * window from the last known anchor, since re-matching against the *whole* shape every poll could
- * jump backward on a route that loops near itself, the same reasoning
- * [matchCurrentStopByProximity]'s own forward-only walk is built on.
+ * The closest point on the shape to (lat, lon). [searchFromMeters] and [searchWindowMeters] limit
+ * the search to that stretch of the shape; a null start searches the whole shape (cold start only).
+ * Searching forward only keeps a looping route from matching backward.
  *
- * Among every candidate segment within [BEARING_TIEBREAK_MARGIN_METERS] of the single closest one,
- * prefers whichever segment's own local [bearingDegrees] most closely matches [vehicleBearing]
- * (circular difference) when it's non-null -- a tie-breaker for a shape that loops/self-intersects
- * within one search window, never the primary signal: a segment meaningfully closer than the rest
- * always wins regardless of bearing agreement. Falls back to pure closest-distance when
- * [vehicleBearing] is null, same "never force a link off missing data" convention every other live
- * source in this app already follows.
+ * Among segments within [BEARING_TIEBREAK_MARGIN_METERS] of the closest, prefers the one heading
+ * most like [vehicleBearing], when known.
  */
 fun projectOntoShape(
     lat: Double,
@@ -129,36 +109,20 @@ fun projectOntoShape(
     return ShapeProjection(chosen.distanceAlong, chosen.distanceFrom)
 }
 
-/** [stopSequence] is the same "at or approaching" semantics [matchCurrentStopByProximity] already
- * uses; [distanceAlongShapeMeters] is the raw projected distance, threaded back in as this trip's own
- * anchor on the next poll (see [TripPositionAnchor]). */
+/**
+ * [stopSequence] is the stop the vehicle is at or approaching; [distanceAlongShapeMeters] is saved
+ * as the next poll's anchor (see [TripPositionAnchor]).
+ */
 data class ShapeMatch(val stopSequence: Int, val distanceAlongShapeMeters: Double)
 
 /**
- * Path-aware alternative to [matchCurrentStopByProximity], for any trip whose agency has a
- * [TripShapeSource] attached (RIPTA today) -- see [[project_pico_transit_proximity_stall_bug]] for
- * why point-radius matching alone wasn't enough: it requires a GPS sample to land within
- * [PROXIMITY_ARRIVAL_RADIUS_METERS] of *each* intervening stop in sequence, which stalled for 7+
- * minutes on a real RIPTA trip once GPS update cadence (~30-60s) outpaced that per-stop confirmation.
- * A continuous distance-along-shape position instead resolves correctly in one step even when the
- * vehicle passed several stops between two coarse GPS samples.
+ * Finds the current stop by projecting the vehicle onto the trip's shape. Unlike
+ * [matchCurrentStopByProximity], it doesn't need a GPS sample near every stop, so it keeps up when
+ * a vehicle passes several stops between updates.
  *
- * [lastAnchorMeters] is whatever [ShapeMatch.distanceAlongShapeMeters] this function returned last
- * poll, or null for the first poll of a trip (or after any reset -- see [TripPositionAnchor]'s own
- * doc for when that happens). When non-null, the search is strictly forward-windowed from it (never
- * backward) -- both the stall fix (a continuous window search catches up across many stops at once,
- * unlike sequential single-stop checks) and a loop/backtrack guard (never re-matching the whole shape
- * from scratch every poll, same reasoning [matchCurrentStopByProximity]'s forward-only walk is built
- * on).
- *
- * When null (cold start), tries [coldStartSequenceHint] first -- the same
- * [GtfsRtTripUpdate.inferCurrentStopSequence]-sourced hint [matchCurrentStopByProximity] validates,
- * here validated by projecting near that hinted stop's own precomputed shape position and requiring
- * [ShapeProjection.distanceFromShapeMeters] to be within [SHAPE_HINT_SANITY_RADIUS_METERS] before
- * trusting it -- and falls back to an unconstrained whole-shape search otherwise, itself held to the
- * same [SHAPE_HINT_SANITY_RADIUS_METERS] bound before being trusted, mirroring
- * [matchCurrentStopByProximity]'s own two-tier cold-start fallback (each tier gated by its own
- * plausibility check, never an unconditional guess).
+ * With a [lastAnchorMeters] from the previous poll, searches forward from it only. On a cold start,
+ * tries near [coldStartSequenceHint]'s stop first, then the whole shape, trusting either only
+ * within [SHAPE_HINT_SANITY_RADIUS_METERS] of the shape.
  */
 fun matchCurrentStopByShapeProjection(
     stops: List<TripStopRow>,

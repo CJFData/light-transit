@@ -188,16 +188,18 @@ class SettingsViewModel(
         get() = _showStopsBeforeBoardingEnabled
     private val _showStopsBeforeBoardingEnabled = MutableStateFlow(false)
 
-    /** Explore's own "use my location" toggle -- separate from the OS/LightOS permission grant
-     * itself, which this screen has no way to revoke; see [LocationPreferences]'s own doc. */
+    /**
+     * The app's own location toggle, separate from the system permission (see
+     * [LocationPreferences]).
+     */
     val locationEnabled: StateFlow<Boolean>
         get() = _locationEnabled
     private val _locationEnabled = MutableStateFlow(true)
 
-    /** Live OS/LightOS permission status, re-checked on every [onScreenShow] (covers coming back
-     * from the system permission prompt or from OS app settings) -- unlike every other field on
-     * this screen, this isn't a stored preference, just a live query via [checkPermission]. Null
-     * until the first check completes. */
+    /**
+     * The live location permission status, checked on every [onScreenShow]; null until the first
+     * check.
+     */
     val locationPermissionStatus: StateFlow<LightServiceMethod.GetPermission.Result?>
         get() = _locationPermissionStatus
     private val _locationPermissionStatus = MutableStateFlow<LightServiceMethod.GetPermission.Result?>(null)
@@ -285,8 +287,8 @@ class SettingsViewModel(
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
-        // Refreshed on every visit, not just once, so returning from the system permission prompt
-        // (or from a manual revoke in OS app settings) is reflected without leaving and re-entering.
+        // Checked on every visit, so a change made in the permission prompt or system settings
+        // shows up.
         viewModelScope.launch(Dispatchers.IO) {
             _locationPermissionStatus.value = checkPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 .getOrNull()?.permissionResult
@@ -297,10 +299,7 @@ class SettingsViewModel(
         viewModelScope.launch { locationPreferences.setLocationEnabled(enabled) }
     }
 
-    /** Called from the AgencyPickerModal opened by the "Transit Agency" row below -- persisting the
-     * new default is all this does. HomeScreenViewModel's own defaultAgencyFlow collector (not this
-     * call) is what actually switches/ingests it, so this is the same effect a first-launch pick
-     * has, just reached from Settings instead. */
+    /** Saves the new default agency; Home's defaultAgencyFlow collector switches to it. */
     fun selectAgency(agency: GtfsAgency) {
         viewModelScope.launch {
             agencyPreferences.setDefaultAgency(agency)
@@ -419,9 +418,10 @@ class SettingsViewModel(
         viewModelScope.launch { tripDetailPreferences.setShowStopsBeforeBoardingEnabled(enabled) }
     }
 
-    /** Deletes every agency's downloaded schedule to free up space, then re-downloads whichever
-     * agency is currently selected -- see [clearAllCachedSchedules]'s own doc for how the running
-     * home screen picks this up. File I/O, so off the main thread even though it's usually quick. */
+    /**
+     * Deletes every agency's downloaded schedule, then re-downloads the selected one (see
+     * [clearAllCachedSchedules]).
+     */
     fun clearScheduleCache() {
         viewModelScope.launch(Dispatchers.IO) { clearAllCachedSchedules(filesDir) }
     }
@@ -449,9 +449,7 @@ class SettingsScreen(
         lightContext.filesDir,
     )
 
-    /** Every on/off setting on this screen renders as one tappable row using the SDK's own
-     * toggle-state icon, replacing the old two-separate-rows "On"/"Off" list this screen used to
-     * use for [SettingsViewModel.tapHoldArrivalsEnabled]/[SettingsViewModel.doubleTapStationEnabled]. */
+    /** An on/off setting as one tappable row with the SDK's toggle icon. */
     @Composable
     private fun ToggleRow(label: String, enabled: Boolean, onToggle: (Boolean) -> Unit, available: Boolean = true) {
         Row(
@@ -541,9 +539,8 @@ class SettingsScreen(
                         .fillMaxWidth()
                         .padding(start = 16.dp)
                         .lightClickable {
-                            // Same AgencyPickerModal Stage 1 onboarding uses, just with a close
-                            // button (allowCancel = true) since -- unlike first launch -- there's
-                            // already a valid agency to fall back to here.
+                            // The same picker as first launch, with a close button since there's
+                            // already an agency.
                             LightModalManager.show(
                                 modal = AgencyPickerModal(
                                     filesDir = lightContext.filesDir,
@@ -567,10 +564,7 @@ class SettingsScreen(
                     )
                 }
 
-                // Only meaningful for a primary that's actually part of a RegionalGroup -- an
-                // agency with no region-mates has nothing to add alongside it (see
-                // ScheduleSelectionScreen's own doc), so the row itself doesn't show at all rather
-                // than opening a screen with nothing real to offer.
+                // Only shown when the primary agency is in a region with others to add.
                 val primaryRegion = defaultAgency?.let { RegionalGroup.forAgency(it) }
                 if (primaryRegion != null) {
                     Row(
@@ -821,9 +815,7 @@ class SettingsScreen(
                 )
                 ToggleRow("Run selection", runSelectionEnabled, viewModel::setRunSelectionEnabled)
 
-                // Only shown at all once run selection itself is on -- a stepper with nothing to
-                // step through (the row above wouldn't even render) makes no sense as a standalone
-                // setting, so it's nested here rather than always visible.
+                // Nested under run selection, since the stepper needs it.
                 if (runSelectionEnabled) {
                     LightText(
                         text = "Adds next and previous buttons beside Select Run to switch trains " +

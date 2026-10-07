@@ -10,9 +10,8 @@ import kotlinx.coroutines.flow.map
 private val wifiOnlyDownloadsKey = booleanPreferencesKey("WIFI_ONLY_DOWNLOADS_ENABLED")
 
 /**
- * Settings toggle that gates the [GtfsIngestor]'s network access -- on by default. When on, it
- * skips both the update check and the schedule download whenever the device isn't on Wi-Fi; a
- * cached schedule keeps working while the gate is active.
+ * "Only download over Wi-Fi", on by default: [GtfsIngestor] skips the update check and download
+ * when not on Wi-Fi. A downloaded schedule keeps working.
  */
 class NetworkPreferences(private val dataStore: DataStore<Preferences>) {
 

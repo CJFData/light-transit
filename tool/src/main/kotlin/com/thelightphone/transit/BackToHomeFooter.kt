@@ -14,40 +14,20 @@ import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// A real, if small, pause between each pop -- not for visual pacing but so a screen just popped
-// mid-query (its onScreenShow coroutine still fetching when goBack() closes its repository out
-// from under it) gets a real chance to observe cancellation before the next pop starts. Popping
-// every screen in one tight, zero-delay loop is what originally surfaced this race (an unguarded
-// DB call outside its own try/catch threw once its connection pool was closed mid-query and
-// crashed the app) -- this doesn't eliminate an unguarded call elsewhere still being possible,
-// only makes the race far less likely to land within one loop's lifetime.
+// A short pause between pops, so a screen closed mid-query can cancel before the next pop.
 private const val POP_STEP_DELAY_MS = 80L
 
-// A plain centered icon in a short Box, not LightBottomBar -- that component's own height
-// (BOTTOMBAR_HEIGHT_UNITS=4f) plus top margin (TOP_MARGIN_UNITS=1f) is sized for a full row of
-// menu icons/labels, oversized dead space around this footer's one lonely icon that left barely
-// any scroll room on screens with real content between their own header and this footer. Same
-// reasoning as HomeScreen's own top-right Current Trip icons and Trip Detail's header icons, both
-// hand-rolled for the same reason.
+// Shorter than LightBottomBar, which is sized for a full row of icons.
 private const val FOOTER_HEIGHT_UNITS = 3f
 private const val ICON_SIZE_UNITS = 1.4f
 
 /**
- * Every non-Home screen's own footer -- a single circular button that jumps straight back to
- * HomeScreen, however many screens deep the rider currently is (HomeScreen itself keeps its own
- * full footer: settings/info icons + the daily message, unrelated to this). [onGoBackOnce] is
- * each screen's own `goBack()` -- can't be called from here directly since it's a
- * `SimpleLightScreen` instance method, not something a free-floating composable has access to;
- * this owns the "keep popping until Home shows up" loop (with a small delay between each pop, see
- * [POP_STEP_DELAY_MS]) so every call site doesn't have to repeat it. See [HomeVisibility]'s own
- * doc for why the loop's stopping condition is safe without a "pop to root" primitive.
+ * The footer on every screen but Home: one button that goes back to Home however deep the rider is.
+ * [onGoBackOnce] is the screen's `goBack()`; this repeats it until Home shows (see
+ * [HomeVisibility]).
  *
- * [leadingIcon]/[trailingIcon] are optional flanking slots -- only Trip Detail's own Next/Previous
- * run stepper uses these today (see TripDetailScreen's own doc), every other call site passes
- * neither and renders exactly as before. Positioned via independent Box alignments, not a Row, so
- * the Home circle stays exactly centered regardless of whether zero, one, or both slots are
- * populated -- a rider toggling between "first run, no Previous" and "not the first run anymore"
- * shouldn't see Home itself visibly shift.
+ * [leadingIcon] and [trailingIcon] are optional side slots (Trip Detail's run stepper). They're
+ * aligned independently so the Home button stays centered.
  */
 @Composable
 fun BackToHomeFooter(

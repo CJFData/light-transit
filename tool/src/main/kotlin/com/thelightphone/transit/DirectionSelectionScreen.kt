@@ -45,35 +45,28 @@ import java.io.File
 sealed class DirectionSelectionState {
     object Loading : DirectionSelectionState()
     data class Loaded(val directions: List<DirectionOption>) : DirectionSelectionState()
-    /** Distinguished from [Loaded] with an empty list -- see [GtfsRepository.routeHasTrips]'s own
-     * doc. This route genuinely has no trips scheduled at all, so there's nowhere useful to
-     * auto-skip to (unlike an empty-but-has-trips [Loaded], which auto-advances to stop
-     * selection). Rendered here instead, so back navigation behaves normally rather than bouncing
-     * into a dead-end "Nothing found in today's schedule" screen. */
+    /**
+     * The route has no trips at all, unlike an empty [Loaded], which skips ahead to stop selection.
+     * Shown here so back navigation works normally.
+     */
     object NoTrips : DirectionSelectionState()
     data class Error(val message: String) : DirectionSelectionState()
 }
 
-/** Matches MBTA-style headsigns like "Hospital District via CCRI Lincoln" -- the via-clause is
- * routing detail, not part of the destination riders actually look for. */
+/**
+ * A "via" clause (e.g. "Hospital District via CCRI Lincoln") is routing detail, not the
+ * destination.
+ */
 private val viaClauseRegex = Regex(""" via .*""", RegexOption.IGNORE_CASE)
 
-/** Only shows a directionName if it's a real word. Some feeds put a bare digit (the direction_id
- * itself) in their direction column, which looks like a glitch, so we treat it as missing and fall
- * back to "Direction $directionId". */
+/** A bare digit in a direction column isn't a name, so it's treated as missing. */
 private fun String?.asRealDirectionName(): String? = this?.takeIf { it.isNotBlank() && it.toIntOrNull() == null }
 
-/** Prefers the feed's own curated direction/destination (directions.txt -- see [DirectionOption]'s
- * own doc) when published, since it's the only reliable source for whether a route's two
- * directions are "Inbound"/"Outbound", "Northbound"/"Southbound", or something else -- direction_id
- * alone carries no fixed meaning. Falls back to a headsign-derived "Toward X" label for any agency
- * that doesn't publish it, or [lastStopName] (see [DirectionOption]'s own doc) for one that has
- * neither a headsign nor directions.txt at all -- e.g. CTA. Used by every screen that shows a
- * [DirectionOption] on its own, outside a grouped picker (arrivals, stop connections, the map),
- * which are built directly from a specific trip, not a grouped/curated one, so directionName only
- * ever comes from a real directions.txt file here, never [DirectionSelectionScreen]'s own grouping.
- * NOT used within [DirectionSelectionScreen] itself -- see [rowLabel]'s own doc for why that needs
- * different precedence. */
+/**
+ * A direction's label outside the picker: the feed's directions.txt name when there is one, else
+ * "Toward" the headsign, else the last stop. Used by arrivals, stop connections, and the map. The
+ * picker uses [rowLabel].
+ */
 fun DirectionOption.displayLabel(): String {
     directionName.asRealDirectionName()?.let { name ->
         return destination?.takeIf { it.isNotBlank() }?.let { "$name to $it" } ?: name
@@ -83,11 +76,11 @@ fun DirectionOption.displayLabel(): String {
         ?: "Direction $directionId"
 }
 
-/** The picker row's text, also carried to downstream screens once chosen. Always headsign-first,
- * unlike [displayLabel]: several headsign variants can share one direction_id and its
- * directions.txt name, and preferring that name would make them render identically.
- * [lastStopName] (see [DirectionOption]) stands in for a missing headsign. Falls back to the
- * directionName/destination only when a row has neither. */
+/**
+ * The picker row's text, also passed on once chosen. Headsign first, since several headsigns can
+ * share one direction name; the last stop stands in for a missing headsign, then the direction
+ * name.
+ */
 fun DirectionOption.rowLabel(): String =
     (headsign?.takeIf { it.isNotBlank() }?.replace(viaClauseRegex, "")?.trim() ?: lastStopName?.takeIf { it.isNotBlank() })
         ?.let { "Toward $it" }
@@ -97,9 +90,8 @@ fun DirectionOption.rowLabel(): String =
         ?: "Direction $directionId"
 
 /**
- * [rowLabel], disambiguated within each direction_id group: two different headsigns can collapse
- * to the same text once [rowLabel] strips "via" clauses. Only the colliding rows fall back to
- * "Toward " plus the full headsign, so two identical-looking rows never lead to different stops.
+ * [rowLabel] can make two headsigns look the same once "via" is stripped; those rows get "Toward"
+ * and the full headsign instead.
  */
 fun List<DirectionOption>.disambiguatedRowLabels(): Map<DirectionOption, String> {
     val counts = groupingBy { it.rowLabel() }.eachCount()
@@ -180,10 +172,7 @@ class DirectionSelectionScreen(
         val directionAlerts by viewModel.directionAlerts.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
 
-        // Only reachable when this route DOES have trips (see DirectionSelectionState.NoTrips's own
-        // doc) -- every one of them just has a null direction_id, so there's nothing meaningful to
-        // distinguish here; skip straight to stop selection instead of showing an empty list with
-        // nothing to tap.
+        // The route has trips but none have a direction_id, so skip straight to stop selection.
         LaunchedEffect(state) {
             val loaded = state as? DirectionSelectionState.Loaded ?: return@LaunchedEffect
             if (loaded.directions.isEmpty()) {
@@ -234,12 +223,8 @@ class DirectionSelectionScreen(
                     )
 
                     is DirectionSelectionState.Loaded -> {
-                        // Grouped by direction_id (never more than 2 real groups -- see GtfsRepository.getDirections's
-                        // own doc) with a section header only when every group has a real directionName -- e.g.
-                        // MBTA's Framingham/Worcester Line reads as "Outbound: Toward Worcester, Toward
-                        // Framingham" / "Inbound: Toward South Station" instead of 4 flat, unrelated-looking
-                        // entries. Any agency without directions.txt has every directionName null; see
-                        // asRealDirectionName's own doc for the other way a "real" name turns out not to be one.
+                        // Grouped by direction_id, with a header when every group has a real name,
+                        // e.g. "Outbound: Toward Worcester, Toward Framingham".
                         val groups = s.directions.groupBy { it.directionId }.entries.sortedBy { it.key }
                         val showHeaders = s.directions.all { it.directionName.asRealDirectionName() != null }
                         LazyColumn(modifier = Modifier.weight(1f)) {

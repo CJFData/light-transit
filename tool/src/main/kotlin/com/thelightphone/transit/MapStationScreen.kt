@@ -47,29 +47,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
-// A station's real platforms can be literally co-located (verified against real MBTA South Station
-// data -- every platform shares identical lat/lon), so this floor is far smaller than the main Map
-// screen's MIN_BOUNDING_BOX_MILES; otherwise every station would render at the same fixed zoom
-// regardless of how spread out its platforms actually are.
+// Much smaller than the main map's, since a station's platforms can share the same coordinates.
 private const val STATION_MIN_BOUNDING_BOX_MILES = 0.02
-// Deliberately larger than the main Map screen's own MAP_TARGET_RADIUS_PIXELS (420f): that value
-// reserves margin for a center pin/label/street-context block this screen never draws (see
-// showCenterPin = false), and the main map also leaves room around unrelated nearby stops -- here
-// every point being fit is a platform the rider actually cares about, so filling more of the frame
-// is fine (per product feedback, even preferable). Pushed close to a real device's own half-width
-// (see MapScreen's comment on the LP3's 1080x1240px canvas) while leaving room for the compass
-// letters.
+// Larger than the main map's, since there's no center pin or unrelated stops to leave room for.
+// Leaves room for the compass letters.
 private const val STATION_ZOOM_TARGET_RADIUS_PIXELS = 500f
 private const val STATION_MIN_ZOOM = 17
-// Same ceiling as the main Map screen's own MAX_ZOOM -- the CARTO tile server this app fetches
-// from (see MapTileClient) isn't verified to serve anything past this, so it stays the hard cap
-// even though the fit-to-bounds formula above now usually reaches it for a real station's
-// platform cluster.
+// Same zoom limit as the main map.
 private const val STATION_MAX_ZOOM = 20
 private const val STATION_FALLBACK_ZOOM = 20
-// Same cadence as the main Map screen's own LIVE_VEHICLE_POLL_INTERVAL_MS -- only ever used at all
-// when "See Everything" is on (see MapStationViewModel.onScreenShow); this screen otherwise never
-// polls live data, same as before that mode existed.
+// Same polling interval as the main map; only used with "See everything" on.
 private const val STATION_LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
 
 sealed class MapStationState {
@@ -82,25 +69,18 @@ sealed class MapStationState {
         val platforms: List<NearbyStopMarker>,
         val tapHoldArrivalsEnabled: Boolean,
         val darkMapEnabled: Boolean,
-        /** Always empty unless "See Everything" (Settings toggle) is on -- see
-         * MapStationViewModel.onScreenShow, which skips live polling entirely otherwise, same as
-         * this screen behaved before that mode existed. */
+        /** Empty unless "See everything" is on. */
         val buses: List<BusMarker>,
         val seeEverythingEnabled: Boolean,
-        /** Settings screen toggle (off by default) -- see MapPreferences.doubleTapStationEnabledFlow.
-         * Governs double-tapping the scrim title here (zoom OUT to the main map) the same way it
-         * already governs double-tapping a station marker on the main Map screen (zoom IN). */
+        /** Whether double-tapping the station name returns to the main map. */
         val doubleTapStationEnabled: Boolean,
-        /** Settings toggle (on by default) -- see TapHoldPreferences.tapHoldVehicleEnabledFlow. Tap
-         * and hold a vehicle marker here to open its own Trip Detail, same as on the main Map screen. */
+        /** Whether a long press on a vehicle opens its trip. */
         val tapHoldVehicleEnabled: Boolean,
     ) : MapStationState()
     data class Error(val message: String) : MapStationState()
 }
 
-/** Everything computed once at screen-open that [MapStationViewModel] needs again to serve an
- * out-of-cycle refresh (e.g. a "Filter by stop" selection changing mid poll-interval) -- mirrors
- * MapScreen's own LoadedMapContext. */
+/** Values worked out when the screen opens, reused for out-of-cycle refreshes. */
 private data class LoadedStationContext(
     val centerLat: Double,
     val centerLon: Double,
@@ -132,21 +112,16 @@ class MapStationViewModel(
     private val _state = MutableStateFlow<MapStationState>(MapStationState.Loading)
     val state: StateFlow<MapStationState> = _state
 
-    /** Mirrors MapViewModel's own expanded-label state -- a tap on a platform reveals/hides its own
-     * name label, same as a nearby-stop marker on the main Map screen. Also doubles as "See
-     * Everything" + "Filter by stop"'s own stop selection, same as on the main Map screen. */
+    /** Platforms tapped open to show their names. Also the selection for "Filter by stop". */
     val expandedStopIds = MutableStateFlow<Set<String>>(emptySet())
 
-    /** "See Everything" mode's own tap-to-expand state for vehicle markers -- see MapViewModel's
-     * identical field for the full explanation. */
+    /** Vehicles tapped open in "See everything" mode to show their full label. */
     val expandedVehicleTripIds = MutableStateFlow<Set<String>>(emptySet())
 
     private var loadJob: Job? = null
     private var loadedContext: LoadedStationContext? = null
 
-    /** Wakes the poll loop early on a "Filter by stop" selection change -- see MapViewModel's
-     * identical field. Only ever actually consumed while "See Everything" is on (see
-     * [onScreenShow]); harmless if sent otherwise, just never received. */
+    /** Wakes the poll loop early when the "Filter by stop" selection changes. */
     private val refreshTrigger = Channel<Unit>(Channel.CONFLATED)
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -191,10 +166,7 @@ class MapStationViewModel(
                     null
                 }
 
-                // Each platform's own label (e.g. "Track 1"), not prefixed with the station name -- same
-                // South-Station-verified technique Upcoming Arrivals already uses for platform
-                // disambiguation (see GtfsRepository.platformLabelFromStopDesc). Falls back to the
-                // platform's own stop_name when stop_desc has nothing more specific.
+                // Each platform's own label (e.g. "Track 1"), falling back to its stop_name.
                 val descriptions = repository.getStopDescriptions(memberStopIds)
                 val platformMarkers = platforms.map { platform ->
                     val label = platformLabelFromStopDesc(descriptions[platform.stopId]) ?: platform.stopName
@@ -215,8 +187,7 @@ class MapStationViewModel(
                     doubleTapStationEnabled, tapHoldVehicleEnabled,
                 )
 
-                // Only "See Everything" ever needs live vehicle data here -- with it off, this
-                // screen behaves exactly as it always has (one static load, no polling at all).
+                // Without "See everything" there's nothing live to poll.
                 if (seeEverythingEnabled) {
                     while (isActive) {
                         refresh()
@@ -238,9 +209,7 @@ class MapStationViewModel(
         }
     }
 
-    /** Only reachable while "See Everything" is on (see [onScreenShow]) -- fetches live vehicle
-     * data and rebuilds [MapStationState.Loaded] with it, reusing MapScreen's own
-     * buildSeeEverythingBuses so both screens share one implementation. */
+    /** Fetches live vehicles and rebuilds the state, using the same code as the main map. */
     private suspend fun refresh() {
         val context = loadedContext ?: return
         if (agency.realtimeVehiclePositionsUrl == null) {
@@ -281,8 +250,7 @@ class MapStationViewModel(
         }
     }
 
-    /** "See Everything" mode's own tap-to-expand for a vehicle marker -- see MapViewModel's
-     * identical function. */
+    /** Toggles a vehicle's full label in "See everything" mode. */
     fun toggleVehicleExpanded(tripId: String) {
         expandedVehicleTripIds.value = expandedVehicleTripIds.value.let { if (tripId in it) it - tripId else it + tripId }
     }
@@ -295,13 +263,9 @@ class MapStationViewModel(
 }
 
 /**
- * A zoomed-in sub-map of just one multi-platform station's own platforms ("Map-Station mode"),
- * reached by double-tapping a station marker on the main Map screen (see MapScreen's
- * doubleTapStationEnabled/onOpenStation). Reuses the same [MapCanvas] the main Map screen draws
- * with -- same tiles/pin style/tap-to-reveal-label behavior -- just with no privileged center pin
- * (every platform is an equal small pin) and the station's name in the scrim instead. Shows live
- * vehicles of its own only when "See Everything" (Settings toggle) is on -- see
- * MapStationViewModel's own doc.
+ * A zoomed-in map of one station's platforms, opened by double-tapping a station on the main map.
+ * Uses the same [MapCanvas], with every platform as an equal pin and the station's name in the top
+ * bar. Shows live vehicles only with "See everything" on.
  */
 class MapStationScreen(
     sealedActivity: SealedLightActivity,
@@ -356,8 +320,7 @@ class MapStationScreen(
                     )
 
                     is MapStationState.Loaded -> MapCanvas(
-                        // Inert placeholders: hitCenter can never fire (see MapCanvas's own gating on
-                        // showCenterPin), so these are never actually read for a hit-test.
+                        // Placeholders; there's no center pin here, so they're never used.
                         stopId = memberStopIds.firstOrNull() ?: "",
                         stopLabel = stationLabel,
                         streetContext = null,
@@ -383,21 +346,14 @@ class MapStationScreen(
                         onOpenStation = { _, _ -> },
                         showCenterPin = false,
                         scrimTitle = stationLabel,
-                        // Tap-and-hold the scrim title for the whole station's own upcoming arrivals -- consistent with
-                        // tap-and-hold meaning "show actual arrivals" everywhere else in the app (a single
-                        // platform pin here, a stop on the main Map screen, Schedule's stop list, the
-                        // Stations list).
+                        // Long press on the station name: arrivals for the whole station.
                         onScrimTitleLongPressed = {
                             navigateTo(screenFactory = { activity ->
                                 UpcomingArrivalsScreen(activity, dbFile, agency, memberStopIds, stationLabel)
                             })
                         },
-                        // Double-tap the scrim title to zoom back out to the main Map screen, centered on this same
-                        // station -- symmetric with double-tapping a station marker on the main map to zoom
-                        // in here (see MapScreen's own onOpenStation). Any one of this station's member
-                        // platform ids resolves back to the full station (via MapViewModel's own
-                        // getStationContaining lookup, the same one every other station entry point goes
-                        // through), so which specific platform id gets passed doesn't matter.
+                        // Double-tap on the station name: back to the main map, centered on this
+                        // station. Any platform id resolves to the whole station.
                         onScrimTitleDoubleTapped = {
                             navigateTo(screenFactory = { activity ->
                                 MapScreen(activity, dbFile, agency, memberStopIds.first(), stationLabel)

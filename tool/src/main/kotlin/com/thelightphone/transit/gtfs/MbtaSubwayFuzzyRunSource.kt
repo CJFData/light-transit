@@ -5,11 +5,10 @@ import kotlinx.coroutines.CancellationException
 import java.time.ZoneId
 
 /**
- * [FuzzyRunTrips] for MBTA subway lines, whose live feed can mark running trains as GTFS-RT `ADDED`
- * trips that were never in the static schedule (most Green Line trains, and other lines during
- * service changes). Unlike [CtaTrainTrackerSource], it needs no separate API: ADDED trips arrive in
- * the standard TripUpdates feed with full predicted `stop_time_update` lists. Scheduled trips with
- * their own live update are left out of the matching, so a real trip_id match always wins.
+ * Closest-match runs for MBTA subway lines, whose live feed can carry running trains as `ADDED`
+ * trips that aren't in the schedule. They come through the standard TripUpdates feed with full stop
+ * predictions. Scheduled trips with their own live update are left out, so a real trip_id match
+ * always wins.
  */
 object MbtaSubwayFuzzyRunSource : FuzzyRunTrips {
     override val routeIds: Set<String> =
@@ -24,9 +23,7 @@ object MbtaSubwayFuzzyRunSource : FuzzyRunTrips {
         val scopedRouteIds = requestedRouteIds.intersect(routeIds)
         if (scopedRouteIds.isEmpty()) return emptyMap()
 
-        // Same feed a caller's own primary live-status check already fetched this poll cycle -- see
-        // FuzzyRunTrips.matchedTripUpdates's own doc for why this redundant-but-cached call is an
-        // acceptable tradeoff for keeping the interface uniform across agencies.
+        // Usually already cached from this poll's other fetch.
         val feed = try {
             agency.fetchMergedTripUpdates(repository, "MbtaSubwayFuzzyRunSource")
         } catch (e: CancellationException) {
@@ -70,11 +67,8 @@ object MbtaSubwayFuzzyRunSource : FuzzyRunTrips {
         return result
     }
 
-    // MBTA has no run-number concept the way CTA does -- an ADDED entity's own trip.tripId (a
-    // synthetic id MBTA itself assigns) is the closest stand-in: stable for as long as that vehicle
-    // assignment stays on the feed, which is all Select Run needs it for. destinationLabel falls
-    // back to the bare route_id (e.g. "Green-B", "Blue") since ADDED trips carry no clean destination field
-    // to draw a real stop name from -- not worth an extra repository lookup for a first pass.
+    // The ADDED trip's id stands in for a run number, stable while it's in the feed. The
+    // destination falls back to the route_id.
     override suspend fun liveRunOptions(
         routeId: String,
         agency: GtfsAgency,
@@ -103,9 +97,7 @@ object MbtaSubwayFuzzyRunSource : FuzzyRunTrips {
                     destinationLabel = routeId,
                     soonestPredictedEpochSeconds = time,
                     nextStopId = nextStopId,
-                    // MBTA's own live feed carries no native delay flag the way CTA's ttpositions
-                    // does -- see FuzzyRunOption.isDelayed's own doc for why this stays null rather
-                    // than a computed guess.
+                    // No delay flag in this feed.
                     isDelayed = null,
                 )
             }

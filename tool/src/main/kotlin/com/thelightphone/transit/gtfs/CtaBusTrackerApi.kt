@@ -20,32 +20,17 @@ private const val CTA_BUS_PREDICTIONS_URL = "https://gtfs.picotransit.com/cta/bu
 private val ctaBusJson = Json { ignoreUnknownKeys = true }
 
 /**
- * A **run-associated trip** is a live vehicle that corresponds to a real, exact trip already in the
- * static schedule -- the live source just doesn't hand back that trip_id directly, so a
- * [LiveVehicleSource] implementation bridges to it via some other agency-specific key. The match is
- * never a guess: either it resolves to the one real static trip it belongs to, or it's dropped for
- * that poll, same as every other live source's "never force a link" contract.
+ * A live source whose vehicles each belong to a real scheduled trip but don't carry its trip_id.
+ * Unlike [FuzzyRunTrips], the match is exact or the vehicle is dropped for that poll.
  *
- * Contrast with a **fuzzy-run trip** (see [FuzzyRunTrips]) -- a live vehicle/run with no real static
- * trip to resolve to at all (e.g. MBTA Green Line's ADDED trips), where any pairing against the
- * schedule is necessarily an approximation, not a genuine match.
- *
- * CTA Bus Tracker (ctabustracker.com/bustime/api/v3) is this app's first run-associated source --
- * proprietary REST/JSON, not GTFS-RT, but every bus IS a real scheduled trip, just not identified by
- * trip_id in the live payload. Its bridge: getvehicles hands back `stsd`/`stst` -- scheduled start
- * date/time -- the same (route, start_date, start_time) triple GTFS-RT itself uses when trip_id
- * isn't directly known; [GtfsRepository.tripIdForScheduledStart] resolves it, dropping ambiguous or
- * unmatched vehicles for that poll.
- *
- * getvehicles has no next-stop/current-sequence field at all, so
- * [LiveVehicleInfo.currentStatus]/[currentStopSequence] are always null. `rt` accepts at most 10
- * comma-delimited route designators per the API's own limit.
+ * Bus Tracker's getvehicles gives each bus's scheduled start date and time (`stsd`/`stst`), which
+ * [GtfsRepository.tripIdForScheduledStart] resolves to a trip. It has no next stop, so
+ * [LiveVehicleInfo.currentStatus] and [currentStopSequence] are null. `rt` takes at most 10 routes.
  */
 object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     override val coveredLineTypes: Set<LineType> = setOf(LineType.BUS)
 
-    // Shared across calls and never closed (this object lives for the app's lifetime), so polls reuse
-    // pooled connections instead of a new TLS handshake each time.
+    // One shared client, never closed, so polls reuse connections.
     private val client = HttpClient(OkHttp)
 
     override suspend fun vehiclesByRoute(routeIds: Set<String>, repository: GtfsRepository): Map<String, LiveVehicleInfo> {
@@ -85,9 +70,9 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
 
     /**
      * Predicted arrival times (`prdtm`) for one or more stops, preferred over [vehiclesByRoute] for
-     * ETAs. Each prediction's `stst`/`stsd` resolve to a trip_id the same way as in [vehiclesByRoute].
-     * Returns the predicted time only, not a delay: `stst` is the trip's first-stop time, not this
-     * stop's scheduled time.
+     * ETAs. Each prediction's `stst`/`stsd` resolve to a trip_id the same way as in
+     * [vehiclesByRoute]. Returns the predicted time only, not a delay: `stst` is the trip's
+     * first-stop time, not this stop's scheduled time.
      */
     override suspend fun predictionsByStop(stopIds: Set<String>, repository: GtfsRepository, zoneId: ZoneId): Map<String, Long> {
         if (stopIds.isEmpty()) return emptyMap()
@@ -117,8 +102,9 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     }
 
     /**
-     * `getpredictions?vid=` returns the vehicle's remaining stops in ascending `prdtm` order; the first
-     * is its next stop. No trip_id resolution needed, since the caller already knows the trip.
+     * `getpredictions?vid=` returns the vehicle's remaining stops in ascending `prdtm` order; the
+     * first is its next stop. No trip_id resolution needed, since the caller already knows the
+     * trip.
      */
     override suspend fun nextStopForVehicle(vehicleId: String, repository: GtfsRepository, zoneId: ZoneId): VehicleNextStop? {
         try {
@@ -141,15 +127,16 @@ object RunAssociatedTripSource : LiveVehicleSource, StopPredictionSource {
     }
 }
 
-/** `prdtm` is "yyyyMMdd HH:mm" in agency-local time with no zone, so it's parsed in the agency's zone. */
+/**
+ * `prdtm` is "yyyyMMdd HH:mm" in agency-local time with no zone, so it's parsed in the agency's
+ * zone.
+ */
 private fun parsePredictionTimestamp(raw: String, zoneId: ZoneId): Long? =
     runCatching {
         LocalDateTime.parse(raw, DateTimeFormatter.ofPattern("yyyyMMdd HH:mm")).atZone(zoneId).toEpochSecond()
     }.getOrNull()
 
-/** getvehicles' `stst` is seconds-past-midnight as a plain int; GTFS stop_times.departure_time
- * wants "HH:MM:SS" (and, same as GTFS, doesn't wrap at 24:00:00 for a post-midnight trip, so this
- * doesn't clamp the hour either). */
+/** Seconds past midnight to "HH:MM:SS", without wrapping at 24:00 for after-midnight trips. */
 private fun secondsToGtfsTime(totalSeconds: Int): String =
     "%02d:%02d:%02d".format(totalSeconds / 3600, (totalSeconds % 3600) / 60, totalSeconds % 60)
 
@@ -186,12 +173,9 @@ private data class BustimePredictionsBody(
 @Serializable
 private data class BustimePrediction(
     val rt: String? = null,
-    /** The stop this specific prediction is for -- only needed by [RunAssociatedTripSource.nextStopForVehicle],
-     * which (unlike [RunAssociatedTripSource.predictionsByStop]) queries by vid rather than stpid, so the
-     * response itself is the only place the stop_id comes from. */
+    /** The stop this prediction is for; needed when querying by vehicle. */
     val stpid: String? = null,
-    /** "yyyyMMdd HH:mm", the agency's own predicted arrival/departure time -- see
-     * [parsePredictionTimestamp]'s own doc. */
+    /** Predicted time, "yyyyMMdd HH:mm". */
     val prdtm: String? = null,
     val stst: Int? = null,
     val stsd: String? = null,

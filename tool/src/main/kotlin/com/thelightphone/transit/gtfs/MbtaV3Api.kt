@@ -18,19 +18,13 @@ private const val MBTA_V3_VEHICLES_URL = "https://gtfs.picotransit.com/mbta/v3/v
 private val mbtaV3Json = Json { ignoreUnknownKeys = true }
 
 /**
- * MBTA's V3 API (https://api-v3.mbta.com), used for commuter rail. Track assignments aren't in
- * GTFS-RT: MBTA assigns a track only shortly before departure, so until then a Vehicle's `stop`
- * points at the station's generic placeholder platform (whose `platform_code` is null) and
- * [LiveVehicleInfo.assignedStopId] is null. That's the common case, not missing data.
+ * MBTA's V3 API, used for commuter rail track assignments and positions. Until a track is assigned,
+ * a vehicle's stop is the station's generic platform (null platform_code) and
+ * [LiveVehicleInfo.assignedStopId] is null; that's normal.
  *
- * The same `/vehicles` response also gives each train's position and status, which we prefer over
- * GTFS-RT VehiclePositions for commuter rail. Both always come from the same source for a given
- * vehicle, so they can't disagree. Subway and Silver Line platforms are already fixed in GTFS, so
- * this is only used for commuter rail. Requests filter by route, since `/vehicles` can't filter by
- * stop.
- *
- * The worker injects `MBTA_API_KEY` on every call for a higher rate limit. JSON:API responses are
- * decoded by hand for just the fields used here, like GtfsRealtime.kt does for protobuf.
+ * Position and status come from the same `/vehicles` response, so they can't disagree. Requests
+ * filter by route, since `/vehicles` can't filter by stop. The proxy adds the API key. JSON:API
+ * fields are decoded by hand.
  */
 object MbtaV3VehicleSource : LiveVehicleSource {
     override val coveredLineTypes: Set<LineType> = setOf(LineType.COMMUTER_RAIL)
@@ -51,8 +45,7 @@ object MbtaV3VehicleSource : LiveVehicleSource {
             }
             val document = mbtaV3Json.decodeFromString(MbtaJsonApiDocument.serializer(), response.bodyAsText())
 
-            // Only stops with a real, non-null platform_code count as an actual assignment -- the
-            // generic per-route placeholder's own platform_code is always null (see class doc).
+            // Only a stop with a platform_code is a real assignment.
             val assignedStopIds = document.included
                 .asSequence()
                 .filter { it.type == "stop" }
@@ -83,9 +76,7 @@ object MbtaV3VehicleSource : LiveVehicleSource {
     }
 }
 
-/** V3's `current_status` is the same three-value GTFS-RT enum, just spelled out as a string instead
- * of GTFS-RT's small int -- mapped to [GtfsRtVehicleStatus]'s own ints so downstream arrival/status
- * logic (isArrived, etc.) doesn't need a second parallel status representation. */
+/** Maps the spelled-out `current_status` to [GtfsRtVehicleStatus]'s ints. */
 private fun String.toGtfsRtVehicleStatus(): Int? = when (this) {
     "INCOMING_AT" -> GtfsRtVehicleStatus.INCOMING_AT
     "STOPPED_AT" -> GtfsRtVehicleStatus.STOPPED_AT
@@ -111,8 +102,7 @@ private fun JsonObject.stringOrNull(key: String): String? = (this[key] as? JsonP
 private fun JsonObject.doubleOrNull(key: String): Double? = (this[key] as? JsonPrimitive)?.doubleOrNull
 private fun JsonObject.intOrNull(key: String): Int? = (this[key] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
 
-/** Digs out a JSON:API `relationships.<name>.data.id` -- null for a to-one relationship with no
- * linked resource (e.g. `"vehicle": {"data": null}`), same as an absent relationship entirely. */
+/** A JSON:API `relationships.<name>.data.id`, or null when unlinked or absent. */
 private fun JsonObject.relationshipId(relationshipName: String): String? {
     val relationship = this[relationshipName] as? JsonObject ?: return null
     val data = relationship["data"] as? JsonObject ?: return null

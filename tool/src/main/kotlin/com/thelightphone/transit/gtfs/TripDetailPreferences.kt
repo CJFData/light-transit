@@ -10,12 +10,9 @@ import kotlinx.coroutines.flow.map
 private val showStopsBeforeBoardingKey = booleanPreferencesKey("SHOW_STOPS_BEFORE_BOARDING_ENABLED")
 
 /**
- * Whether Trip Detail's stop list widens backward to the trip's very first stop (rather than
- * starting at the rider's own boarding stop) -- the earlier stops render greyed out, the same
- * treatment [SelectRunScreen] already uses, purely so the existing single live-vehicle marker
- * (see TripDetailState.Loaded.liveAtStopSequence's own doc) can render when the vehicle is still
- * approaching from before the boarding stop, instead of silently having nowhere to show up. Off
- * by default -- opt-in extra context, not the default trip view.
+ * "Show earlier stops", off by default: Trip Detail's list starts at the trip's first stop instead
+ * of the boarding stop, greyed out, so a vehicle still approaching the boarding stop has a row to
+ * show on.
  */
 class TripDetailPreferences(private val dataStore: DataStore<Preferences>) {
 

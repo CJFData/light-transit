@@ -56,16 +56,12 @@ class ScheduleSelectionViewModel(
         get() = _defaultAgency
     private val _defaultAgency = MutableStateFlow<GtfsAgency?>(null)
 
-    /** Agencies the rider has opted into downloading beyond [defaultAgency] -- see
-     * [AgencyPreferences.additionalDownloadsFlow]'s own doc. */
+    /** Agencies the rider downloads in addition to [defaultAgency]. */
     val additionalDownloads: StateFlow<Set<GtfsAgency>>
         get() = _additionalDownloads
     private val _additionalDownloads = MutableStateFlow<Set<GtfsAgency>>(emptySet())
 
-    /** Per-agency ingest progress, only ever populated for an agency the rider has actively just
-     * turned on here this session -- reset to [GtfsIngestStatus.Ready] once done, removed
-     * entirely when turned back off (a currently-selected preference alone, not this map, is
-     * what's persisted -- see [AgencyPreferences.setAgencyDownloadEnabled]). */
+    /** Download progress for agencies turned on here this session. Cleared when turned off. */
     val ingestStatuses: StateFlow<Map<GtfsAgency, GtfsIngestStatus>>
         get() = _ingestStatuses
     private val _ingestStatuses = MutableStateFlow<Map<GtfsAgency, GtfsIngestStatus>>(emptyMap())
@@ -80,13 +76,8 @@ class ScheduleSelectionViewModel(
     }
 
     /**
-     * Turning an agency off just stops tracking it as an extra download; its already-downloaded
-     * database is left on disk (see this screen's own doc) rather than deleted here, so
-     * re-enabling it doesn't need a fresh download. Never touches the primary agency itself --
-     * that's picked exclusively via [AgencyPickerModal] (its own region drill-down included, see
-     * that class's own doc), a distinct, earlier step from this screen's own "add more on top of
-     * my primary" purpose. A no-op for [agency] == [defaultAgency]'s own current value, since
-     * that row renders disabled rather than ever calling this.
+     * Turning an agency off stops tracking it but keeps its database, so turning it back on doesn't
+     * need a download. The primary's row is disabled; it's changed through [AgencyPickerModal].
      */
     fun toggleAgency(agency: GtfsAgency) {
         if (agency == defaultAgency.value) return
@@ -100,12 +91,8 @@ class ScheduleSelectionViewModel(
     }
 
     /**
-     * Tap+hold on a non-primary row (see [ScheduleSelectionScreen.AgencyToggleRow]'s own doc) --
-     * swaps [agency] in as the new primary via [AgencyPreferences.promoteToPrimary] (picked up by
-     * HomeScreenViewModel's own defaultAgencyFlow collector exactly like a fresh pick through
-     * [AgencyPickerModal] would be), ingesting it here if it isn't already downloaded -- the one
-     * thing [promoteToPrimary] itself can't do, since it has no [GtfsIngestor] of its own. Mirrors
-     * [toggleAgency]'s identical no-op guard for the current primary.
+     * Tap and hold on a non-primary row: makes [agency] the primary, downloading it first if
+     * needed.
      */
     fun makePrimary(agency: GtfsAgency) {
         if (agency == defaultAgency.value) return
@@ -113,8 +100,7 @@ class ScheduleSelectionViewModel(
         if (agency !in additionalDownloads.value) startIngest(agency)
     }
 
-    // Runs off the main thread, like HomeScreenViewModel's agencyIngestJob. Downloading and parsing
-    // a schedule takes a while and would freeze the UI otherwise.
+    // Runs off the main thread so a long download doesn't freeze the UI.
     private fun startIngest(agency: GtfsAgency) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -124,30 +110,17 @@ class ScheduleSelectionViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // Left as GtfsIngestStatus.CheckingForUpdates/Downloading/Parsing (whatever it last
-                // reached) rather than a fake "Ready" -- HomeScreenViewModel's own primary-agency
-                // ingest has the identical no-explicit-error-state gap already; a rider can just
-                // retry (retoggle, or tap+hold again).
+                // A failure leaves the last status showing; turning the agency off and on again
+                // retries.
             }
         }
     }
 }
 
 /**
- * Lets a rider download more than one agency's static schedule *on top of* their existing primary
- * -- e.g. NYC Subway as primary, plus a specific bus borough and LIRR for transfers. The primary
- * itself is picked earlier and separately, via [AgencyPickerModal] (including its own region
- * drill-down for a grouped agency) -- this screen only ever adds extras alongside whatever that
- * already is, never sets or changes it (see [ScheduleSelectionViewModel.toggleAgency]'s own doc).
- * Reachable only from Settings' own "Additional Schedules" row, which only shows at all when the
- * primary agency is actually part of a [RegionalGroup] -- an ungrouped primary (MBTA, RIPTA, a
- * plain Colorado agency, etc.) has no region-mates to add, so there's nothing for this screen to
- * offer and the row (and this screen) don't appear for it at all. [focusRegion] is that region,
- * always the primary's own -- unlike an earlier version of this screen, there's no unfocused
- * "every region at once" mode anymore, since every real entry point already knows which one region
- * is relevant. Only the download/storage side of this: browsing Schedule/Map for one of these once
- * downloaded isn't wired up by this screen (see [RegionalGroup]'s own doc for the current state of
- * that).
+ * Additional Schedules: downloads other agencies in the primary's region on top of the primary,
+ * e.g. a bus borough and LIRR alongside NYC Subway. Reached from Settings, which only shows the row
+ * when the primary is in a [RegionalGroup]; [focusRegion] is that region.
  */
 class ScheduleSelectionScreen(
     sealedActivity: SealedLightActivity,
@@ -165,15 +138,8 @@ class ScheduleSelectionScreen(
     )
 
     /**
-     * Tap toggles [enabled] (see [ScheduleSelectionViewModel.toggleAgency]); tap+hold on a
-     * non-primary row instead swaps it in as the new primary agency (see
-     * [ScheduleSelectionViewModel.makePrimary]'s own doc) -- [lightClickable] has no long-press
-     * hook of its own, so this uses the same raw [detectTapGestures] pattern
-     * FirstStopSelectionScreen's identical tap-vs-hold row already does, rather than inventing a
-     * second one. Both gestures are no-ops on the primary's own row (`enabled = !isPrimary`
-     * already reads false for [lightClickable]'s sibling rows elsewhere in this app -- mirrored
-     * here as an explicit `if (isPrimary) return@detectTapGestures` guard on each callback since
-     * this composable owns its own gesture detector instead of delegating to that modifier).
+     * Tap toggles the download; tap and hold makes the agency primary. Neither does anything on the
+     * primary's own row.
      */
     @Composable
     private fun AgencyToggleRow(
@@ -211,9 +177,7 @@ class ScheduleSelectionScreen(
             LightText(
                 text = agency.displayName,
                 variant = LightTextVariant.Copy,
-                // Same underline-marks-the-current-one convention TripDetailScreen's own alight
-                // stop and SelectRunScreen's own boarded run already use, rather than greying the
-                // primary row out.
+                // The primary is underlined, like the alight stop in Trip Detail.
                 underline = isPrimary,
                 modifier = Modifier.weight(1f),
             )

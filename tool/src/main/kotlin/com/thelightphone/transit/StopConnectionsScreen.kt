@@ -46,10 +46,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** 100 feet -- close enough to be "the same corner", not a separate trip to walk to. */
+/** 100 feet: close enough to count as the same corner. */
 private const val NEARBY_STOP_RADIUS_METERS = 30.48
-/** Enough to show real variety at each nearby stop without turning this into a second full
- * schedule dump for every one of them. */
+/** Departures shown per nearby stop. */
 private const val NEARBY_STOP_CONNECTIONS_LIMIT = 3
 private const val FEET_PER_METER = 3.28084
 
@@ -62,9 +61,10 @@ sealed class StopConnectionsState {
     data class Error(val message: String) : StopConnectionsState()
 }
 
-/** A nearby stop's next few departures, already filtered to exclude any route+direction the
- * current stop itself already offers -- these are meant to surface options you wouldn't otherwise
- * see from here, not duplicate what's already on screen. */
+/**
+ * A nearby stop's next departures, leaving out any route and direction the current stop already
+ * has.
+ */
 data class NearbyStopConnections(
     val stopName: String,
     val distanceMeters: Double,
@@ -94,9 +94,7 @@ class StopConnectionsViewModel(
     private val _state = MutableStateFlow<StopConnectionsState>(StopConnectionsState.Loading)
     val state: StateFlow<StopConnectionsState> = _state
 
-    /** Whether [stopId] is itself a real, qualifying multi-platform station -- see
-     * GtfsRepository.getStationContaining, the same single source of truth Upcoming Arrivals' own
-     * transfer icon uses. */
+    /** Whether [stopId] is part of a multi-platform station. */
     val isStation = MutableStateFlow(false)
 
     /** Alerts naming this stop, when alerts are shown in menus. */
@@ -106,23 +104,17 @@ class StopConnectionsViewModel(
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) { stopAlerts.value = loadStopAlerts(dbFile, repository, alertPreferences, listOf(stopId)) }
         viewModelScope.launch(Dispatchers.IO) {
-            // Inside the same try/catch as the rest of this block (not a separate unguarded call before it)
-            // so a screen popped mid-query -- e.g. several rapid-fire goBack() calls in a row, like
-            // BackToHomeFooter's "jump to Home" loop -- can't crash the app just because this
-            // repository got closed out from under an in-flight query on the way out.
+            // In the same try/catch, so a screen closed mid-query doesn't crash.
             _state.value = try {
-                // A trip only ever stops at one platform of a station, so stopId here is just that one platform
-                // -- resolve its full station (if any) so connections are listed across every platform
-                // actually serving it, not just the one this trip happened to use. Same pattern as
-                // UpcomingArrivalsViewModel/GtfsRepository.getScheduledArrivals(stopIds).
+                // Connections cover every platform of the stop's station, not just the one this
+                // trip uses.
                 val station = repository.getStationContaining(stopId)
                 isStation.value = station != null
                 val stopIds = station?.memberStopIds ?: listOf(stopId)
 
                 val today = todayForGtfs(agency?.zoneId ?: java.time.ZoneId.systemDefault())
                 val connections = repository.getNextConnections(stopIds, afterTime, excludeTripId, today)
-                // What's already offered right here -- a nearby stop repeating one of these isn't
-                // telling you anything new, so it's left out of that stop's list entirely.
+                // Routes already offered here are left out of the nearby stops' lists.
                 val servedHere = connections.mapTo(mutableSetOf()) { it.route.routeId to it.direction.directionId }
 
                 val here = repository.getStopLocation(stopId)

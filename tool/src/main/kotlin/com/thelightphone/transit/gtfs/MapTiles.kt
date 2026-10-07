@@ -23,16 +23,12 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.tan
 
-/**
- * Standard Web Mercator "slippy map" tile math (see the OSM wiki's "Slippy map tilenames" page) --
- * shared by both the background tile fetch and marker placement so everything drawn on the map
- * screen comes from one consistent coordinate system.
- */
+/** Web Mercator tile math, shared by the tile fetch and marker placement. */
 private const val TILE_SIZE = 256.0
 private const val EARTH_CIRCUMFERENCE_METERS = 40_075_016.686
 private const val METERS_PER_MILE = 1609.344
 
-/** Fractional (x, y) tile coordinates for (lat, lon) at the given integer zoom. */
+/** Fractional (x, y) tile coordinates for (lat, lon) at [zoom]. */
 fun lonLatToTileFraction(lat: Double, lon: Double, zoom: Int): Pair<Double, Double> {
     val n = 2.0.pow(zoom)
     val x = (lon + 180.0) / 360.0 * n
@@ -41,29 +37,19 @@ fun lonLatToTileFraction(lat: Double, lon: Double, zoom: Int): Pair<Double, Doub
     return x to y
 }
 
-/** Ground resolution (meters/pixel) at [lat] and integer [zoom]. */
+/** Meters per pixel at [lat] and [zoom]. */
 fun metersPerPixel(lat: Double, zoom: Int): Double {
     val latRad = Math.toRadians(lat)
     return (EARTH_CIRCUMFERENCE_METERS * cos(latRad)) / (TILE_SIZE * 2.0.pow(zoom))
 }
 
 /**
- * The integer zoom that fits every (lat, lon) in [points] within [availableHalfExtentPx] of
- * (centerLat, centerLon) in both axes, clamped to [minZoom]..[maxZoom]. Unlike a textbook
- * "fitBounds" (which re-centers on the bounding box's own centroid), this fits the box around a
- * fixed center point -- the map screen's selected stop must always render at dead center, so each
- * point's offset is measured from (centerLat, centerLon) directly. A dense cluster of nearby
- * points naturally yields a high (zoomed-in) result; a lone distant point naturally yields a low
- * one -- no per-agency density special-casing needed.
+ * The zoom that fits every point within [availableHalfExtentPx] of the center, clamped to
+ * [minZoom]..[maxZoom]. Fits around the fixed center rather than the points' centroid, so the
+ * selected stop stays centered.
  *
- * Falls back to [fallbackZoom] when [points] is empty or every point is ~coincident with the
- * center, since the fit-to-bounds formula is undefined for a zero-size box -- rarely reached once
- * [minBoundingBoxMiles] is positive, since the floor below already keeps the box away from
- * zero-size on its own.
- *
- * [minBoundingBoxMiles] treats the bounding box as at least this wide in each dimension before
- * computing zoom, so a real-world-tiny cluster (e.g. two platforms 30ft apart) doesn't compute an
- * absurdly tight zoom just because the points happen to be that close together.
+ * The box is at least [minBoundingBoxMiles] across so a tiny cluster doesn't zoom in too far.
+ * [fallbackZoom] is used when there's nothing to fit.
  */
 fun fitBoundsZoom(
     centerLat: Double,
@@ -75,8 +61,7 @@ fun fitBoundsZoom(
     fallbackZoom: Int,
     minBoundingBoxMiles: Double = 0.0,
 ): Int {
-    // Computed at zoom 0 (n = 1) as a zoom-independent baseline -- offsets at any real zoom z are
-    // this baseline scaled by 2^z, since both x and the Mercator-projected y are linear in n.
+    // Offsets at zoom 0; at zoom z they're scaled by 2^z.
     val (centerFracX, centerFracY) = lonLatToTileFraction(centerLat, centerLon, 0)
     var maxDx = 0.0
     var maxDy = 0.0
@@ -86,9 +71,7 @@ fun fitBoundsZoom(
         maxDy = max(maxDy, abs(fracY - centerFracY))
     }
 
-    // 1 unit of this function's zoom-0 tile-fraction is EARTH_CIRCUMFERENCE_METERS*cos(lat) real
-    // meters at ANY zoom (the zoom cancels out of that ratio, the same relationship metersPerPixel
-    // uses) -- so a real-world minimum can be converted into this same unit and floored in directly.
+    // Converts the minimum size from miles into zoom-0 tile units.
     if (minBoundingBoxMiles > 0.0) {
         val minHalfExtentMeters = (minBoundingBoxMiles * METERS_PER_MILE) / 2.0
         val minHalfExtentFraction = minHalfExtentMeters / (EARTH_CIRCUMFERENCE_METERS * cos(Math.toRadians(centerLat)))
@@ -108,11 +91,7 @@ fun fitBoundsZoom(
 
 data class PixelPoint(val x: Float, val y: Float)
 
-/**
- * Pixel offset of (lat, lon) relative to (centerLat, centerLon) at the given zoom -- the same
- * projection tile placement uses, but usable on its own for marker placement even when a tile
- * failed to fetch, so placement never depends on the tile network call succeeding.
- */
+/** Pixel offset of (lat, lon) from the center at [zoom]. Doesn't depend on tiles loading. */
 fun projectRelativeToCenter(centerLat: Double, centerLon: Double, lat: Double, lon: Double, zoom: Int): PixelPoint {
     val (centerX, centerY) = lonLatToTileFraction(centerLat, centerLon, zoom)
     val (pointX, pointY) = lonLatToTileFraction(lat, lon, zoom)
@@ -122,14 +101,12 @@ fun projectRelativeToCenter(centerLat: Double, centerLon: Double, lat: Double, l
     )
 }
 
-/** One fetched map tile and its integer tile coordinates at the map's zoom level. */
+/** One fetched tile and its tile coordinates. */
 data class FetchedTile(val tileX: Int, val tileY: Int, val bitmap: Bitmap)
 
 /**
- * Every tile fetched to cover the requested area around one center point, plus the fractional tile
- * coordinates of that center point. Each tile is drawn independently at its own screen offset via
- * [screenOffset] -- there's no pre-stitched composite bitmap, so a handful of failed tiles just
- * leave that patch blank instead of requiring a grid size guessed "big enough" up front.
+ * The tiles covering an area around a center point. Each is drawn at its own offset, so a failed
+ * tile just leaves a blank patch.
  */
 data class MapTiles(
     val zoom: Int,
@@ -137,7 +114,7 @@ data class MapTiles(
     val centerFracY: Double,
     val tiles: List<FetchedTile>,
 ) {
-    /** This tile's pixel offset relative to the center point, at the map's zoom level. */
+    /** This tile's pixel offset from the center point. */
     fun screenOffset(tileX: Int, tileY: Int): PixelPoint = PixelPoint(
         x = ((tileX - centerFracX) * TILE_SIZE).toFloat(),
         y = ((tileY - centerFracY) * TILE_SIZE).toFloat(),
@@ -145,10 +122,8 @@ data class MapTiles(
 }
 
 /**
- * A small in-process LRU of decoded tile bitmaps, keyed by "style/z/x/y", shared by every [MapTileClient]
- * instance and screen visit this session -- revisiting the Map screen for the same or a nearby stop
- * reuses tiles already downloaded. Capacity is a tile count, not a byte budget, since every raster
- * tile is the same 256x256 size.
+ * An in-memory LRU of decoded tiles, keyed by "style/z/x/y" and shared across screens. Sized by
+ * tile count, since every tile is the same size.
  */
 private object TileCache {
     private const val MAX_ENTRIES = 300
@@ -166,16 +141,9 @@ private object TileCache {
 }
 
 /**
- * Fetches individual raster tiles from one of CARTO's basemaps (built on OpenStreetMap data),
- * caching decoded bitmaps in [TileCache]. Voyager is the default -- chosen for street-name
- * legibility, since its labels and road contours stay readable at the small sizes this screen
- * renders at, unlike the darker "Dark Matter" style -- but Dark Matter remains available as an
- * opt-in (see MapPreferences). Routed through pico-transit-proxy rather than CARTO directly, same
- * as every other live/static feed this app uses -- CARTO requires a `key` query param per tile
- * request, so the worker injects it server-side (env.CARTO_API_KEY) rather than shipping it in the
- * app itself. A real, descriptive User-Agent is sent on every request, and on-screen "©
- * OpenStreetMap contributors © CARTO" attribution is required wherever these tiles are displayed --
- * see MapScreen's Content().
+ * Fetches CARTO raster tiles (OpenStreetMap data) through the proxy, which adds the API key.
+ * Voyager is the default for legibility; Dark Matter is optional (see MapPreferences). The map must
+ * show "© OpenStreetMap contributors © CARTO".
  */
 class MapTileClient {
     private val client = HttpClient(OkHttp)
@@ -184,18 +152,13 @@ class MapTileClient {
         private const val VOYAGER_BASE_URL = "https://gtfs.picotransit.com/carto/voyager"
         private const val DARK_BASE_URL = "https://gtfs.picotransit.com/carto/dark"
         private const val USER_AGENT = "LightTransitTool/1.0 (+https://github.com/lightphone)"
-        // Fetched area is this much larger than the target radius, so the real device canvas (whose
-        // exact size isn't known yet when tiles are requested) ends up comfortably inside the
-        // fetched area rather than right at its edge.
+        // Fetch a bit more than the target radius, since the canvas size isn't known yet.
         private const val COVERAGE_MARGIN = 1.3
     }
 
     /**
-     * Every tile needed to cover a [targetRadiusMeters] circle around (lat, lon) at [zoom], fetched
-     * concurrently. Individual tile failures are logged and simply omitted from the result -- never
-     * fail the whole map for one bad tile. [darkMode] selects Dark Matter over the default Voyager
-     * style; both are cached independently (see [fetchFromParentTile]) so switching styles never serves a
-     * stale tile from the other one.
+     * The tiles covering [targetRadiusMeters] around (lat, lon), fetched concurrently. Failed tiles
+     * are logged and left out. [darkMode] picks Dark Matter; each style is cached separately.
      */
     suspend fun fetchTilesAround(
         lat: Double,
@@ -225,8 +188,11 @@ class MapTileClient {
         MapTiles(zoom, centerFracX, centerFracY, tiles)
     }
 
-    /** Cuts [children] (tiles at [zoom]) from their parent's 512px @2x tile at zoom - 1, so one request
-     * covers four tiles and street labels render larger. Each quadrant is a drop-in 256px tile. */
+    /**
+     * Cuts [children] (tiles at [zoom]) from their parent's 512px @2x tile at zoom - 1, so one
+     * request covers four tiles and street labels render larger. Each quadrant is a drop-in 256px
+     * tile.
+     */
     private suspend fun fetchFromParentTile(
         parentX: Int,
         parentY: Int,
@@ -252,7 +218,7 @@ class MapTileClient {
         }
     }
 
-    /** One tile image decoded, or null on any failure ([label] identifies it in the log). */
+    /** One decoded tile, or null on failure ([label] is for the log). */
     private suspend fun fetchBitmap(url: String, label: String): Bitmap? =
         try {
             val response = client.get(url) {

@@ -8,9 +8,7 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun groupsRealSouthStationPlatformsUnderTheStationRecord() {
-        // Real rows from MBTA's static GTFS stops.txt: the "South Station" parent (location_type=1)
-        // plus its six real child platform/entrance stop_ids (location_type=0, parent_station=
-        // place-sstat), verified by hand-downloading the feed during development.
+        // MBTA's South Station parent (location_type=1) and its six child stop_ids.
         val rows = listOf(
             RawStopRow("place-sstat", "South Station", 42.352271, -71.055242, parentStation = null, locationType = 1),
             RawStopRow("70079", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
@@ -37,11 +35,8 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun excludesEntrancesAndPathwayNodesFromMemberStopIdsButKeepsBoardingAreas() {
-        // Real shape from MBTA's South Station: real platforms (location_type=0), a boarding area
-        // (location_type=4, e.g. a specific bus bay), a door that happens to be an elevator
-        // (location_type=2, "door-sstat-deweyelev" in the real feed), and an escalator pathway node
-        // (location_type=3, "node-382-lobby" in the real feed). Only the platform and boarding area
-        // should end up as members -- the door and escalator node are not places a rider boards.
+        // South Station's platforms, a boarding area, an elevator door, and an escalator node. Only
+        // the platform and boarding area are places to board.
         val rows = listOf(
             RawStopRow("place-sstat", "South Station", 42.352271, -71.055242, parentStation = null, locationType = 1),
             RawStopRow("70079", "South Station", 42.352271, -71.055242, parentStation = "place-sstat", locationType = 0),
@@ -63,9 +58,8 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun fallsBackToAllChildrenWhenNoneAreRealPlatforms() {
-        // A degenerate feed where every child under a parent is an entrance/pathway node -- rather
-        // than produce a station with zero member stops (breaking every schedule lookup for it), fall
-        // back to the unfiltered list so the station still resolves to something.
+        // Every child is an entrance or pathway node; fall back to the unfiltered list so the
+        // station still resolves.
         val rows = listOf(
             RawStopRow("place-onlydoors", "Doors Only Station", 42.0, -71.0, parentStation = null, locationType = 1),
             RawStopRow("door-a", "Doors Only Station", 42.0, -71.0, parentStation = "place-onlydoors", locationType = 2),
@@ -79,9 +73,7 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun stopWithManyConvergingRoutesButNoStationRecordIsNotAStation() {
-        // A stop many routes happen to converge at, but with no location_type=1 parent record
-        // backing it -- per the Station sub-map rule, this must never qualify, no matter how many
-        // routes serve it.
+        // Many routes meet here, but with no location_type=1 parent it isn't a station.
         val rows = listOf(
             RawStopRow("busy-stop", "Busy Corner", 42.0, -71.0, parentStation = null, locationType = 0),
         )
@@ -93,7 +85,7 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun stationRecordWithOnlyOneChildDoesNotQualify() {
-        // A real location_type=1 record, but only a single child platform -- the rule requires 2+.
+        // A location_type=1 parent with only one child platform; stations need 2 or more.
         val rows = listOf(
             RawStopRow("place-solo", "Lonely Station", 42.0, -71.0, parentStation = null, locationType = 1),
             RawStopRow("child-1", "Lonely Station", 42.0, -71.0, parentStation = "place-solo", locationType = 0),
@@ -106,9 +98,7 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun fallbackPromotedRepresentativeIsNeverAStation() {
-        // Same missing-parent-record scenario as fallsBackToFirstChildWhenTheParentRecordItselfIsMissing
-        // below -- even with 2+ children, there's no real Station record to back it, so it must not
-        // qualify as a station regardless of how many children point at the missing parent.
+        // Two or more children pointing at a missing parent still isn't a station.
         val rows = listOf(
             RawStopRow("child-b", "Ghost Stop", 42.1, -71.1, parentStation = "place-ghost", locationType = 0),
             RawStopRow("child-a", "Ghost Stop", 42.1, -71.1, parentStation = "place-ghost", locationType = 0),
@@ -135,8 +125,8 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun fallsBackToFirstChildWhenTheParentRecordItselfIsMissing() {
-        // parent_station points at "place-ghost", but no row with that stop_id exists (e.g. the
-        // station record has no coordinates and got filtered out upstream by the SQL WHERE clause).
+        // parent_station points at a stop_id that doesn't exist (e.g. filtered out for missing
+        // coordinates).
         val rows = listOf(
             RawStopRow("child-b", "Ghost Stop", 42.1, -71.1, parentStation = "place-ghost"),
             RawStopRow("child-a", "Ghost Stop", 42.1, -71.1, parentStation = "place-ghost"),
@@ -171,9 +161,8 @@ class GtfsRepositoryDedupTest {
 
     @Test
     fun platformLabelExtractsTheLastSegmentOfRealSouthStationStopDescs() {
-        // Real stop_desc values from MBTA's static GTFS stops.txt for South Station's own child
-        // platforms -- stop_name is identical ("South Station") across every one of these and can't
-        // distinguish them, but stop_desc's last " - "-delimited segment names the specific platform.
+        // South Station's platforms share a stop_name; the last " - " segment of stop_desc names
+        // each platform.
         assertEquals("Ashmont/Braintree", platformLabelFromStopDesc("South Station - Red Line - Ashmont/Braintree"))
         assertEquals("Alewife", platformLabelFromStopDesc("South Station - Red Line - Alewife"))
         assertEquals(
@@ -189,7 +178,7 @@ class GtfsRepositoryDedupTest {
         assertEquals(null, platformLabelFromStopDesc(null))
         assertEquals(null, platformLabelFromStopDesc(""))
         assertEquals(null, platformLabelFromStopDesc("   "))
-        // A single segment, no " - " separator at all -- nothing to split off as a platform.
+        // No " - " separator, so no platform label.
         assertEquals(null, platformLabelFromStopDesc("South Station"))
     }
 }

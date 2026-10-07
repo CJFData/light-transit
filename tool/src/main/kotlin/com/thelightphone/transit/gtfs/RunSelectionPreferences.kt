@@ -11,14 +11,9 @@ private val runSelectionEnabledKey = booleanPreferencesKey("RUN_SELECTION_ENABLE
 private val runStepperEnabledKey = booleanPreferencesKey("RUN_STEPPER_ENABLED")
 
 /**
- * Settings for a rider's own way to override a [FuzzyRunTrips] boarded trip's automatic run match --
- * a nested pair, not two independent switches. [runSelectionEnabledFlow] (on by default) gates the
- * whole "Select Run" row on Trip Detail: tapping the label always opens the full list (tap a vehicle
- * marker directly on the trip's own stop list). [runStepperEnabledFlow] (off by default) is a second,
- * finer toggle nested under the first -- Settings itself only shows this row at all while run
- * selection is on, since a stepper with nothing to step through makes no sense otherwise -- that
- * additionally shows Next/Previous run icons flanking the same label for a fast one-tap nudge,
- * without needing to open the list screen.
+ * Settings for picking a closest-match run. [runSelectionEnabledFlow] (on by default) shows Trip
+ * Detail's Select Run row, which opens the run list. [runStepperEnabledFlow] (off by default, shown
+ * only when the first is on) adds Next/Previous icons beside it.
  */
 class RunSelectionPreferences(private val dataStore: DataStore<Preferences>) {
 

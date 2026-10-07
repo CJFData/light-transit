@@ -54,18 +54,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** Same threshold StationListScreen's own inline search affordance uses, compared against the
- * collapsed [pickerEntries] count (regions counted once, not per member) -- easily cleared today
- * with dozens of rows across regions and ungrouped agencies alike. */
+/** Search is offered at this many rows, counting each region once, like StationListScreen. */
 private const val AGENCY_SEARCH_MIN_COUNT = 10
 
-/** One row in the picker list -- either a plain agency, or, for one that belongs to a
- * [RegionalGroup], a row representing the whole region instead of its individual members. Picking
- * a region row (e.g. "New York City", "Denver") drills into that region's own member list (see
- * [AgencyPickerModal.activeRegion]) so the rider can then pick their primary agency there, the
- * same as picking an ungrouped agency directly. Downloading additional agencies within that same
- * region is a separate, later step, done via [ScheduleSelectionScreen] (Settings' "Additional
- * Schedules" row, right under the agency picker), not something this picker itself does. */
+/** A picker row: an agency, or a region that opens a list of its members. */
 private sealed class PickerEntry {
     abstract val displayName: String
     data class Agency(val agency: GtfsAgency) : PickerEntry() {
@@ -76,9 +68,9 @@ private sealed class PickerEntry {
     }
 }
 
-/** [GtfsAgency.entries], with every grouped agency collapsed into one [PickerEntry.Region] row at
- * the position its first member would have sorted to -- so a rider sees "New York City" once,
- * not each of its 9 member agencies individually. */
+/**
+ * [GtfsAgency.entries] with each region collapsed into one row, where its first member would sort.
+ */
 private val pickerEntries: List<PickerEntry> by lazy {
     val seenGroups = mutableSetOf<RegionalGroup>()
     GtfsAgency.entries.mapNotNull { agency ->
@@ -91,17 +83,12 @@ private val pickerEntries: List<PickerEntry> by lazy {
     }
 }
 
-// Matches HomeScreen's own former inline list -- keeps every agency name lined up at the same x
-// position whether or not a download-arrow icon sits next to it.
+// Also used for the blank placeholder so names line up.
 private const val AGENCY_ICON_SIZE = 1f
 
 /**
- * Shown via LightModalManager.show/activeModal?.Content() -- HomeScreen's "no agency selected yet"
- * onboarding step (Stage 1) and Settings' own agency switcher both trigger this same modal,
- * differing only in [allowCancel] (Settings allows backing out; onboarding doesn't). Modeled on
- * ReachedStopModal's own trigger/presentation/dismiss pattern (a transient overlay, not a screen on
- * the nav stack) but its own component, since picking an agency needs a real list (plus optional
- * search) rather than a single centered message.
+ * The agency picker, shown as a modal from Home's first run and from Settings. Only Settings can
+ * cancel it ([allowCancel]).
  */
 class AgencyPickerModal(
     private val filesDir: File,
@@ -113,27 +100,20 @@ class AgencyPickerModal(
     private val dismissSignal = CompletableDeferred<Unit>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Non-null only while this picker is showing a region's own drill-down member list -- set
-     * when a rider taps a region row (see [selectEntry]), not tied to whatever the current primary
-     * agency is. A plain UI toggle, not persisted, same as [searchActive] in [Content]. A
-     * [MutableStateFlow] rather than a `remember`ed Compose state since [selectEntry] (where a
-     * region tap needs to set this) is a plain class method, not itself composable. */
+    /** The region whose members are showing, or null for the main list. */
     private val activeRegion = MutableStateFlow<RegionalGroup?>(null)
 
-    /** Which agencies already have a GTFS database downloaded on disk -- an agency in this set
-     * gets a blank spacer instead of the download-arrow icon next to its row, same as HomeScreen's
-     * own former inline list. Computed once when the modal is shown (nothing ingests while this is
-     * up -- see this class's own doc), not kept live. */
+    /**
+     * Agencies already downloaded, which get a blank instead of the download arrow. Computed once
+     * when shown.
+     */
     private val cachedAgencies = MutableStateFlow<Set<GtfsAgency>>(emptySet())
 
-    /** Every screen automatically gets its own ViewModel store; a LightModal doesn't, since its
-     * Content() is composed as a sibling of the current screen in LightActivity rather than
-     * nested under it (see LightActivity's Content()) -- so this modal creates and provides its
-     * own, fresh per show and cleared on [dismiss]. Without it, the inline search keyboard's
-     * `viewModel(key = ...)` call below would resolve against the Activity's shared default store
-     * and keep reusing a stale callback bound to a discarded TextFieldState on later opens -- the
-     * same "stops accepting input on reopen" bug the Stations search screen hit for the same
-     * underlying reason. */
+    /**
+     * A modal doesn't get its own ViewModel store like a screen does, so this one makes one per
+     * show and clears it on [dismiss]. Without it, the search keyboard would reuse a stale callback
+     * and stop accepting input on reopen.
+     */
     private val viewModelStoreOwner = object : ViewModelStoreOwner {
         override val viewModelStore = ViewModelStore()
     }
@@ -149,9 +129,7 @@ class AgencyPickerModal(
         dismiss()
     }
 
-    /** A region row never picks anything itself -- it drills into that region's own member list
-     * (see [PickerEntry]'s and [activeRegion]'s own docs) so the rider can then pick their primary
-     * agency from within it, the same as tapping an ungrouped agency directly always has. */
+    /** A region row opens its member list; an agency row picks it. */
     private fun selectEntry(entry: PickerEntry) {
         when (entry) {
             is PickerEntry.Agency -> selectAndDismiss(entry.agency)
@@ -191,8 +169,7 @@ class AgencyPickerModal(
         }
     }
 
-    /** [activeRegion]'s own drill-down list -- a region's members, picked exactly like any
-     * ungrouped agency (see [selectEntry]'s own doc). */
+    /** A region's member list. */
     @Composable
     private fun RegionContent(group: RegionalGroup, cached: Set<GtfsAgency>, onBack: () -> Unit, onSelectAgency: (GtfsAgency) -> Unit) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -218,10 +195,10 @@ class AgencyPickerModal(
         }
     }
 
-    /** Inline live-filter search -- see StationListScreen's identical pattern (SearchContent's own
-     * doc there), just against [GtfsAgency.entries] instead of a station list. [textFieldState] is
-     * hoisted from [Content] for the same reason: this composable is only ever in composition
-     * while search is active, so a state created locally would be a fresh instance every reopen. */
+    /**
+     * Inline search, like StationListScreen's. [textFieldState] is hoisted from [Content] so it
+     * survives reopening search.
+     */
     @Composable
     private fun SearchContent(
         cached: Set<GtfsAgency>,
@@ -239,9 +216,7 @@ class AgencyPickerModal(
             keyboardOptionsFlow = keyboardOptionsFlow,
         )
         val query = textFieldState.text.toString()
-        // A region matches on its own name (e.g. "New York City") or any member's (e.g. searching
-        // "Staten Island" still surfaces the "New York City" region row, not that one member
-        // directly) -- see PickerEntry's own doc for why a member never gets its own row here.
+        // A region matches on its own name or any member's.
         val filtered = remember(query) {
             if (query.isBlank()) {
                 pickerEntries
@@ -403,7 +378,7 @@ class AgencyPickerModal(
         }
     }
 
-    // No real timeout -- see this modal's Duration.INFINITE call site. Never fires in practice.
+    // Never fires; the modal has no timeout.
     override val onExpired: () -> Unit = {}
 
     override fun dismiss() {

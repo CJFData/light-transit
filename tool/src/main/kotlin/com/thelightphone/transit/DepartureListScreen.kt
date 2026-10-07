@@ -52,17 +52,11 @@ class DepartureListViewModel(
     dbFile: File,
     private val routeId: String,
     private val directionId: Int?,
-    /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
-     * [directionId] rather than conflated into one nullable signal. */
     private val headsign: String?,
-    /** See [FirstStopSelectionViewModel]'s own doc. */
     private val lastStopId: String?,
     private val stopId: String,
     private val departurePreferences: DeparturePreferences,
-    /** True when the stop that led here was picked while [FirstStopSelectionScreen] was itself
-     * showing tomorrow's schedule -- carries that choice forward so this screen opens already on
-     * tomorrow instead of re-defaulting to today (which would likely just be empty again, the
-     * same "nothing found" state the rider was trying to get past). */
+    /** True when the previous screen was showing tomorrow, so this one opens on tomorrow too. */
     startOnTomorrow: Boolean = false,
 ) : LightViewModel<Unit>() {
 
@@ -72,10 +66,7 @@ class DepartureListViewModel(
     private val _state = MutableStateFlow<DepartureListState>(DepartureListState.Loading)
     val state: StateFlow<DepartureListState> = _state
 
-    /** Whether the list below shows tomorrow's service day instead of today's, toggled by tapping
-     * the header's own "Today - tap for tomorrow" / "Tomorrow - tap for today" label (see
-     * [DepartureListScreen.Content]). Departures queries already accept an arbitrary service date,
-     * so shifting this by one day is all [loadDepartures] needs to do. */
+    /** Whether the list shows tomorrow's service day; tapping the header switches it. */
     private val _showTomorrow = MutableStateFlow(startOnTomorrow)
     val showTomorrow: StateFlow<Boolean> = _showTomorrow
 
@@ -97,19 +88,13 @@ class DepartureListViewModel(
         _state.value = try {
             val serviceDate = todayForGtfs(agency?.zoneId ?: java.time.ZoneId.systemDefault())
                 .let { if (_showTomorrow.value) it.plusDays(1) else it }
-            // Read once at screen-open, same as every other one-shot Settings read in this app
-            // (see TapHoldPreferences' own usage) -- Settings isn't shown at the same time as
-            // this screen, so no need to react live.
+            // Read once when the screen opens.
             val includeLongerTrips = departurePreferences.includeLongerTripsEnabledFlow.first()
             val departures = when {
                 directionId == null -> repository.getDepartures(routeId, null, stopId, serviceDate)
-                // See GtfsRepository.getDeparturesForVariant's own doc: also includes any longer
-                // trip that reaches at least as far as the chosen variant (e.g. a "South Station"
-                // train also shows up under a "Toward Readville" pick, since it passes through
-                // Readville on the way) -- deliberately asymmetric, so the inverse never happens (a
-                // "Toward Readville" trip never shows up under "Toward South Station"). Unless the
-                // rider has turned this off in Settings, in which case it's an exact headsign match
-                // only, in both directions.
+                // With "Include longer trips", also shows trips that go past the chosen destination
+                // (e.g. a South Station train under "Toward Readville"), but not the reverse. Off,
+                // headsigns must match exactly.
                 includeLongerTrips -> repository.getDeparturesForVariant(routeId, directionId, headsign, lastStopId, stopId, serviceDate)
                 else -> repository.getDeparturesForExactVariant(routeId, directionId, headsign, lastStopId, stopId, serviceDate)
             }
@@ -134,10 +119,7 @@ class DepartureListScreen(
     private val routeId: String,
     private val routeLabel: String,
     private val directionId: Int?,
-    /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
-     * [directionId] rather than conflated into one nullable signal. */
     private val headsign: String?,
-    /** See [FirstStopSelectionViewModel]'s own doc. */
     private val lastStopId: String?,
     private val directionLabel: String,
     private val stopId: String,
@@ -165,11 +147,8 @@ class DepartureListScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    // Screen name stays on line1 always -- only line2 doubles as the day toggle (tapping either
-                    // line flips between today's and tomorrow's schedule, see DepartureListViewModel.toggleDay).
-                    // Every departures query already takes an arbitrary service date, so this is a pure UI/state
-                    // addition, not a new query path. Same line1/line2 convention as FirstStopSelectionScreen's own
-                    // header, one screen earlier in this flow.
+                    // The screen name stays on the first line; tapping either line switches between
+                    // today and tomorrow.
                     center = LightTopBarCenter.TwoLineDetail(
                         line1 = "Departures",
                         line2 = if (showTomorrow) "Tomorrow - tap for today" else "Today - tap for tomorrow",

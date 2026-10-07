@@ -59,16 +59,12 @@ class FirstStopSelectionViewModel(
     private val dbFile: File,
     private val routeId: String,
     private val directionId: Int?,
-    /** Null only for the auto-skip case (see [GtfsRepository.getStops]'s own doc) -- every real
-     * chosen [com.thelightphone.transit.gtfs.DirectionOption] carries its own headsign (possibly
-     * itself null -- see [GtfsRepository.getStopsForVariant]), so this screen tells "no direction
-     * was ever chosen" apart from "the chosen variant's headsign happens to be blank" via
-     * [directionId] rather than conflating both into this one field. */
+    /**
+     * The chosen direction's headsign, which may be blank. Whether a direction was chosen at all
+     * comes from [directionId].
+     */
     private val headsign: String?,
-    /** The chosen [com.thelightphone.transit.gtfs.DirectionOption]'s own lastStopId -- see that
-     * class's own doc. Plays headsign's exact same role for an agency with no real headsign at all,
-     * so it's threaded through to [GtfsRepository.getStopsForVariant] alongside it rather than
-     * conflated into [headsign] itself (which stays the real trip_headsign column, or null). */
+    /** The chosen direction's last stop, standing in for a missing headsign. */
     private val lastStopId: String?,
     private val tapHoldPreferences: TapHoldPreferences,
     private val alertPreferences: AlertPreferences,
@@ -83,16 +79,10 @@ class FirstStopSelectionViewModel(
     /** Each stop's alerts for this route, when alerts are shown in menus. */
     val stopAlerts = MutableStateFlow<Pair<Map<String, List<Alert>>, ScreenAlerts>?>(null)
 
-    /** Settings screen's "Tap and hold" toggle for this screen specifically (on by default) -- see
-     * TapHoldPreferences.tapHoldScheduleArrivalsEnabledFlow. Read once at screen-open, same as
-     * every other one-shot Settings read in this app, since Settings isn't shown at the same time
-     * as this screen. */
+    /** Whether tap and hold opens a stop's arrivals. Read once when the screen opens. */
     val tapHoldArrivalsEnabled = MutableStateFlow(true)
 
-    /** Whether the list below is showing tomorrow's service day instead of today's -- same toggle
-     * DepartureListScreen already has (see [DepartureListViewModel.showTomorrow]'s own doc), added
-     * here too so a rider who hits "Nothing found in today's schedule" has somewhere to go instead of
-     * a dead end, rather than only ever querying today with no path forward. */
+    /** Whether the list shows tomorrow's schedule, like DepartureListScreen. */
     private val _showTomorrow = MutableStateFlow(false)
     val showTomorrow: StateFlow<Boolean> = _showTomorrow
 
@@ -113,11 +103,8 @@ class FirstStopSelectionViewModel(
 
     private suspend fun loadStops() {
         _state.value = try {
-            // Already in physical route order (see GtfsRepository.getStops's own doc) -- no location needed
-            // to pick a stop along a route, same as choosing a route or direction. Restricted to stops with a
-            // departure still remaining today -- a stop that would lead to an empty "No departures today"
-            // screen isn't worth offering. Tomorrow has no "remaining from now" concept -- start-of-day
-            // ("00:00:00") is used as afterTime instead, so every stop with any service tomorrow is offered.
+            // Stops in route order that still have a departure today. Tomorrow counts from
+            // midnight.
             val zoneId = agency?.zoneId ?: java.time.ZoneId.systemDefault()
             val today = todayForGtfs(zoneId).let { if (_showTomorrow.value) it.plusDays(1) else it }
             val afterTime = if (_showTomorrow.value) "00:00:00" else currentGtfsTimeOfDay(zoneId)
@@ -155,10 +142,7 @@ class FirstStopSelectionScreen(
     private val routeId: String,
     private val routeLabel: String,
     private val directionId: Int?,
-    /** See [FirstStopSelectionViewModel]'s own doc for why this is kept separate from
-     * [directionId] rather than folded into a single nullable signal. */
     private val headsign: String?,
-    /** See [FirstStopSelectionViewModel]'s own doc. */
     private val lastStopId: String?,
     private val directionLabel: String,
 ) : LightScreen<Unit, FirstStopSelectionViewModel>(sealedActivity) {
@@ -188,10 +172,8 @@ class FirstStopSelectionScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    // Screen name stays on line1 always -- only line2 doubles as the day toggle (tapping either
-                    // line flips between today's and tomorrow's schedule, see
-                    // FirstStopSelectionViewModel.toggleDay), same pattern as DepartureListScreen's own
-                    // header.
+                    // The screen name stays on the first line; tapping either line switches between
+                    // today and tomorrow.
                     center = LightTopBarCenter.TwoLineDetail(
                         line1 = "Choose Stop",
                         line2 = if (showTomorrow) "Tomorrow - tap for today" else "Today - tap for tomorrow",
@@ -222,10 +204,8 @@ class FirstStopSelectionScreen(
                         lighten = true,
                     )
 
-                    // Empty now means "no stop on this route/direction has a departure left today (or at all
-                    // tomorrow)" (see GtfsRepository.getStops/getStopsForVariant's own doc), not "this
-                    // route/direction doesn't exist" -- the message says so rather than implying something's
-                    // missing or broken. The header above is still tappable from here, same as any other state.
+                    // Empty means no departures left today (or none tomorrow), not that the route
+                    // is missing.
                     is FirstStopSelectionState.Loaded -> if (s.stops.isEmpty()) {
                         LightText(
                             text = if (showTomorrow) "Nothing found in tomorrow's schedule." else "Nothing found in today's schedule.",
@@ -242,9 +222,8 @@ class FirstStopSelectionScreen(
                                     variant = LightTextVariant.Copy,
                                     modifier = Modifier
                                         .weight(1f)
-                                        // A short tap proceeds as usual to this route/direction's scheduled departure times at this
-                                        // stop; tap-and-hold newly opens the stop's actual (live) upcoming arrivals
-                                        // instead, across every route serving it, not just this one.
+                                        // Tap opens this route's departures at the stop; tap and
+                                        // hold opens live arrivals for every route there.
                                         .pointerInput(stop.stopId) {
                                             detectTapGestures(
                                                 onTap = {

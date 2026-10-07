@@ -10,13 +10,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.protobuf.ProtoBuf
 
 /**
- * Regression coverage for the fields RTD Denver's live GTFS-RT feed sends that MBTA/RIPTA never
- * did -- verified by hand-decoding RTD's real TripUpdate.pb/VehiclePosition.pb byte-for-byte during
- * development, the same way MBTA/RIPTA's own field numbers were originally verified (see
- * GtfsRealtime.kt's doc comments). Bytes here are hand-built to reproduce exactly that shape rather
- * than embedding a live feed snapshot, since raw feed content (trip ids, times) goes stale in
- * minutes. If any of these fields get un-declared again, this fails with a decode exception instead
- * of the failure only showing up as "RTD's live arrivals are silently missing."
+ * Fields seen in live feeds that the decoder must accept. The bytes are hand-built to match those
+ * feeds' shape, since a saved snapshot goes stale.
  */
 class GtfsRealtimeTest {
 
@@ -24,9 +19,9 @@ class GtfsRealtimeTest {
     fun decodesTripUpdateWithRtdOnlyFields() {
         val tripDescriptor = ByteArrayOutputStream().apply {
             writeStringField(1, "115873037")
-            writeVarintField(4, 0) // schedule_relationship -- undeclared before this fix
+            writeVarintField(4, 0) // schedule_relationship
             writeStringField(5, "0")
-            writeVarintField(6, 1) // direction_id -- undeclared before this fix
+            writeVarintField(6, 1) // direction_id
         }.toByteArray()
 
         val vehicleDescriptor = ByteArrayOutputStream().apply {
@@ -36,14 +31,14 @@ class GtfsRealtimeTest {
         val stopTimeUpdate = ByteArrayOutputStream().apply {
             writeVarintField(1, 10)
             writeStringField(4, "12535")
-            writeVarintField(5, 0) // schedule_relationship -- undeclared before this fix
+            writeVarintField(5, 0) // schedule_relationship
         }.toByteArray()
 
         val tripUpdate = ByteArrayOutputStream().apply {
             writeMessageField(1, tripDescriptor)
             writeMessageField(2, stopTimeUpdate)
-            writeMessageField(3, vehicleDescriptor) // undeclared before this fix
-            writeVarintField(4, 1786067248L) // timestamp -- undeclared before this fix
+            writeMessageField(3, vehicleDescriptor) // vehicle
+            writeVarintField(4, 1786067248L) // timestamp
         }.toByteArray()
 
         val entity = ByteArrayOutputStream().apply {
@@ -84,7 +79,7 @@ class GtfsRealtimeTest {
             writeMessageField(2, position)
             writeVarintField(4, 2)
             writeVarintField(5, 1786067248L)
-            writeVarintField(9, 1) // occupancy_status -- undeclared before this fix
+            writeVarintField(9, 1) // occupancy_status
         }.toByteArray()
 
         val entity = ByteArrayOutputStream().apply {
@@ -112,7 +107,7 @@ class GtfsRealtimeTest {
 
         val arrival = ByteArrayOutputStream().apply {
             writeVarintField(2, 1786080480L)
-            writeVarintField(4, 1786080123L) // second timestamp -- undeclared before this fix
+            writeVarintField(4, 1786080123L) // second timestamp
         }.toByteArray()
 
         val stopTimeUpdate = ByteArrayOutputStream().apply {
@@ -121,8 +116,7 @@ class GtfsRealtimeTest {
             writeStringField(4, "12535")
         }.toByteArray()
 
-        // LTC's vendor bundle nests its own trip_id/start_date/start_time/shape_id -- content is
-        // never read by this app, only its presence at TripUpdate field 6 matters for this test.
+        // A vendor bundle; only its presence at TripUpdate field 6 matters here.
         val vendorTripProperties = ByteArrayOutputStream().apply {
             writeStringField(1, "2331159")
             writeStringField(4, "0")
@@ -131,9 +125,9 @@ class GtfsRealtimeTest {
         val tripUpdate = ByteArrayOutputStream().apply {
             writeMessageField(1, tripDescriptor)
             writeMessageField(2, stopTimeUpdate)
-            writeMessageField(6, vendorTripProperties) // undeclared before this fix
-            writeStringField(7, "") // undeclared before this fix
-            writeStringField(8, "974747") // undeclared before this fix
+            writeMessageField(6, vendorTripProperties) // vendor field
+            writeStringField(7, "") // vendor field
+            writeStringField(8, "974747") // vendor field
         }.toByteArray()
 
         val entity = ByteArrayOutputStream().apply {
@@ -162,7 +156,7 @@ class GtfsRealtimeTest {
     }.toByteArray()
 }
 
-// --- Minimal hand-rolled protobuf wire-format writer, just enough to build the fixtures above. ---
+// A minimal protobuf writer for building the fixtures above.
 
 private fun ByteArrayOutputStream.writeVarint(value: Long) {
     var remaining = value

@@ -1,13 +1,9 @@
 package com.thelightphone.transit.gtfs
 
 /**
- * See [RealtimeTripIdBridge]'s own doc for the origin-time encoding this decodes -- verified this
- * session against the real static schedule: raw origin_time 120050 (from trip_id "120050_L..N01R")
- * decodes to "20:00:30", matching an actual Weekday L-route [GtfsRepository] departure_time
- * verbatim, along with 120450 -> "20:04:30" and 120850 -> "20:08:30". NYCT's own static feed also
- * already uses plain 00:00-23:59 wraparound for post-midnight departures (confirmed: real rows like
- * "00:06:30" exist), not the extended->24:00:00 notation some agencies use, so no service-day
- * boundary adjustment is needed here.
+ * Decodes the origin time in NYC subway realtime trip_ids (see [RealtimeTripIdBridge]), e.g. 120050
+ * to "20:00:30". The static schedule writes after-midnight times as 00:00 onward, so no service-day
+ * adjustment is needed.
  */
 object NycSubwayTripIdBridge : RealtimeTripIdBridge {
     override fun scheduledStartTime(rawTripId: String): String? {

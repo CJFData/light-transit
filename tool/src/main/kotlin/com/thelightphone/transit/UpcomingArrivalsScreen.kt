@@ -67,9 +67,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 
-// Matches MapScreen's own LIVE_VEHICLE_POLL_INTERVAL_MS -- fast enough that a live source's own
-// refresh cadence (CTA Bus Tracker updates roughly every 30s per its own docs) is never the
-// bottleneck, without polling so often it wastes requests on data that hasn't changed yet.
+// Same polling interval as the map.
 private const val ARRIVALS_POLL_INTERVAL_MS = 10_000L
 
 data class ArrivalRow(
@@ -77,24 +75,21 @@ data class ArrivalRow(
     val stopSequence: Int,
     val routeLabel: String,
     val directionLabel: String,
-    /** Mode icon shown in place of the old "Bus -"/"Subway -"/"Commuter Rail -" text prefix -- see
-     * [toVehicleIcon] (MapScreen.kt), the single source of truth for this mapping. */
+    /** The mode icon; see [toVehicleIcon]. */
     val lineType: LineType?,
     val etaEpochSeconds: Long,
     val isLive: Boolean,
-    /** True only when this row's live data came from a [FuzzyRunTrips] source (CTA 'L' trains, MBTA
-     * subway) -- an approximate pairing (soonest live run <-> soonest scheduled trip by rank,
-     * see [FuzzyRunTrips]'s own doc), never a certain match the way every other live source is.
-     * [statusLabel] must surface this distinctly ("Closest match", not "Live") so a rider never
-     * reads an approximation as a confirmed prediction. */
+    /**
+     * True when the live data came from a closest match rather than a confirmed one; shown as
+     * "Closest match", not "Live".
+     */
     val isClosestMatch: Boolean = false,
     val status: ArrivalStatus?,
-    /** This arrival's own platform within the station, only populated when the selected stop is an
-     * actual multi-platform grouped station (e.g. "Track 1", "Ashmont/Braintree") -- see
-     * GtfsRepository.getScheduledArrivals(stopIds: List<String>, ...). Null for a plain stop. */
+    /**
+     * The arrival's platform at a multi-platform station (e.g. "Track 1"); null for a plain stop.
+     */
     val platformLabel: String?,
-    /** The agency's timezone, not the device's: [etaDisplay] renders [etaEpochSeconds] as a clock
-     * time in the agency's zone, like all GTFS time math in this codebase. */
+    /** The agency's time zone, for showing the ETA. */
     val zoneId: ZoneId,
 )
 
@@ -103,9 +98,10 @@ fun ArrivalRow.etaDisplay(): String {
     return formatGtfsTime("%02d:%02d:00".format(time.hour, time.minute))
 }
 
-/** e.g. "Red Line - Toward Alewife - Alewife" or "Commuter Rail - Toward Providence - Track 1" --
- * the platform is only appended when this arrival actually came from a grouped multi-platform
- * station ([ArrivalRow.platformLabel] non-null); a plain stop's line is unchanged. */
+/**
+ * e.g. "Commuter Rail - Toward Providence - Track 1". The platform is only added at a
+ * multi-platform station.
+ */
 fun ArrivalRow.routeAndDirectionLabel(): String {
     val base = "$routeLabel - $directionLabel"
     return platformLabel?.let { "$base - $it" } ?: base
@@ -125,9 +121,8 @@ sealed class UpcomingArrivalsState {
     object Loading : UpcomingArrivalsState()
 
     /**
-     * [isOffline] is true when there's no live feed at all (no [GtfsAgency.realtimeTripUpdatesUrl],
-     * or the fetch failed), as opposed to a feed with no update for one trip, which is shown per row
-     * without a badge.
+     * [isOffline] is true when no live data matched at all, as opposed to one trip without an
+     * update.
      */
     data class Loaded(
         val arrivals: List<ArrivalRow>,
@@ -141,10 +136,10 @@ sealed class UpcomingArrivalsState {
 class UpcomingArrivalsViewModel(
     private val dbFile: File,
     private val agency: GtfsAgency,
-    /** Every child platform stop_id belonging to the selected stop -- more than one entry means this
-     * is a real multi-platform grouped station (see GtfsRepository.groupStationsByParent), in
-     * which case arrivals across every platform are unioned and each is labeled with its own
-     * platform. A plain stop is just its own single-element list. */
+    /**
+     * The selected stop's platform stop_ids. More than one means a station; arrivals from every
+     * platform are combined and labeled.
+     */
     private val stopIds: List<String>,
     private val alertPreferences: AlertPreferences,
 ) : LightViewModel<Unit>() {
@@ -154,19 +149,17 @@ class UpcomingArrivalsViewModel(
     private val _state = MutableStateFlow<UpcomingArrivalsState>(UpcomingArrivalsState.Loading)
     val state: StateFlow<UpcomingArrivalsState> = _state
 
-    /** Whether the selected stop is itself a real, qualifying multi-platform station -- see
-     * GtfsRepository.getStationContaining, the same source of truth every other screen's transfer
-     * icon uses. Resolved via [stopIds]'s first entry rather than checking its length, since a
-     * caller may pass just one representative id even for a station (e.g. the Map screen's
-     * tap-and-hold shortcut). Kept separate from [state] so the icon can render as soon as this
-     * quick lookup resolves, without waiting on the network-bound arrivals fetch below. */
+    /**
+     * Whether the selected stop is a multi-platform station. Checked from the first id, since a
+     * caller may pass one id for a station. Separate from [state] so the icon shows before arrivals
+     * load.
+     */
     val isStation = MutableStateFlow(false)
 
     /** Alerts naming this stop, when alerts are shown in menus. */
     val stopAlerts = MutableStateFlow<Pair<List<Alert>, ScreenAlerts>?>(null)
 
-    /** Tracked so a previous load job is cancelled on hide/re-show, like other screens' load jobs;
-     * an untracked one could outlive [onCleared] and hit the closed [repository]. */
+    /** Tracked so a load is cancelled on hide and re-show and can't outlive [onCleared]. */
     private var loadJob: Job? = null
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -174,11 +167,8 @@ class UpcomingArrivalsViewModel(
         loadJob?.cancel()
         viewModelScope.launch(Dispatchers.IO) { stopAlerts.value = loadStopAlerts(dbFile, repository, alertPreferences, stopIds) }
         loadJob = viewModelScope.launch(Dispatchers.IO) {
-            // Own try/catch (not folded into the state one below) so a screen popped mid-query -- e.g.
-            // several rapid-fire goBack() calls in a row, like BackToHomeFooter's "jump to Home" loop --
-            // can't crash the app just because this repository got closed out from under an in-flight
-            // query on the way out. Same reasoning applies to every DB call in this coroutine, not just
-            // this one.
+            // Caught here so a screen closed mid-query doesn't crash when the repository closes.
+            // The same goes for every query below.
             try {
                 isStation.value = repository.getStationContaining(stopIds.first()) != null
             } catch (e: CancellationException) {
@@ -187,20 +177,13 @@ class UpcomingArrivalsViewModel(
                 Log.e("UpcomingArrivalsScreen", "getStationContaining failed for stops $stopIds", e)
             }
             try {
-                // Scheduled trips snapshotted once per service day, not re-queried every poll --
-                // same reasoning as MapScreen's own scheduledArrivalsByStopId: only the live-data
-                // fetches below need to repeat on a cadence, not the static schedule itself.
-                // Previously this whole block ran exactly once per screen visit with no poll loop
-                // at all, so live data (ETAs, delay status) never updated after the initial load no
-                // matter how long the screen stayed open -- confirmed as the real cause of arrivals
-                // "taking so long to update": it wasn't network/caching latency, the screen just
-                // never asked again.
+                // The schedule is read once per service day; only the live data is polled.
                 var today = todayForGtfs(agency.zoneId)
                 var scheduled = repository.getScheduledArrivals(stopIds, currentGtfsTimeOfDay(agency.zoneId), today)
 
                 while (isActive) {
-                    // Re-snapshotted when the service day rolls over while this screen is open. The schedule itself
-                    // is re-fetched, not just re-dated, since calendar.txt can run different trips on different days.
+                    // Re-read when the service day rolls over, since different days can run
+                    // different trips.
                     val currentDay = todayForGtfs(agency.zoneId)
                     if (currentDay != today) {
                         today = currentDay
@@ -222,14 +205,13 @@ class UpcomingArrivalsViewModel(
         scheduled: List<ScheduledArrival>,
         today: LocalDate,
     ): UpcomingArrivalsState = try {
-                // Merged with any MultiGtfsFeed component's own realtime feed (e.g. Bustang under RTD
-                // Denver) -- see MergedRealtimeFeed's own doc. [feed.primary] (used below for
-                // staleness/offline) stays keyed off the agency's own primary feed only.
+                // Includes any extra feeds' trip updates. [feed.primary] is the agency's own feed,
+                // for staleness and offline.
                 val feed = agency.fetchMergedTripUpdates(repository, "UpcomingArrivalsScreen")
 
-                // Agencies without GTFS-RT leave [feed] empty and supply live data through a [StopPredictionSource]
-                // (predicted times, preferred) or a [LiveVehicleSource] (positions only). Both are fetched concurrently,
-                // since neither depends on the other.
+                // Agencies without GTFS-RT supply live data through a [StopPredictionSource]
+                // (predicted times, preferred) or a [LiveVehicleSource] (positions only). Both are
+                // fetched at once.
                 val stopPredictionSource = agency.component<StopPredictionSource>()
                 val liveVehicleSource = agency.component<LiveVehicleSource>()
                 val fuzzyRunTrips = agency.component<FuzzyRunTrips>()
@@ -237,8 +219,7 @@ class UpcomingArrivalsViewModel(
                     scheduled.filterTo(mutableSetOf()) { LineType.forGtfsRouteType(it.route.routeType) in source.coveredLineTypes }
                         .mapTo(mutableSetOf()) { it.route.routeId }
                 }.orEmpty()
-                // Scoped to routes actually scheduled at this stop, not FuzzyRunTrips' own full
-                // routeIds set -- same rate-limit discipline as liveSourceRouteIds above.
+                // Only routes scheduled at this stop, to limit requests.
                 val fuzzyRouteIds = scheduled.mapTo(mutableSetOf()) { it.route.routeId }
                 val (stopPredictions, liveVehiclesByTripId, fuzzyMatchesByTripId) = coroutineScope {
                     val predictionsDeferred = async {
@@ -285,48 +266,39 @@ class UpcomingArrivalsViewModel(
                 }
 
                 val rows = scheduled.mapNotNull { arrival ->
-                    // Matched against this specific arrival's own platform (arrival.stopId), not
-                    // just whichever platform the screen was originally opened for -- a grouped
-                    // station's live predictions are per-platform, same as its static schedule.
+                    // Matched against the arrival's own platform, since a station's predictions are
+                    // per platform.
                     val rtStopUpdate = feed.byTripId[arrival.tripId]
                         ?.updateFor(arrival.stopId, arrival.stopSequence)
-                    // computeArrivalEta never returns null (it falls back to a schedule-only time), so the other
-                    // live sources have to be checked before calling it, not after. In order of preference: a
-                    // GTFS-RT match, a predicted time from a StopPredictionSource, a LiveVehicleSource confirming the
-                    // trip is running (so we trust the schedule), a FuzzyRunTrips closest match, and finally the
-                    // plain schedule.
+                    // computeArrivalEta always returns a time, falling back to the schedule, so
+                    // other sources are checked first. In order of preference: a GTFS-RT match, a
+                    // predicted time, a live vehicle confirming the trip is running, a closest
+                    // match, then the schedule.
                     val fuzzyStopUpdate = fuzzyMatchesByTripId[arrival.tripId]?.updateFor(arrival.stopId, arrival.stopSequence)
                     var isClosestMatch = false
                     val eta = when {
                         rtStopUpdate != null -> computeArrivalEta(arrival.departureTime, today, rtStopUpdate, agency.zoneId) ?: return@mapNotNull null
                         arrival.tripId in stopPredictions ->
-                            // Diffed against arrival.departureTime, the scheduled time at this stop, via the same synthetic
-                            // GtfsRtStopTimeUpdate pattern as a TripUpdates match. Never against the trip's origin time,
-                            // which StopPredictionSource has no basis to diff against (see its doc).
+                            // Compared against the scheduled time at this stop, like a trip update.
                             computeArrivalEta(
                                 arrival.departureTime, today,
                                 GtfsRtStopTimeUpdate(departure = GtfsRtStopTimeEvent(time = stopPredictions.getValue(arrival.tripId))),
                                 agency.zoneId,
                             ) ?: return@mapNotNull null
                         arrival.tripId in liveVehiclesByTripId ->
-                            // No GTFS-RT or real prediction match, but a LiveVehicleSource confirms a real
-                            // vehicle is out on this exact trip right now -- e.g. RunAssociatedTripSource's
-                            // position-only bridge (see its own doc) has no arrival-time prediction of its
-                            // own, so this trusts the scheduled time rather than guessing an offset, just
-                            // marks it confirmed live instead of schedule-only.
+                            // A live vehicle is on this trip but there's no predicted time, so the
+                            // schedule is shown, marked live.
                             gtfsTimeToEpochSeconds(arrival.departureTime, today, agency.zoneId)
                                 ?.let { ArrivalEta(etaEpochSeconds = it, isLive = true, status = null) }
                                 ?: return@mapNotNull null
                         fuzzyStopUpdate != null -> {
-                            // Real predicted time from an actual live run -- just paired to this trip_id
-                            // approximately (see fuzzyMatchesByTripId's own doc) -- so computeArrivalEta's
-                            // diff-against-schedule status (Late/Early/OnTime) is still meaningful, unlike
-                            // a fabricated one would be.
+                            // A real predicted time from the matched run, so Late/Early/On Time
+                            // still applies.
                             val fuzzyEta = computeArrivalEta(arrival.departureTime, today, fuzzyStopUpdate, agency.zoneId)
                                 ?: return@mapNotNull null
-                            // A live result with no status means the update didn't plausibly fit this trip's schedule (see
-                            // ARRIVAL_STATUS_IMPLAUSIBLE_THRESHOLD_SECONDS). Showing the schedule instead keeps this row and
-                            // Trip Detail agreeing on the trip's time.
+                            // A live result with no status didn't plausibly fit this trip's
+                            // schedule. Showing the schedule instead keeps this row and Trip Detail
+                            // agreeing.
                             if (fuzzyEta.isLive && fuzzyEta.status != null) {
                                 isClosestMatch = true
                                 fuzzyEta
@@ -352,11 +324,8 @@ class UpcomingArrivalsViewModel(
                 }.sortedBy { it.etaEpochSeconds }
 
                 val stale = feed.primary?.header?.isStale(System.currentTimeMillis() / 1000) ?: false
-                // Offline means "no live prediction at all" — a feed that fetched fine but simply
-                // has zero matches among currently-scheduled trips still counts as offline, while
-                // even one live match means we're genuinely getting live data. An agency with a
-                // StopPredictionSource/LiveVehicleSource but no standard feed (feed.primary always null)
-                // isn't offline just because of that -- only the "zero live matches" check below applies.
+                // Offline means no live match at all, even when the feed fetched fine. An agency
+                // with only its own live source isn't offline just for having no feed.
                 val hasNonStandardLiveSource = stopPredictionSource != null || liveVehicleSource != null || fuzzyRunTrips != null
                 val isOffline = (feed.primary == null && !hasNonStandardLiveSource) || (rows.isNotEmpty() && rows.none { it.isLive })
                 UpcomingArrivalsState.Loaded(rows, isOffline = isOffline, realtimeStale = stale)
@@ -433,9 +402,7 @@ class UpcomingArrivalsScreen(
                         .padding(bottom = 16.dp),
                 ) {
                     LightIcon(icon = LightIcons.MAP, size = 1.4f, modifier = Modifier.padding(end = 8.dp))
-                    // Weighted so a long stop name wraps within its own bounded share of the row,
-                    // leaving guaranteed room for the trailing icon -- see NearbyStopsScreen's
-                    // identical fix for the same underlying Compose behavior.
+                    // Weighted so a long stop name wraps instead of pushing out the icon.
                     LightText(
                         text = stopLabel,
                         variant = LightTextVariant.Copy,
@@ -516,9 +483,8 @@ class UpcomingArrivalsScreen(
                                                 size = 1.2f,
                                                 modifier = Modifier.padding(end = 8.dp),
                                             )
-                                            // Status renders directly under the route/direction text it describes (same weighted column)
-                                            // rather than as a sibling of the whole Row -- otherwise it lines up flush
-                                            // with the mode icon's left edge instead of the text.
+                                            // In the text's column, so the status lines up under
+                                            // the route rather than the icon.
                                             Column(
                                                 modifier = Modifier
                                                     .weight(1f)

@@ -13,11 +13,8 @@ private val tapHoldVehicleKey = booleanPreferencesKey("TAP_HOLD_VEHICLE_ENABLED"
 private val stationTapArrivalsKey = booleanPreferencesKey("STATION_TAP_ARRIVALS_ENABLED")
 
 /**
- * Settings toggles for "tap and hold a stop to see its actual arrivals" outside the Map screen,
- * which has its own toggle (see MapPreferences.tapHoldArrivalsEnabledFlow). Schedule mode's stop
- * selection list and the Stations browse list each get their own here, both on by default like
- * the Map screen's. All three are purely additive: the short tap keeps doing exactly what it
- * always did either way, and only tap-and-hold's new behavior is gated.
+ * Tap-and-hold settings outside the map (see MapPreferences.tapHoldArrivalsEnabledFlow). Schedule's
+ * stop list and the Stations list each have one, on by default; tap keeps its usual action.
  */
 class TapHoldPreferences(private val dataStore: DataStore<Preferences>) {
 
@@ -35,10 +32,7 @@ class TapHoldPreferences(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { prefs -> prefs[tapHoldStationArrivalsKey] = enabled }
     }
 
-    /** On by default -- tap and hold a vehicle marker on the Map screen or Station map to open its
-     * own Trip Detail, regardless of "See Everything" mode. Purely additive, same reasoning as the
-     * two toggles above: a vehicle marker has no existing short-tap behavior of its own to preserve
-     * outside "See Everything" (where a plain tap keeps toggling its short/long label either way). */
+    /** On by default: tap and hold a vehicle on a map to open its trip. */
     val tapHoldVehicleEnabledFlow: Flow<Boolean> =
         dataStore.data.map { prefs -> prefs[tapHoldVehicleKey] ?: true }
 
@@ -46,13 +40,11 @@ class TapHoldPreferences(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { prefs -> prefs[tapHoldVehicleKey] = enabled }
     }
 
-    /** On by default -- scoped to the Stations list screen only (StationListScreen), nowhere else.
-     * Swaps that screen's two gestures: a plain tap opens a station's live upcoming arrivals
-     * directly (its platform map is still one tap away from there, via Upcoming Arrivals' own
-     * "Selected stop" row), and tap-and-hold opens the platform map instead. Off, the gestures
-     * revert to their original assignment -- plain tap opens the platform map, and
-     * [tapHoldStationArrivalsEnabledFlow] above resumes controlling whether tap-and-hold opens
-     * arrivals. */
+    /**
+     * On by default, Stations list only: tap opens a station's arrivals and tap and hold opens its
+     * platform map. Off, the reverse, with [tapHoldStationArrivalsEnabledFlow] controlling tap and
+     * hold.
+     */
     val stationTapArrivalsEnabledFlow: Flow<Boolean> =
         dataStore.data.map { prefs -> prefs[stationTapArrivalsKey] ?: true }
 

@@ -121,20 +121,15 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.time.Duration
 
-// One agency-row icon's footprint -- also used as a blank placeholder's size for the "already
-// cached" state, so every agency name lines up at the same x position whether or not it has an
-// icon next to it.
+// Agency-row icon size, also used for the blank placeholder so names line up.
 private const val AGENCY_ICON_SIZE = 1f
 
-// Stage 2's own ticking clock, in whichever agency's own timezone is currently selected -- see
-// HomeScreenViewModel's currentTime.
+// The home screen clock, in the selected agency's time zone.
 private val CLOCK_FORMATTER = DateTimeFormatter.ofPattern("h:mm a")
 
 /**
- * A friendly, low-stakes message shown at the bottom of the home screen -- picked deterministically
- * by calendar day, or randomly if random selection is enabled, so it stays the same across every
- * visit in a day. TODO: work in transit authority specific ones,
- * holidays, seasons, or weather.
+ * A short message on the home screen, picked by the day, or at random when that's turned on. TODO:
+ * agency-specific, holiday, seasonal, or weather messages.
  */
 private val DAILY_MESSAGES = listOf(
     // Transit-themed
@@ -195,8 +190,6 @@ private val DAILY_MESSAGES = listOf(
 )
 
 
-/** [random] is the Settings screen's own opt-in toggle (off by default) -- see
- * HomeScreenPreferences.dailyMessageRandomFlow. */
 private fun dailyMessage(random: Boolean): String {
     if (random) return DAILY_MESSAGES.random()
     val dayOfYear = LocalDate.now().dayOfYear
@@ -205,43 +198,31 @@ private fun dailyMessage(random: Boolean): String {
 
 
 
-/** Whether the current screen is HomeScreen -- set true/false in onScreenShow/onScreenHide below.
- * [BackToHomeFooter] reads this to hide its own "back to home" affordance while already on
- * HomeScreen, since popping further would be pointless here. */
+/** Whether Home is the current screen, so the footer's home button can hide itself there. */
 object HomeVisibility {
     val isVisible = MutableStateFlow(false)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 }
 
-// Matches every other live-polling screen's own cadence (see MapScreen/TripDetailScreen's
-// identical constant) -- HomeScreen only ever runs this while a trip is actually boarded.
+// How often the boarded trip's live position is polled.
 private const val LIVE_VEHICLE_POLL_INTERVAL_MS = 10_000L
 
 /**
- * Drives the boarded-trip progress bar and ETA shown minimally on the home screen -- populated
- * only while a trip is boarded, via GTFS-RT live polling. [stopsRemaining]/[etaEpochSeconds] are
- * null whenever there's nothing live to show yet (no position reported, or no alight stop chosen
- * on Trip Detail); [headingSubtitle] falls back to guidance text rather than a blank line then.
+ * The boarded trip's progress and ETA for the home screen. Fields are null until there's live data
+ * and an alight stop.
  */
 
 data class ActiveTripStatus(
     val routeLabel: String,
     val alightStopName: String?,
     val etaEpochSeconds: Long?,
-    /** Count of stops between the vehicle's current/next stop (inclusive) and the alight stop
-     * (exclusive) -- see [HomeScreenViewModel.refreshActiveTripStatus] for the exact computation.
-     * Null whenever there's no live vehicle position to compute it from. */
+    /** Stops left from the vehicle's next stop to the alight stop. */
     val stopsRemaining: Int?,
-    /** How far along the vehicle is between the boarding stop (0f) and the alight stop (1f), by
-     * stop_sequence position -- drives the progress bar's marker (Settings screen's "Trip progress
-     * bar" toggle). Null under the same conditions as [stopsRemaining]. */
+    /** Progress from the boarding stop (0) to the alight stop (1), for the progress bar. */
     val progressFraction: Float?,
-    /** The boarded trip's own agency timezone -- [etaEpochSeconds] must be rendered against this,
-     * not the rider's device zone, same reasoning as every other GTFS time display in the app. */
+    /** The trip's agency time zone, for showing the ETA. */
     val zoneId: ZoneId,
-    /** True only when the fields above came from a [FuzzyRunTrips] source: an approximate
-     * rank-matched pairing, never a certain one. [headingSubtitle] must mark this distinctly so a
-     * rider never mistakes it for a confirmed live position while boarded. */
+    /** True when this came from a closest match rather than a confirmed position. */
     val isClosestMatch: Boolean = false,
 )
 
@@ -251,9 +232,7 @@ private fun Long.asClockTime(zoneId: ZoneId): String {
 }
 
 fun ActiveTripStatus.headingSubtitle(): String {
-    // "~" prefix is the only signal a rider gets here that this is a closest-match approximation,
-    // not a confirmed live position -- HomeScreen's single compact line has no room for a separate
-    // "Closest match" label the way Upcoming Arrivals/Trip Detail show one.
+    // "~" marks a closest match on this one compact line.
     val approxPrefix = if (isClosestMatch) "~" else ""
     val stopsToDest = when {
         stopsRemaining == null -> null
@@ -287,119 +266,81 @@ class HomeScreenViewModel(
 
     private val ingestor = GtfsIngestor(filesDir, connectivity, networkPreferences)
 
-    /** The trip the rider is currently on (if any), independent of whichever agency is selected
-     * above -- see BoardedTripPreferences' own doc comment for why this is a saved reference back
-     * to Trip Detail rather than a background tracker. Collected for this ViewModel's whole
-     * lifetime so it reflects a Board/Alight tap made on Trip Detail immediately upon returning here. */
+    /** The trip the rider is on, if any, kept current so Board and Alight taps show right away. */
     val boardedTrip = MutableStateFlow<BoardedTrip?>(null)
 
-    /** The rider's own explicit Select Run pick (Trip Detail, while boarded) -- see
-     * [BoardedFuzzyRun]'s own doc. Collected for this ViewModel's whole lifetime so a selection made
-     * on Trip Detail is reflected here immediately, same reasoning as [boardedTrip]. */
+    /** The rider's Select Run pick, kept current like [boardedTrip]. */
     val boardedFuzzyRun = MutableStateFlow<BoardedFuzzyRun?>(null)
 
-    /** Live progress toward the boarded trip's alight stop -- see [ActiveTripStatus]'s own doc
-     * comment. Null whenever nothing's boarded; otherwise refreshed by [tripStatusPollJob] below. */
+    /** Live progress toward the boarded trip's alight stop; null when nothing's boarded. */
     val activeTripStatus = MutableStateFlow<ActiveTripStatus?>(null)
 
-    /** Settings screen's "Trip progress bar" toggle (on by default) -- see
-     * BoardedTripPreferences.progressBarVisibleFlow. */
     val progressBarVisible = MutableStateFlow(true)
 
-    /** Settings screen's "Daily message" toggle (on by default) -- see
-     * HomeScreenPreferences.dailyMessageVisibleFlow. */
     val dailyMessageVisible = MutableStateFlow(true)
 
-    /** Settings screen's "Randomize daily message" toggle (off by default) -- see
-     * HomeScreenPreferences.dailyMessageRandomFlow. */
     val dailyMessageRandom = MutableStateFlow(false)
 
-    /** The message text itself, re-rolled once per [onScreenShow] rather than computed fresh on
-     * every recomposition, so a random pick (when [dailyMessageRandom] is on) stays put for the
-     * rest of this visit instead of changing under the rider on every recomposition. */
+    /**
+     * The message, picked once per visit so a random one doesn't change while the screen is open.
+     */
     val dailyMessageText = MutableStateFlow(dailyMessage(random = false))
 
-    /** One-shot signal: non-null exactly when the rider has just dismissed the "you've arrived"
-     * modal for the boarded trip's alight stop while HomeScreen was visible -- mirrors
-     * TripDetailViewModel's identical field (see the shared checkReachedAlightStop). Content()
-     * observes this to navigate to that stop's Upcoming Arrivals, then calls
-     * [clearReachedAlightStop] to consume it. Carries the agency alongside the stop rather than
-     * reading [boardedTrip] fresh, since [checkReachedAlightStop] already clears it to null before
-     * the modal even shows. */
+    /**
+     * Set when the rider dismisses the "you've reached your stop" message on this screen; Content()
+     * then opens that stop's arrivals and clears it.
+     */
     val reachedAlightStop = MutableStateFlow<Pair<GtfsAgency, TripStopRow>?>(null)
 
-    /** Wakes the trip-status poll loop early on a boarded-trip change (board/alight/alight-stop
-     * tap made on Trip Detail) rather than waiting out the rest of the current poll interval --
-     * same conflated-trigger pattern MapScreen's own refreshTrigger uses. */
+    /** Wakes the trip-status poll early when the boarded trip changes. */
     private val tripStatusRefreshTrigger = Channel<Unit>(Channel.CONFLATED)
     private var tripStatusPollJob: Job? = null
 
-    /** The home screen's alerts and what's needed to show them; null when there's nothing to show. */
+    /** The home screen's alerts; null when there are none to show. */
     val homeAlerts = MutableStateFlow<Pair<List<Alert>, ScreenAlerts>?>(null)
     private var alertsPollJob: Job? = null
 
-    /** Null until Stage 1's onboarding modal (or a Settings-driven switch) picks one -- see the
-     * defaultAgencyFlow collector in [init]. Declared, along with every field below through
-     * [feedAttribution], before that init block: viewModelScope uses Dispatchers.Main.immediate, so
-     * a coroutine in init with an already-cached value to emit runs synchronously during
-     * construction. Referencing a field declared later would read it before its own initializer
-     * runs -- still null -- which crashed with a bare NPE until these were moved up here. */
+    /**
+     * The selected agency. This and the fields below are declared before init because its
+     * collectors can run during construction.
+     */
     val selectedAgency = MutableStateFlow<GtfsAgency?>(null)
-    /** Ingest failure text only -- shown under Stage 2's agency name/loading indicator. */
+    /** Ingest failure text, if any. */
     val status = MutableStateFlow<String?>(null)
 
-    /** Set once ingestion completes successfully; gates whether the "Schedule"/"Explore" mode
-     * buttons are available, and whether Stage 2's own loading indicator shows (see [currentTime]'s
-     * own doc for the rest of that heading block). */
+    /** Set once the agency's schedule is ready; enables Schedule and Explore. */
     val readyAgency = MutableStateFlow<GtfsAgency?>(null)
     private var agencyIngestJob: Job? = null
 
-    /** True exactly when [selectedAgency]'s ingest was skipped by the "Only download over Wi-Fi"
-     * setting (see [GtfsIngestStatus.WaitingForWifi]) -- distinct from [status] itself since a Wi-Fi
-     * reconnect should retry ingest only in this case, not for an unrelated ingest failure that
-     * also happens to leave [status] non-null. */
+    /**
+     * True when the download was skipped by "Only download over Wi-Fi", so reconnecting to Wi-Fi
+     * retries it.
+     */
     private val waitingForWifi = MutableStateFlow(false)
 
-    /** Stage 2's own ticking clock, in [selectedAgency]'s timezone -- "" until an agency is picked.
-     * Restarted (see [currentTimeJob]) every time [selectedAgency] changes, since the zone changes
-     * with it. */
+    /** The ticking clock text; restarted when the agency (and time zone) changes. */
     val currentTime = MutableStateFlow("")
     private var currentTimeJob: Job? = null
 
-    /** Whether [readyAgency] has any real, qualifying multi-platform stations (see
-     * GtfsRepository.getAllStations) -- an agency with none shows no "Station" entry
-     * point rather than one that always opens an empty list. Reset to false the moment a new agency
-     * is selected so a stale true from the previous agency can't flash before this agency's own
-     * check completes. */
+    /** Whether the agency has multi-platform stations, to show the Station button. */
     val agencyHasStations = MutableStateFlow(false)
 
-    /** The currently-selected agency's own GTFS-feed attribution, plus one entry for every
-     * [MultiGtfsFeed] component it has -- e.g. RTD Denver's attribution followed by "Bustang",
-     * so a merged feed's data source gets credited too -- and the same for every agency in
-     * [AgencyPreferences.additionalDownloadsFlow] (Schedule Selection's own "extra downloads
-     * alongside my primary" list, see that flow's own doc), so a rider with more than one schedule
-     * downloaded sees all of them credited, not just whichever one drives Home. Deduplicated by
-     * name (see [refreshFeedAttribution]) -- e.g. NYC Subway + a NYC bus borough both attribute
-     * "MTA New York City Transit", which should only ever show once, not once per schedule that
-     * happens to share it. See GtfsRepository.getFeedAttribution's own doc for the primary entry's
-     * fallback chain. Reset to empty the moment a new agency is selected, same reasoning as
-     * [agencyHasStations]. */
+    /**
+     * Data credits for the selected agency, its extra feeds, and any additional schedules in its
+     * region, with duplicates removed.
+     */
     val feedAttribution = MutableStateFlow<List<FeedAttribution>>(emptyList())
 
-    /** See [feedAttribution]'s own doc for why this is tracked at all (reacting to
-     * [AgencyPreferences.additionalDownloadsFlow] changing independently of [selectedAgency], same
-     * reasoning as [preferences]' defaultAgencyFlow collector in [init]) -- also read directly by
-     * Content()'s own "Schedule" bottom-bar button, to decide whether tapping it should prompt for
-     * which downloaded schedule to browse first (see [ScheduleAgencyPickerScreen]) or, the common
-     * single-schedule case, go straight to [LineTypeSelectionScreen] the way it always has. */
+    /**
+     * Additional schedules the rider has downloaded, for the credits and the Schedule button's
+     * picker.
+     */
     val additionalDownloads = MutableStateFlow<Set<GtfsAgency>>(emptySet())
 
     init {
         viewModelScope.launch {
             boardedTripPreferences.boardedTripFlow.collect { newTrip ->
-                // TripPositionAnchor is shared with TripDetailViewModel (see its doc) and must only be reset
-                // when the boarded trip itself changes, not on every re-emission of the same trip's record
-                // (e.g. setting the alight stop rewrites it), which would discard an advancing anchor mid-ride.
+                // Reset the shared stop anchor only when the boarded trip itself changes.
                 if (newTrip?.tripId != boardedTrip.value?.tripId) {
                     TripPositionAnchor.clear()
                 }
@@ -423,11 +364,8 @@ class HomeScreenViewModel(
         viewModelScope.launch {
             homeScreenPreferences.dailyMessageVisibleFlow.collect { dailyMessageVisible.value = it }
         }
-        // Covers both cold start (no saved default opens the onboarding modal; a saved default
-        // auto-selects it) and a Settings-driven switch made while this ViewModel is alive but
-        // HomeScreen isn't visible -- this collector runs for the ViewModel's whole lifetime, and
-        // DataStore's Flow reacts the moment Settings persists a new default, so no separate
-        // propagation path is needed.
+        // Selects the saved default agency, or opens the picker when there isn't one. Also handles
+        // a switch made in Settings.
         viewModelScope.launch {
             preferences.defaultAgencyFlow.collect { default ->
                 when {
@@ -442,21 +380,14 @@ class HomeScreenViewModel(
                 refreshFeedAttribution()
             }
         }
-        // Settings' "Clear schedule cache" deletes the selected agency's own database without changing
-        // which agency is selected, so the defaultAgencyFlow collector above never fires for it (it's
-        // keyed on the agency actually changing). This second trigger re-runs selectAgency for the same
-        // agency once there's nothing left on disk for it. drop(1) skips the value every MutableStateFlow
-        // emits immediately on collect, so this doesn't re-ingest on ordinary screen creation.
+        // Clearing the schedule cache keeps the same agency, so re-download it once its files are
+        // gone.
         viewModelScope.launch {
             GtfsCacheClearedSignal.version.drop(1).collect {
                 selectedAgency.value?.let { agency -> selectAgency(agency) }
             }
         }
-        // "Only download over Wi-Fi" can leave selectAgency's own ingest skipped entirely -- this
-        // resumes it the moment Wi-Fi actually becomes available, rather than making the rider reopen
-        // the app or revisit Settings to get today's schedule. drop(1) skips the Flow's own initial
-        // emission on collect (this device's connectivity at ViewModel-creation time), same reasoning
-        // as the GtfsCacheClearedSignal collector above -- only a real transition to Wi-Fi should retry.
+        // Retry a download skipped by "Only download over Wi-Fi" once Wi-Fi connects.
         viewModelScope.launch {
             connectivity.observeNetworkStatus()
                 .map { it.isWifi }
@@ -468,9 +399,7 @@ class HomeScreenViewModel(
                     }
                 }
         }
-        // Restarted (not just updated) on every agency change since the timezone itself changes --
-        // a stale loop ticking in the previous agency's zone would show the wrong clock for one
-        // more tick after switching.
+        // Restarted on each agency change, since the time zone changes too.
         viewModelScope.launch {
             selectedAgency.collect { agency ->
                 currentTimeJob?.cancel()
@@ -488,12 +417,10 @@ class HomeScreenViewModel(
         }
     }
 
-    /** Stage 1: shown via the same LightModal overlay ReachedStopModal uses (see
-     * AgencyPickerModal's own doc) whenever there's no agency selected and no saved default --
-     * first launch, or after Settings clears it. Picking an agency there only persists it as the
-     * new default; this ViewModel's own defaultAgencyFlow collector (not the modal itself) is what
-     * actually selects/ingests it, so the same path handles both first-launch and a Settings-driven
-     * switch identically. */
+    /**
+     * Shows the agency picker when no agency is saved. Picking one saves it, and the default-agency
+     * collector selects it.
+     */
     private fun showAgencyPicker() {
         LightModalManager.show(
             modal = AgencyPickerModal(
@@ -509,13 +436,10 @@ class HomeScreenViewModel(
         reachedAlightStop.value = null
     }
 
-    /** Fired the moment "Explore" is tapped, before NearbyStopsScreen opens -- skipped entirely if
-     * the rider has turned location off in Settings ([LocationPreferences]). Otherwise, always
-     * primes LightOS's ~30s update lease (fire-and-forget, harmless without permission -- gives the
-     * GPS radio a beat's head start over waiting for NearbyStopsScreen's own onScreenShow), and
-     * separately -- only if the permission has never been asked about before ([GetPermission.Result.Unknown])
-     * -- fires [requestPermission], the actual system/Light permission prompt, right here while Home
-     * is still the visible screen. A rider who already said no isn't re-prompted on every tap. */
+    /**
+     * Called when Explore is tapped: unless location is off, starts warming up GPS, and asks for
+     * permission if it's never been asked.
+     */
     fun primeLocation(requestPermission: () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             if (!locationPreferences.locationEnabledFlow.first()) return@launch
@@ -530,9 +454,7 @@ class HomeScreenViewModel(
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         HomeVisibility.isVisible.value = true
-        // Re-rolled every time this screen becomes visible again, not just once per process, so
-        // "Randomize daily message" delivers a fresh pick on each return trip. See dailyMessageText's
-        // own doc for why this isn't just computed inline in Content() instead.
+        // A new message each time the screen is shown.
         dailyMessageText.value = dailyMessage(dailyMessageRandom.value)
         tripStatusPollJob?.cancel()
         tripStatusPollJob = viewModelScope.launch(Dispatchers.IO) {
@@ -541,12 +463,10 @@ class HomeScreenViewModel(
                 withTimeoutOrNull(LIVE_VEHICLE_POLL_INTERVAL_MS) { tripStatusRefreshTrigger.receive() }
             }
         }
-        // Agency selection (default-agency auto-select, or showing the onboarding modal) is now
-        // handled by the defaultAgencyFlow collector in init -- see its own doc comment.
         alertsPollJob?.cancel()
         alertsPollJob = viewModelScope.launch(Dispatchers.IO) {
-            // No polling at all while alerts are off. Restarts on an agency change, so the previous
-            // agency's alerts are never shown, and again once its schedule finishes loading.
+            // No polling while alerts are off. Restarts when the agency changes and when its
+            // schedule finishes loading.
             combine(alertPreferences.enabledFlow, selectedAgency, readyAgency) { enabled, _, _ -> enabled }.collectLatest { enabled ->
                 homeAlerts.value = null
                 if (!enabled) {
@@ -585,10 +505,8 @@ class HomeScreenViewModel(
     }
 
     /**
-     * Fetches this agency's live vehicle position (and, if available, a live TripUpdates
-     * prediction) for the boarded trip and recomputes [activeTripStatus] -- mirrors the same
-     * live-position/ETA pattern MapScreen and TripDetailScreen already use. No-ops, leaving the
-     * previous status in place, on any fetch/lookup failure.
+     * Refreshes the boarded trip's position, progress, and ETA. Leaves the last status in place if
+     * a lookup fails.
      */
     private suspend fun refreshActiveTripStatus() {
         val trip = boardedTrip.value ?: return
@@ -615,22 +533,17 @@ class HomeScreenViewModel(
             val vehicle = trip.agency.fetchVehiclePosition(trip.tripId, repository)
             val tripUpdate = trip.agency.fetchTripUpdate(trip.tripId, repository)
 
-            // Agencies without GTFS-RT can still locate this trip's vehicle through a live source that
-            // covers its line type.
+            // An agency without GTFS-RT may still locate the vehicle through its own live source.
             val liveVehicleSource = trip.agency.component<LiveVehicleSource>()
                 ?.takeIf { source -> trip.lineType != null && trip.lineType in source.coveredLineTypes }
             val stopPredictionSource = trip.agency.component<StopPredictionSource>()
-            // Same architecture-gap reasoning as liveVehicleSource above, for CTA 'L' trains/MBTA
-            // subway trains that have no real trip to resolve to at all -- see FuzzyRunTrips's
-            // own doc, and TripDetailScreen's identical wiring for the same source.
+            // Closest-match tracking, for trips no live vehicle matches directly.
             val fuzzyRunTrips = trip.agency.component<FuzzyRunTrips>()
             val routeId = (liveVehicleSource != null || fuzzyRunTrips != null)
                 .takeIf { it }
                 ?.let { repository.getRoutesForTrips(setOf(trip.tripId))[trip.tripId]?.route?.routeId }
             val scopedFuzzyRunTrips = fuzzyRunTrips?.takeIf { source -> routeId != null && routeId in source.routeIds }
-            // A rider's own explicit Select Run pick (Trip Detail, while boarded) always wins over
-            // the automatic closest-match once it exists for this exact trip -- see BoardedFuzzyRun's
-            // own doc for why boarding specifically needs that higher-authority layer.
+            // The rider's Select Run pick wins over the automatic closest match.
             val pinnedRun = boardedFuzzyRun.value?.takeIf { it.tripId == trip.tripId }
             val liveVehicleInfo = liveVehicleSource
                 ?.takeIf { routeId != null }
@@ -644,8 +557,6 @@ class HomeScreenViewModel(
                         null
                     }
                 }
-            // Try vehicle-id predictions first for an authoritative next stop; otherwise fall back to the
-            // position-based matching below.
             val vehicleNextStop = stopPredictionSource?.let { source ->
                 liveVehicleInfo?.vehicleId?.let { vehicleId ->
                     try {
@@ -660,11 +571,7 @@ class HomeScreenViewModel(
             }
             val matchedStopFromVehicle = vehicleNextStop?.let { next -> stops.find { it.stopId == next.stopId } }
 
-            // Least certain of every source checked here (see FuzzyRunTrips's own doc), so it's only
-            // ever consulted once liveVehicleInfo/vehicle/tripUpdate have all come up empty below --
-            // same priority TripDetailScreen's own poll loop already gives it. A pinned run (see
-            // pinnedRun's own doc above) skips the ranked match entirely and just refreshes that one
-            // specific run's current live data instead.
+            // The closest match is used only when nothing else locates the vehicle.
             val fuzzyTripUpdate = scopedFuzzyRunTrips?.let { source ->
                 try {
                     if (pinnedRun != null) {
@@ -679,20 +586,12 @@ class HomeScreenViewModel(
                     null
                 }
             }
-            // The soonest remaining stop in the matched live run's own ordered stop list -- same
-            // "first entry is the next stop" precedent vehicleNextStop/matchedStopFromVehicle above
-            // already establishes for StopPredictionSource.
+            // The matched run's next stop.
             val matchedStopFromFuzzy = fuzzyTripUpdate?.stopTimeUpdate?.firstOrNull()?.stopId
                 ?.let { stopId -> stops.find { it.stopId == stopId } }
-            // Computed once, reused both in the fallback chain below and in isClosestMatch's own
-            // check, so the two can never drift out of sync with each other.
             val tripUpdateInferredSequence = tripUpdate?.inferCurrentStopSequence()
-            // Shared by both the shape and point-radius tiers below -- computed once rather than per
-            // tier, since either (or both, across successive polls) may need it.
             val stopLocations = repository.getTripStopLocations(trip.tripId, trip.fromStopSequence)
-            // Path-aware alternative to matchCurrentStopByProximity, tried first when this agency has a
-            // TripShapeSource (see matchCurrentStopByShapeProjection for why). Without one, matchViaShape
-            // returns null immediately and the point-radius tier below runs as before.
+            // Shape-based matching first, for agencies with a [TripShapeSource].
             val shapeSource = trip.agency.component<TripShapeSource>()
             suspend fun matchViaShape(lat: Double, lon: Double, bearing: Float?): Int? {
                 val source = shapeSource ?: return null
@@ -708,13 +607,8 @@ class HomeScreenViewModel(
                 return match.stopSequence
             }
 
-            // VehiclePositions' own current_stop_sequence is preferred when present; falls back to
-            // shape-aware matching, then GPS-proximity matching, and only as a last resort to inferring
-            // it from TripUpdates' own remaining stops -- same fallback chain as TripDetailScreen's poll
-            // loop. The two geometric tiers are both gated by shapeSource (i.e. TripShapeSource
-            // attachment, RIPTA today) rather than running for any agency current_stop_sequence happens
-            // to be missing for -- see matchCurrentStopByProximity's own doc for why this is an explicit
-            // per-agency opt-in rather than an automatic fallback.
+            // Current stop, in order of preference: the vehicle's reported stop, shape matching,
+            // GPS proximity, then the trip update's remaining stops.
             val currentSeq = matchedStopFromVehicle?.stopSequence
                 ?: liveVehicleInfo?.currentStopSequence
                 ?: liveVehicleInfo?.let { info -> matchViaShape(info.latitude, info.longitude, null) }
@@ -739,27 +633,19 @@ class HomeScreenViewModel(
                 ?: tripUpdateInferredSequence
                 ?: matchedStopFromFuzzy?.stopSequence
             currentSeq?.let { TripPositionAnchor.record(trip.tripId, it) }
-            // True only when nothing above this point resolved a stop -- matchedStopFromFuzzy is
-            // exactly what filled currentSeq's last fallback slot, so this stays in sync with the
-            // priority chain above by construction. A rider's own pinned run is never "closest
-            // match" -- they confirmed it themselves.
+            // A closest match only when nothing else found the stop and the rider hasn't picked a
+            // run.
             val isClosestMatch = pinnedRun == null && matchedStopFromVehicle == null &&
                 liveVehicleInfo == null && vehicle == null && tripUpdateInferredSequence == null &&
                 matchedStopFromFuzzy != null
 
             val stopsRemaining = currentSeq?.let { seq -> stops.count { it.stopSequence in seq until stop.stopSequence } }
-            // currentSeq is the stop the vehicle is APPROACHING, not one it's already reached -- true of
-            // VehiclePositions' own current_stop_sequence (paired with IN_TRANSIT_TO/INCOMING_AT per the
-            // GTFS-RT spec; STOPPED_AT is the rare case where it's actually arrived) and of both fallbacks
-            // above (see GtfsRtTripUpdate.inferCurrentStopSequence). Crediting currentSeq as "completed" made
-            // the marker jump a full stop ahead -- most visibly right after boarding, snapping to "1 stop
-            // done" the instant the vehicle departs.
+            // currentSeq is the stop the vehicle is heading to, so only the stops before it count
+            // as done.
             val stopsCompleted = currentSeq?.let { seq ->
                 if (vehicle?.currentStatus == GtfsRtVehicleStatus.STOPPED_AT) seq else seq - 1
             }
-            // Boarding stop (0f) to alight stop (1f) -- guards against a same-sequence divide (the
-            // rider designated their own boarding stop as the alight stop too) by leaving it null
-            // rather than producing a NaN/Infinity fraction.
+            // Null when the boarding and alight stops are the same.
             val progressFraction = if (stopsCompleted != null && stop.stopSequence != trip.fromStopSequence) {
                 ((stopsCompleted - trip.fromStopSequence).toFloat() / (stop.stopSequence - trip.fromStopSequence).toFloat())
                     .coerceIn(0f, 1f)
@@ -770,11 +656,8 @@ class HomeScreenViewModel(
             val today = todayForGtfs(trip.agency.zoneId)
             val rtStopUpdate = tripUpdate?.updateFor(stop.stopId, stop.stopSequence)
             val scheduledTime = stop.arrivalTime ?: stop.departureTime
-            // This ETA is for the rider's designated ALIGHT stop specifically, not necessarily the
-            // vehicle's immediate next stop -- vehicleNextStop's own predicted time is reused directly
-            // only on the rare occasion it happens to be the same stop (about to arrive), otherwise a
-            // fresh stop-scoped lookup is needed, same "real predicted time beats trust-the-schedule"
-            // priority Upcoming Arrivals/Trip Detail already give StopPredictionSource.
+            // The predicted time at the alight stop, from the vehicle's next-stop prediction when
+            // it's that stop.
             val predictedAlightTime = vehicleNextStop?.takeIf { it.stopId == stop.stopId }?.predictedEpochSeconds
                 ?: stopPredictionSource?.let { source ->
                     try {
@@ -801,9 +684,7 @@ class HomeScreenViewModel(
                 zoneId = trip.agency.zoneId,
             )
 
-            // Checked here (not just from Trip Detail's own poll) so the "you've arrived" moment
-            // fires even if the rider's just sitting on HomeScreen rather than Trip Detail -- see
-            // the shared checkReachedAlightStop's own doc comment.
+            // Also checked here so the arrival message fires while the rider is on Home.
             checkReachedAlightStop(trip, stops, currentSeq, boardedTripPreferences) { reachedAlightStop.value = trip.agency to it }
         } catch (e: CancellationException) {
             throw e
@@ -835,12 +716,10 @@ class HomeScreenViewModel(
                         null
                     }
                 }
-                // A later selection may have started another ingest while this one was running.
-                // Do not let the older job replace the newer agency's ready state or station check.
+                // A newer selection may have started another download; don't let this older one
+                // overwrite its state.
                 if (selectedAgency.value != agency) return@launch
-                // "Only download over Wi-Fi" can skip ingest entirely, leaving nothing on disk for a
-                // first-ever pick of this agency made off Wi-Fi -- only an actual database on disk
-                // (this agency's own fresh one, or a still-usable stale one) makes it ready to use.
+                // Only ready once there's a database on disk.
                 if (!gtfsDbFile(filesDir, agency).exists()) return@launch
                 readyAgency.value = agency
             } catch (e: CancellationException) {
@@ -853,10 +732,7 @@ class HomeScreenViewModel(
                 return@launch
             }
 
-            // Best-effort enrichment, not core to the agency being usable -- Schedule/Station/Explore are
-            // already available from readyAgency above regardless of whether this succeeds. A failure here
-            // (e.g. a schema addition an already-cached database hasn't picked up yet -- see GtfsIngestor's
-            // own "upToDate" doc) shouldn't blank a successfully-loaded agency out with a scary error.
+            // Best effort; a failure here doesn't affect the agency being usable.
             val stationRepo = GtfsRepository(gtfsDbFile(filesDir, agency))
             try {
                 agencyHasStations.value = stationRepo.getAllStations().isNotEmpty()
@@ -871,14 +747,10 @@ class HomeScreenViewModel(
         }
     }
 
-    /** One [FeedAttribution] entry per (agency, [MultiGtfsFeed]) pair with a static feed of its
-     * own -- [agency]'s own primary entry first, then one per component, same shape
-     * [selectAgency]'s tail always credited for the single-agency case. A feedUrl-less
-     * [MultiGtfsFeed] (e.g. NYC Subway's extra line-group realtime feeds) has no static schedule
-     * of its own to attribute, so it's skipped, same as before this was split out. Empty (not
-     * thrown) for an agency with no database on disk yet, or any other lookup failure -- this is
-     * always best-effort enrichment, never something [refreshFeedAttribution]'s caller should have
-     * to guard against failing. */
+    /**
+     * Data credits for an agency and its extra feeds with their own schedules. Empty if the agency
+     * has no database yet.
+     */
     private fun attributionForAgency(agency: GtfsAgency): List<FeedAttribution> {
         val dbFile = gtfsDbFile(filesDir, agency)
         if (!dbFile.exists()) return emptyList()
@@ -886,9 +758,9 @@ class HomeScreenViewModel(
         return try {
             val legend = agency.component<AttributionLegend>()?.text
             val partner = agency.component<AttributionPartner>()?.name
-            // An agency that is its own partner (e.g. Sound Transit) is credited once, as the partner.
-            // A partner-sourced feed names the partner as its publisher (511's Muni feed says "511 SF
-            // Bay"), so the agency itself is credited by its agency.txt name instead.
+            // An agency that is its own partner is credited once, as the partner. A partner-sourced
+            // feed names the partner as publisher, so the agency is credited by its agency.txt
+            // name.
             val feedCredit = if (partner != null) repo.getAgencyAttribution() ?: repo.getFeedAttribution() else repo.getFeedAttribution()
             val credit = feedCredit?.let {
                 if (partner == agency.displayName) it.copy(name = partner) else it.copy(partner = partner)
@@ -906,12 +778,10 @@ class HomeScreenViewModel(
         }
     }
 
-    /** Recomputes [feedAttribution] from [selectedAgency] plus any
-     * [AgencyPreferences.additionalDownloadsFlow] extras in the primary's region (see
-     * [RegionalGroup.forAgency]). [additionalDownloads] is one flat preference, so without the region
-     * check, extras from a previous region would leak into an unrelated primary's attribution; an
-     * ungrouped primary only credits itself. Deduplicated by [FeedAttribution.name], keeping
-     * first-seen order ([selectedAgency]'s credits first), so a shared publisher shows once. */
+    /**
+     * Rebuilds the credits for the selected agency plus additional schedules in its region, without
+     * duplicates.
+     */
     private fun refreshFeedAttribution() {
         val primary = selectedAgency.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -925,10 +795,10 @@ class HomeScreenViewModel(
     }
 }
 
-/** The app's root screen. With no agency selected (first launch, or after Settings clears the
- * default), it renders behind Stage 1's [AgencyPickerModal] onboarding overlay -- see
- * HomeScreenViewModel's defaultAgencyFlow collector. Once an agency is selected it's Stage 2's own
- * landing screen: clock/agency name/loading indicator, then Schedule/Station/Explore once ready. */
+/**
+ * The app's first screen: the agency picker when none is chosen, then the home screen with the
+ * clock, trip status, and mode buttons.
+ */
 @InitialScreen
 class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeScreenViewModel>(sealedActivity) {
 
@@ -971,12 +841,9 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
         val locationPermissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.ACCESS_FINE_LOCATION)
 
 
-        /** OH this, isn't part of the initial screen, Only on the homescreen and trip detail screen will this appear
-         * if you boarded a trip and you reached your selected to stop to alight you get a message. once it clears
-         * it will immediatly open upcoming arrivals for the stop or station you land at so if you are transfering you know what's coming up*/
-        // Fires once the "you've arrived" modal has been dismissed while HomeScreen was the
-        // visible screen (manually or by timeout) -- see ReachedStopModal/checkReachedAlightStop.
-        // Navigates to that stop's own Upcoming Arrivals, matching Trip Detail's identical handling.
+        // After a boarded rider reaches their alight stop and dismisses the message, open that
+        // stop's upcoming arrivals so they can see what's next. This happens on Home and Trip
+        // Detail.
         LaunchedEffect(reachedAlightStop) {
             val (agency, stop) = reachedAlightStop ?: return@LaunchedEffect
             navigateTo(screenFactory = { activity ->
@@ -991,11 +858,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
             ) {
-                // Current Trip lives here (top-right corner) rather than in the bottom icon row -- it's about
-                // something already in progress, not a mode to pick, so it reads as a status indicator rather
-                // than a menu item. Built by hand (matching LightTopBar's own height/padding) rather than via
-                // LightTopBar's rightButton slot, which only accepts a single button -- this needs two icons
-                // together (vehicle type, then Play).
+                // The vehicle type and Play icons for the current trip, top right.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1048,14 +911,9 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                 .fillMaxWidth()
                                 .padding(32.dp)
                         ) {
-                            // While a trip is boarded, this becomes an active-trip status instead of Stage 2's own
-                            // clock/agency-name heading -- everything below (mode icons, daily message) stays as-is either
-                            // way. Reverts the moment the trip is alighted (boardedTrip/activeTripStatus both go null
-                            // together).
+                            // While boarded, the heading shows the trip's status instead of the
+                            // agency.
                             if (boardedTrip != null) {
-                                // Same ticking clock Stage 2's own heading uses (HomeScreenViewModel.currentTime) -- kept
-                                // visible here too rather than giving up the space to trip status, since the current time is
-                                // just as useful mid-trip as before boarding.
                                 LightText(
                                     text = currentTime,
                                     variant = LightTextVariant.Detail,
@@ -1073,10 +931,9 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                     lighten = true,
                                     modifier = Modifier.padding(bottom = 16.dp),
                                 )
-                                // Boarding stop (left) to alight stop (right), with a vehicle-type marker positioned at the
-                                // live stop_sequence progress between them -- see ActiveTripStatus.progressFraction. Settings
-                                // toggle (on by default); 0f (marker at start) whenever there's no live position yet, rather
-                                // than hiding the bar, so its layout doesn't jump once one arrives.
+                                // Progress from the boarding stop to the alight stop, with a
+                                // vehicle marker. Shown at the start until there's live data, so
+                                // the layout doesn't jump.
                                 if (progressBarVisible) {
                                     BoxWithConstraints(
                                         modifier = Modifier
@@ -1095,10 +952,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                     }
                                 }
                             } else if (selectedAgency != null) {
-                                // Stage 2's own landing heading: a ticking clock in the agency's own timezone
-                                // (HomeScreenViewModel.currentTime), its name, and -- only while its GTFS data is still
-                                // ingesting -- a spinning REFRESH icon, shown just once here since Stage 2 only ever has one
-                                // agency to show at a time.
+                                // The clock, the agency's name, and a spinner while its schedule
+                                // downloads.
                                 LightText(
                                     text = currentTime,
                                     variant = LightTextVariant.Heading,
@@ -1136,8 +991,6 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                 }
                             }
 
-                            // Ingest failure text only -- the loading state itself is the spinning icon
-                            // next to the agency name above, not a screen-wide banner.
                             status?.let {
                                 LightText(
                                     text = it,
@@ -1147,10 +1000,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                 )
                             }
 
-                            // Lives here -- directly under the heading/status block, in the same spot whether boarded
-                            // (below the progress bar) or not (below Stage 2's own clock/agency-name heading) -- rather
-                            // than pinned to the bottom alongside the feed attribution below.
-                            // Hidden while alerts are showing, but alerts keep the gap it takes up.
+                            // Hidden while alerts are showing, but its space stays as the gap above
+                            // them.
                             if (dailyMessageVisible || homeAlerts != null) {
                                 LightText(
                                     text = dailyMessageText,
@@ -1165,13 +1016,9 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                             homeAlerts?.let { (alerts, screenAlerts) -> HomeAlertsPager(alerts, screenAlerts) }
                         }
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            // Standard, agency-agnostic attribution -- see GtfsRepository.getFeedAttribution's own doc for
-                            // exactly which GTFS file this comes from, plus one name per MultiGtfsFeed component with its own
-                            // static feed (e.g. "Bustang" alongside RTD Denver's own). Tied to whichever agency is currently selected, not
-                            // just "ready", so it reads correctly even mid-sync. An agency with a required legend
-                            // (see AttributionLegend) gets its own line with that exact wording instead. Agencies
-                            // credited through a partner (see AttributionPartner) are grouped after it, e.g.
-                            // "Sound Transit & Pierce Transit, Community Transit".
+                            // Data credits, or an agency's required legend. Partner-sourced
+                            // agencies are grouped after the partner, e.g. "Sound Transit & Pierce
+                            // Transit, Community Transit".
                             val credits = feedAttribution.filter { it.requiredLegend == null }
                             val partners = credits.mapNotNull { it.partner }.toSet()
                             val creditParts = credits.filter { it.partner == null && it.name !in partners }.map { it.name } +
@@ -1199,10 +1046,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                     }
                 }
             }
-            // Settings, About first, then whichever of Schedule/Station/Explore are actually reachable
-            // right now (built, not a fixed-size list with null placeholders) -- Current Trip lives in the
-            // top-right corner instead (see LightTopBar above), so this row's worst case is 5, always
-            // exactly one LightBottomBar row (which hard-caps at 5 items).
+            // Settings and About, then whichever of Schedule, Station, and Explore are available.
             val bottomBarItems = buildList {
                 add(
                     LightBarButton.LightIcon(
@@ -1223,13 +1067,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                     ),
                 )
                 readyAgency?.let { agency ->
-                    // Only region-mates of the primary agency count as "other available
-                    // schedules" here -- an additional download outside the primary's own
-                    // region (possible in principle, see AgencyPreferences.additionalDownloadsFlow's
-                    // own doc -- nothing stops a rider from ending up with a cross-region mix)
-                    // isn't treated as part of "this region's schedules" for this prompt -- go
-                    // straight to LineTypeSelectionScreen for the primary alone in that case,
-                    // same as the always-only-one-schedule case already does.
+                    // Only downloaded schedules in the agency's region count for the schedule
+                    // picker.
                     val regionSchedules = RegionalGroup.forAgency(agency)?.members
                         ?.filter { it == agency || (it in additionalDownloads && gtfsDbFile(lightContext.filesDir, it).exists()) }
                         ?: listOf(agency)

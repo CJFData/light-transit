@@ -10,13 +10,9 @@ import kotlinx.coroutines.flow.map
 private val includeLongerTripsKey = booleanPreferencesKey("DEPARTURES_INCLUDE_LONGER_TRIPS_ENABLED")
 
 /**
- * Settings toggle for [GtfsRepository.getDeparturesForVariant]'s "reaches at least this far"
- * inclusion rule (see that function's own doc) -- on by default. When off, the departures list
- * falls back to an exact-headsign match only (see [GtfsRepository.getDeparturesForExactVariant]):
- * e.g. picking "Toward Readville" would show only Readville-headsign trips, never the longer
- * "Toward South Station" ones that also happen to reach Readville along the way. An escape hatch
- * for a rider who specifically doesn't want the broader trips mixed in, even though they're never
- * misleading in the other direction.
+ * "Include longer trips", on by default: departures for a destination also include trips that go
+ * past it (see [GtfsRepository.getDeparturesForVariant]). Off, only exact headsign matches (see
+ * [GtfsRepository.getDeparturesForExactVariant]).
  */
 class DeparturePreferences(private val dataStore: DataStore<Preferences>) {
 

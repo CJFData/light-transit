@@ -16,12 +16,9 @@ import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3RepeatableKeyboardCallback
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Feeds keystrokes from Light's own public `light-keyboard` library into a [TextFieldState].
- * Shared by every screen in this app that docks the embedded keyboard inline alongside its own
- * content (a live-filtered list, a single-line search field) instead of using sdk/ui's
- * full-screen `LightTextInputEditor` -- that composable's own keystroke-handling glue is
- * deliberately internal to sdk/ui, so this mirrors its logic directly against the public
- * `light-keyboard` API rather than reaching into it.
+ * Feeds keystrokes from the `light-keyboard` library into a [TextFieldState], for screens that dock
+ * the keyboard inline instead of using the full-screen `LightTextInputEditor`, whose glue is
+ * internal to sdk/ui.
  */
 class InlineTextFieldKeyboardCallback(
     private val state: TextFieldState,
@@ -100,8 +97,10 @@ private fun deleteWordCount(value: CharSequence): Int {
     return value.length - if (lastSpace >= 0) lastSpace + 1 else 0
 }
 
-/** One shared factory for every inline keyboard's own scoped ViewModel -- [key] must be unique per
- * screen (and stable across recomposition) since it's used as the ViewModelStore lookup key. */
+/**
+ * The inline keyboard's ViewModel. [key] must be unique per screen and stable, since it's the
+ * ViewModelStore key.
+ */
 @Composable
 fun rememberInlineLp3KeyboardViewModel(
     key: String,

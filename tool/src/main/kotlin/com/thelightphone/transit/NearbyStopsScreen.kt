@@ -67,38 +67,34 @@ import java.io.File
 
 private const val METERS_PER_MILE = 1609.344
 private const val NEARBY_STOP_LIMIT = 20
-// Polls GetCurrentLocation for ~12s (LightOS needs a moment to acquire a fix after
-// RequestLocationUpdates) before giving up and falling back to manual search.
+// About 12 seconds of polling for a fix before falling back to search.
 private const val LOCATION_POLL_ATTEMPTS = 8
 private const val LOCATION_POLL_INTERVAL_MS = 1500L
 
-/** Which action "Try Again" performs for a given [NearbyStopsMode.Error] -- a GPS/ranking failure
- * retries the location fix, a geocoding failure reopens address entry instead. */
+/** What "Try Again" does: retry GPS, or reopen address entry after a search failure. */
 enum class NearbyStopsErrorRetry { Location, Search }
 
 /**
- * This screen has one job -- "closest stops to a location" -- and a search only ever changes
- * *which* location that is (GPS vs. a geocoded address), never what the screen does. [Input] /
- * [Searching] / [GeocodeResults] are a full-screen takeover for typing an address (same as this
- * screen's own former IP-geolocation prefill flow); everything else shares one frame with a pinned
- * Search/Current Location row (see [NearbyStopsScreen.Content]).
+ * The screen shows the stops closest to a location, from GPS or a searched address. [Input],
+ * [Searching], and [GeocodeResults] take over the screen for address entry; the rest share a frame
+ * with the pinned Search row.
  */
 sealed class NearbyStopsMode {
-    /** Initial state, and re-entered on resume: checking/awaiting GPS location permission. */
+    /** Waiting for location permission or a fix. Also re-entered on resume. */
     object Locating : NearbyStopsMode()
-    /** Location permission was denied (or not yet granted) -- non-blocking; Search stays usable. */
+    /** Location permission isn't granted. Search still works. */
     object NeedsPermission : NearbyStopsMode()
-    /** The rider turned location off in Settings ([com.thelightphone.transit.gtfs.LocationPreferences]) --
-     * distinct from [NeedsPermission] since there's nothing to grant here, only a Settings link. */
+    /** Location is turned off in Settings, so there's nothing to grant. */
     object LocationOff : NearbyStopsMode()
     data class Input(val prefillText: String = "") : NearbyStopsMode()
     object Searching : NearbyStopsMode()
     data class GeocodeResults(val results: List<GeocodeResult>) : NearbyStopsMode()
-    /** Ranking stops around a freshly-acquired GPS fix or a newly-picked search result. */
+    /** Ranking stops around a new GPS fix or search result. */
     object Ranking : NearbyStopsMode()
-    /** [anchorLabel] is null while ranked against the GPS fix, or the picked [GeocodeResult]'s own
-     * display name when ranked against a searched address instead -- drives both the pinned header
-     * row's icon/text (see [NearbyStopsScreen.Content]) and which retry a ranking failure offers. */
+    /**
+     * [anchorLabel] is null for GPS, or the searched address's name. Sets the Search row's text and
+     * which retry a failure offers.
+     */
     data class NearbyStops(val stops: List<StopWithDistance>, val anchorLabel: String?) : NearbyStopsMode()
     data class Error(val message: String, val retry: NearbyStopsErrorRetry) : NearbyStopsMode()
 }
@@ -115,20 +111,19 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     private val _mode = MutableStateFlow<NearbyStopsMode>(NearbyStopsMode.Locating)
     val mode: StateFlow<NearbyStopsMode> = _mode
 
-    /** Cached once GPS gives a real fix, so "recenter" is instant when possible instead of
-     * re-polling from scratch. */
+    /** The last GPS fix, so switching back to Current Location is instant. */
     private var lastGpsFix: Pair<Double, Double>? = null
 
-    /** Snapshot of [_mode] taken by [openSearch], so cancelling out of address entry restores
-     * exactly what was on screen before rather than always bouncing back to [NearbyStopsMode.Locating]. */
+    /** The mode before [openSearch], restored when search is cancelled. */
     private var modeBeforeSearch: NearbyStopsMode? = null
 
-    /** The running GPS poll. [openSearch] cancels it so a late result can't replace the address input. */
+    /**
+     * The running GPS poll. [openSearch] cancels it so a late result can't replace the address
+     * input.
+     */
     private var locateJob: Job? = null
 
-    /** Drives whether the Search Location screen offers "Current Location" at all -- mirrored from
-     * [LocationPreferences] into a plain [StateFlow] the Composable can collect, same pattern
-     * [SettingsViewModel] already uses for its own preference-backed fields. */
+    /** Whether Search offers "Current Location". */
     val locationEnabled: StateFlow<Boolean>
         get() = _locationEnabled
     private val _locationEnabled = MutableStateFlow(true)
@@ -141,10 +136,8 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
-        // Runs on the first appearance, and again on any resume while still Locating/NeedsPermission/
-        // LocationOff (e.g. returning from the system permission prompt Home may have already
-        // triggered, or from flipping the Settings toggle) -- but never once real content (a stop
-        // list, an in-progress search) is on screen, since that would discard it.
+        // Runs on first show, and on resume while still waiting on location (e.g. back from the
+        // permission prompt or Settings), but never once results or a search are showing.
         if (_mode.value !is NearbyStopsMode.Locating &&
             _mode.value !is NearbyStopsMode.NeedsPermission &&
             _mode.value !is NearbyStopsMode.LocationOff
@@ -164,8 +157,8 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
             return
         }
         _mode.value = NearbyStopsMode.Locating
-        // Home already primes this lease when "Explore" is tapped; requesting it again here is
-        // idempotent (a renewal) and covers a direct/returning entry that skipped Home's priming.
+        // Home may already have requested this when Explore was tapped; asking again just renews
+        // it.
         callRemoteServiceMethod(LightServiceMethod.RequestLocationUpdates, Unit)
         try {
             repeat(LOCATION_POLL_ATTEMPTS) { attempt ->
@@ -179,7 +172,6 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
                 }
                 if (attempt < LOCATION_POLL_ATTEMPTS - 1) delay(LOCATION_POLL_INTERVAL_MS)
             }
-            // No fix in time -- Search stays pinned above regardless, so this doesn't dead-end.
             _mode.value = NearbyStopsMode.Error("Couldn't find your location.", NearbyStopsErrorRetry.Location)
         } finally {
             withContext(NonCancellable) {
@@ -207,8 +199,7 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
         locateJob = viewModelScope.launch(Dispatchers.IO) { locateFromGps() }
     }
 
-    /** Switches the ranking anchor back to GPS -- called from the Search Location screen's own
-     * "Current Location" option, not just a same-screen "recenter" action. */
+    /** Switches back to ranking by GPS, from Search's "Current Location" option. */
     fun recenterToGps() {
         modeBeforeSearch = null
         val fix = lastGpsFix
@@ -293,9 +284,8 @@ class NearbyStopsScreen(
             is NearbyStopsMode.Input -> {
                 val locationEnabled by viewModel.locationEnabled.collectAsState()
                 val textFieldState = rememberTextFieldState(m.prefillText)
-                // Submit-triggered, not live-filtered like Stations search -- this hits Nominatim's
-                // free geocoding API (see this app's own "be kind to their free APIs" note), so it
-                // should never fire on every keystroke, only when the rider actually asks to search.
+                // Searches on submit rather than on every keystroke, to go easy on the free
+                // geocoding API.
                 val keyboardCallback = remember(textFieldState) {
                     InlineTextFieldKeyboardCallback(state = textFieldState, onReturn = { viewModel.search(textFieldState.text) })
                 }
@@ -344,8 +334,7 @@ class NearbyStopsScreen(
                             )
                             LightText(text = "Search", variant = LightTextVariant.Copy, lighten = true)
                         }
-                        // Always offered below Search -- the one exception is location turned off
-                        // in Settings, since there's then no GPS fix for this to switch to at all.
+                        // Hidden only when location is off in Settings.
                         if (locationEnabled) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -382,16 +371,9 @@ class NearbyStopsScreen(
                         },
                     )
                     Column(modifier = Modifier.weight(1f).padding(32.dp)) {
-                    // Same row structure/spacing StationListScreen's own "Search stations" row uses
-                    // (icon size 1.2f, lighten=true text, 12dp bottom gap, no divider) -- pinned
-                    // regardless of body state below, since searching only ever changes which
-                    // location this screen is ranking stops against, so it stays reachable the whole
-                    // time. Also doubles as a live indicator of the current anchor: the magnifying
-                    // glass is always shown (implying it's always replaceable), with either the
-                    // searched address's own name, or "Current Location" plus a trailing crosshair
-                    // when ranked against GPS instead. Tapping it always opens Search Location, which
-                    // offers "Current Location" as its own option to switch back (see the Input
-                    // branch above).
+                    // The pinned Search row, styled like Stations search. Shows the current
+                    // location: the searched address, or "Current Location" with a crosshair.
+                    // Tapping it opens Search.
                     val searchedLabel = (m as? NearbyStopsMode.NearbyStops)?.anchorLabel
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -529,11 +511,8 @@ class NearbyStopsScreen(
                                                 .fillMaxWidth()
                                                 .lightClickable {
                                                     navigateTo(screenFactory = { activity ->
-                                                        // The full member list, not just one child platform -- a deduplicated station (see
-                                                        // GtfsRepository.groupStationsByParent) can have several platforms
-                                                        // each serving different lines (e.g. South Station), and arrivals
-                                                        // need to be unioned across all of them, not just whichever one
-                                                        // happened to be the dedup representative.
+                                                        // Every platform of the station, so
+                                                        // arrivals cover all of them.
                                                         UpcomingArrivalsScreen(
                                                             activity,
                                                             dbFile,
@@ -546,10 +525,8 @@ class NearbyStopsScreen(
                                                 .padding(vertical = 12.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            // Weighted so a long stop name wraps within its own share of the row instead of first
-                                            // greedily measuring against the row's full width and only then
-                                            // discovering there's no room for the distance label, pushing it off
-                                            // the right edge.
+                                            // Weighted so a long stop name wraps instead of pushing
+                                            // the distance off screen.
                                             Row(
                                                 modifier = Modifier.weight(1f),
                                                 verticalAlignment = Alignment.CenterVertically,

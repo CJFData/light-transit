@@ -10,16 +10,13 @@ import com.thelightphone.sdk.ui.LightModalManager
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 
-// Long enough that a rider glancing at their phone has time to notice and read it, short enough
-// that it doesn't sit forever if they don't tap Close -- either way, the caller navigates once
-// it's gone (see TripDetailScreen/HomeScreen's own reachedAlightStop handling).
+// How long the "you've arrived" message stays up before closing on its own.
 val REACHED_STOP_MODAL_DURATION = 15.seconds
 
-/** The dismissable "you've arrived" celebration -- reuses the SDK's own full-screen modal template
- * rather than custom UI. Manual close (tap) and auto-expiry ([REACHED_STOP_MODAL_DURATION]) both
- * end up calling [onDismissed] exactly once -- LightModalManager only invokes [onExpired] when
- * [awaitDismiss] *didn't* already win the race, so there's no risk of double-firing the navigation
- * it triggers. */
+/**
+ * The "you've arrived" message, using the SDK's full-screen modal. Closing it and timing out both
+ * call [onDismissed] exactly once.
+ */
 class ReachedStopModal(
     stopName: String,
     private val onDismissed: () -> Unit,
@@ -44,14 +41,9 @@ class ReachedStopModal(
 }
 
 /**
- * Reached (or passed) [boardedTrip]'s designated alight stop -- ends boarded status immediately
- * (matches "the stop they just alighted at" from the feature spec, and self-guards against
- * re-triggering the modal on a later poll, since the boarded trip will no longer match once this
- * runs) and shows the celebration via [LightModalManager], which draws on top of whatever screen
- * is current. Shared between [TripDetailViewModel] (only checks while showing THIS trip's own
- * detail screen) and [HomeScreenViewModel] (checks regardless of which trip's detail screen, if
- * any, is open) -- either way, this only runs while one of those two screens is visible and
- * polling, matching [BoardedTripPreferences]'s own doc on why there's no background equivalent.
+ * When the vehicle reaches or passes the alight stop: ends the boarded trip (so it can't fire
+ * again) and shows [ReachedStopModal] over the current screen. Used by Trip Detail for its own trip
+ * and by Home.
  */
 suspend fun checkReachedAlightStop(
     boardedTrip: BoardedTrip,

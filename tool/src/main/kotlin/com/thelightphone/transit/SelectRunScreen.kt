@@ -51,14 +51,11 @@ import java.io.File
 
 sealed class SelectRunState {
     object Loading : SelectRunState()
-    /** [stops] is this trip's own FULL stop list, from its real origin (stop_sequence 0), not just
-     * [SelectRunViewModel]'s own `fromStopSequence` onward -- deliberately wider than what Trip
-     * Detail itself ever shows, so a run whose live position is still short of the rider's own
-     * boarding stop is still visible and pickable here (see Content()'s own greyed-out styling for
-     * those). [optionsByStop] keys every live run that survived `liveRunOptionsForTrip`'s own
-     * filtering by its own [FuzzyRunOption.nextStopId] -- more than one entry at a stop_id means two
-     * live runs currently share a next stop (rare but real); both still render, individually
-     * tappable, rather than silently dropping one. */
+    /**
+     * [stops] is the trip's full stop list, wider than Trip Detail shows, so a run still short of
+     * the boarding stop can be picked. [optionsByStop] groups live runs by their next stop; two
+     * runs at the same stop both show.
+     */
     data class Loaded(
         val stops: List<TripStopRow>,
         val optionsByStop: Map<String, List<FuzzyRunOption>>,
@@ -69,9 +66,9 @@ sealed class SelectRunState {
 /**
  * Lets a rider pick which live run they're on by tapping its vehicle marker on this trip's stop
  * list. An automatic closest match is still a guess, and boarding is where a wrong guess misleads a
- * rider mid-journey. Only reachable from Trip Detail while [tripId] is the boarded trip on a
- * route [FuzzyRunTrips] covers. [liveRunOptionsForTrip] limits the options to runs on this
- * trip's own direction and path.
+ * rider mid-journey. Only reachable from Trip Detail while [tripId] is the boarded trip on a route
+ * [FuzzyRunTrips] covers. [liveRunOptionsForTrip] limits the options to runs on this trip's own
+ * direction and path.
  */
 class SelectRunViewModel(
     private val dbFile: File,
@@ -88,15 +85,10 @@ class SelectRunViewModel(
     private val _state = MutableStateFlow<SelectRunState>(SelectRunState.Loading)
     val state: StateFlow<SelectRunState> = _state
 
-    /** This trip's own vehicle mode, for the same live-marker icon Trip Detail itself uses --
-     * almost always Subway in practice (every current [FuzzyRunTrips] source is rail-only), but
-     * resolved for real rather than hardcoded, same as [TripDetailViewModel.lineType]. */
+    /** This trip's vehicle type, for the run markers. */
     val lineType = MutableStateFlow<LineType?>(null)
 
-    /** The rider's own already-pinned run for this exact trip, if any -- Content() underlines its
-     * row so a rider re-opening this screen can see what's currently selected, same convention
-     * TripDetailScreen's own alight-stop underline already uses. Collected for this ViewModel's
-     * whole lifetime so a pin made here is reflected the instant it lands, not just on next load. */
+    /** The rider's pinned run for this trip, underlined in the list. */
     val boardedRunId = MutableStateFlow<String?>(null)
 
     init {
@@ -111,8 +103,7 @@ class SelectRunViewModel(
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _state.value = try {
-                // From the trip's real origin, not fromStopSequence -- see SelectRunState.Loaded's
-                // own doc on why this screen deliberately shows more than Trip Detail itself does.
+                // From the trip's first stop, not the boarding stop.
                 val stops = repository.getTripStops(tripId, 0)
                 lineType.value = repository.getRouteTypeForTrip(tripId)?.let { LineType.forGtfsRouteType(it) }
                 val source = agency.component<FuzzyRunTrips>()
@@ -129,9 +120,11 @@ class SelectRunViewModel(
         }
     }
 
-    /** Launched on [HomeVisibility.scope], not [viewModelScope]: the tap that calls this immediately
-     * calls `goBack()`, which clears this ViewModel and would cancel a viewModelScope write before it
-     * reached DataStore. */
+    /**
+     * Launched on [HomeVisibility.scope], not [viewModelScope]: the tap that calls this immediately
+     * calls `goBack()`, which clears this ViewModel and would cancel a viewModelScope write before
+     * it reached DataStore.
+     */
     fun selectRun(runId: String) {
         HomeVisibility.scope.launch { boardedFuzzyRunPreferences.selectRun(tripId, runId) }
     }
@@ -214,14 +207,8 @@ class SelectRunScreen(
                         )
                         LazyColumn(modifier = Modifier.weight(1f)) {
                             items(s.stops) { stop ->
-                                // A stop before Trip Detail's own first-shown stop (fromStopSequence)
-                                // -- real route context, not part of this rider's own boarded
-                                // journey, so it's greyed out (the SDK's own de-emphasized look --
-                                // lighten on text, matching alpha for the row as a whole since
-                                // LightIcon has no lighten of its own). The run markers underneath a
-                                // stop are never greyed themselves, regardless of which stop they're
-                                // on -- every option shown is equally real and equally selectable;
-                                // only the stop's own relevance to this rider's trip is in question.
+                                // Stops before the boarding stop are greyed out; their run markers
+                                // stay selectable.
                                 val isPriorToTripStart = stop.stopSequence < fromStopSequence
                                 Column(
                                     modifier = Modifier
@@ -244,9 +231,7 @@ class SelectRunScreen(
                                         )
                                     }
                                     for (option in s.optionsByStop[stop.stopId].orEmpty()) {
-                                        // CTA's own delay flag, not a computed diff -- see
-                                        // FuzzyRunOption.isDelayed's own doc for why. Omitted (not
-                                        // "On time") whenever the source has no native signal at all.
+                                        // Only when the source flags a delay; there's no "On time".
                                         val statusSuffix = if (option.isDelayed == true) " - Delayed" else ""
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,

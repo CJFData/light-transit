@@ -30,11 +30,7 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 
 private data class IconLegendEntry(val icon: LightIconConfiguration, val label: String)
 
-/** Every icon [MapScreen] actually draws on its own canvas -- kept as a single list so it can't
- * quietly drift out of sync with what MapScreen uses (verified against a full grep of every
- * LightIcons.* reference actually drawn there, not just imported). Chrome-only icons (back,
- * settings, search, this screen's own entry point) aren't map/data indicators, so they're left out
- * per the same reasoning that excluded them from the request this screen was built for. */
+/** Every icon drawn on the map. */
 private val ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_SUBWAY, "Subway or light rail"),
     IconLegendEntry(LightIcons.DIRECTIONS_BUS, "Bus"),
@@ -44,18 +40,16 @@ private val ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DIRECTIONS_ARRIVAL, "Your selected stop (large) or a nearby stop (small)"),
 )
 
-/** Icons that show up around schedule selection/download, not on the map or HomeScreen's own
- * bottom bar -- split out from [ICON_LEGEND] since neither one is actually drawn there:
- * [LightIcons.DOWNLOAD_ARROW] appears next to a not-yet-downloaded agency in the Transit Agency
- * picker and Additional Schedules; [LightIcons.REFRESH] appears inline next to the agency name on
- * HomeScreen while its schedule is being checked/downloaded. */
+/**
+ * Icons from schedule download: the download arrow in the agency pickers, and the refresh spinner
+ * on Home.
+ */
 private val SCHEDULE_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.DOWNLOAD_ARROW, "Schedule not downloaded yet"),
     IconLegendEntry(LightIcons.REFRESH, "Schedule downloading or checking for updates"),
 )
 
-/** HomeScreen's own bottom icon rows -- kept as a single list for the same reason as [ICON_LEGEND],
- * verified against HomeScreen.kt's own LightBottomBar item lists. */
+/** Home's bottom icon rows. */
 private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.ELLIPSES, "About"),
     IconLegendEntry(LightIcons.SETTINGS, "Settings"),
@@ -69,9 +63,7 @@ private val MENU_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.EMERGENCY, "Service alert; tap to read it"),
 )
 
-/** Settings screen's own on/off toggles -- every one of them renders as one of these two icons
- * next to their label, per SettingsScreen's own ToggleRow. See SettingsScreen.kt for the current
- * list of toggles. */
+/** The on/off icons for Settings toggles. */
 private val TOGGLE_ICON_LEGEND = listOf(
     IconLegendEntry(LightIcons.TOGGLE_STATE_ON, "On; tap to turn off"),
     IconLegendEntry(LightIcons.TOGGLE_STATE_OFF, "Off; tap to turn on"),
@@ -79,9 +71,7 @@ private val TOGGLE_ICON_LEGEND = listOf(
 
 class InfoScreenViewModel : LightViewModel<Unit>()
 
-/** HomeScreen's info/about entry point -- no dedicated "about screen" template exists anywhere in
- * the SDK (checked), so this follows the same LightTopBar+LightScrollView+LightText convention
- * SettingsScreen already established elsewhere in this app. */
+/** About: the app, data credits, and icon legends. */
 class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoScreenViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<InfoScreenViewModel>

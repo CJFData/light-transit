@@ -25,12 +25,8 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import kotlinx.coroutines.CompletableDeferred
 
 /**
- * "Are you sure?" gate for Settings' "Clear schedule cache" row -- deleting every agency's
- * downloaded schedule can't be undone from within the app (it just re-downloads), so this is
- * cheap insurance against a mis-tap. Built from the same primitives ReachedStopModal/
- * AgencyPickerModal already use (no dedicated confirm-dialog component exists in the SDK yet)
- * rather than a single-button LightFullscreenModal, since this needs two distinct choices, not
- * one dismiss.
+ * Confirmation for Settings' "Clear schedule cache", built from the same pieces as the other modals
+ * since it needs two choices.
  */
 class ClearCacheConfirmModal(
     private val onConfirm: () -> Unit,
@@ -80,8 +76,7 @@ class ClearCacheConfirmModal(
         }
     }
 
-    // No real timeout -- same reasoning as AgencyPickerModal's own onExpired: shown with
-    // Duration.INFINITE, so this never actually fires.
+    // Never fires; the modal has no timeout.
     override val onExpired: () -> Unit = {}
 
     override fun dismiss() {
