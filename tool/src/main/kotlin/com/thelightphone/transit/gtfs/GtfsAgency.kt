@@ -1097,14 +1097,15 @@ enum class GtfsAgency(
         timeZoneId = "America/Chicago",
     ),
 
-    // Philadelphia region (see RegionalGroup.PHILADELPHIA). SEPTA publishes buses, Metro lines, and
-    // trolleys in one feed and Regional Rail in another. Schedules only for now.
+    // Philadelphia region (see RegionalGroup.PHILADELPHIA). Buses, Metro lines, and trolleys come in
+    // one schedule and Regional Rail in another. SEPTA's live feeds match the bus schedule's trips.
     SEPTA_BUS(
         "septa_bus",
-        "SEPTA Bus & Metro (No Live)",
+        "SEPTA Bus & Metro",
         "https://www3.septa.org/developer/google_bus.zip",
-        null,
-        null,
+        "https://gtfs.picotransit.com/septa/tripupdates",
+        "https://gtfs.picotransit.com/septa/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/septa/alerts",
         timeZoneId = "America/New_York",
     ),
     SEPTA_RAIL(

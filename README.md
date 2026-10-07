@@ -2,7 +2,7 @@
 
 Pico Transit is a friendly little companion for getting around on public transit: real schedules, live arrivals, connections at any stop, and a live map showing where your ride actually is. No ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-It covers **132 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, the SF Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more), and all 9 **Puget Sound** agencies (King County Metro, Sound Transit, and more). The rest have schedules only for now: about 40 Colorado agencies, SEPTA, Southern New England's regional transit authorities and ferries, Metra, Pace, and LA Metro.
+It covers **133 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, **Cleveland's GCRTA**, **SEPTA**'s buses, Metro, and trolleys, the San Francisco Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more), and all 9 **Puget Sound** agencies (King County Metro, Sound Transit, and more). The rest have schedules only for now: about 40 Colorado agencies, SEPTA Regional Rail, Southern New England's regional transit authorities and ferries, Metra, Pace, and LA Metro.
 
 Use it on its own or alongside the Light Phone's Directions tool. It's built on the [Light SDK](https://github.com/lightphone/light-sdk), so it stays as calm and un-distracting as the rest of your Light experience.
 
@@ -10,8 +10,13 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 
 ## 🔄 Recent updates
 
+**v0.5.1**
+- 🚋 **Cleveland, live**: GCRTA's buses, Red Line, and light rail, with live arrivals, vehicles, and service alerts.
+- 🔔 **SEPTA, live**: SEPTA's buses, Metro, and trolleys now show live arrivals, vehicles, and service alerts. Regional Rail stays schedules-only for now.
+- ⚠️ **More service alerts**: Nashville's WeGo now has service alerts too.
+
 **v0.5.0**
-- ⚠️ **Service alerts** (optional, turn on in Settings): detours, closures, and other service changes for MBTA, RTD, LTC, NYC Subway, NYC buses, LIRR, Metro-North, the SF Bay Area, and Puget Sound. See them on the home screen, as an alert icon on routes, stops, and trips, and as pop-ups when new ones arrive.
+- ⚠️ **Service alerts** (optional, turn on in Settings): detours, closures, and other service changes for MBTA, RTD, LTC, NYC Subway, NYC buses, LIRR, Metro-North, the San Francisco Bay Area, and Puget Sound. See them on the home screen, as an alert icon on routes, stops, and trips, and as pop-ups when new ones arrive.
 - 🚇 **Closest match for every MBTA subway line**: trains Pico Transit can't match to a scheduled trip now get a closest match on all subway lines, not just the Green Line.
 - 🗺️ **More places**: SEPTA in Philadelphia, and a Southern New England region joining MBTA and RIPTA with 12 Massachusetts transit authorities and 8 ferries. 132 feeds in all.
 - 🙏 **Clearer data credits**: agencies whose data comes through 511.org or Sound Transit are now credited by their own names.
@@ -36,8 +41,8 @@ The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 ## 🔭 Coming up
 
 - 📍 **Real GPS for Explore**: built, but it needs a LightOS update before it can work, so it's marked **(Testing)** for now. Address search works in the meantime.
-- 🗺️ **Route shapes on the map**: drawing the real path between stops instead of straight lines (RIPTA's shapes are already read).
-- 🚏 **More agencies**, with help from the community.
+- 📡 **Expanding current agency feeds**: bringing live arrivals, vehicles, and service alerts to more of the agencies Pico Transit has schedules for today.
+- 🚏 **Adding more agencies**, with help from the community.
 
 ## 🚏 Agencies and live data
 
@@ -196,7 +201,7 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
 | Agency | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
 |---|:-:|:-:|:-:|:-:|
-| SEPTA Bus & Metro | ✓ | — | — | — |
+| SEPTA Bus & Metro | ✓ | ✓ | ✓ | ✓ |
 | SEPTA Regional Rail | ✓ | — | — | — |
 
 **Nashville**
@@ -244,11 +249,11 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
   <img src="docs/screenshots/Screenshot_20260810_171500.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260810_171800.png" alt="Pico Transit screenshot" width="220">
 
-- 🗂️ **Multiple schedules by region**: New York City, Denver, the SF Bay Area, and Puget Sound group their agencies together. Turn on more schedules from the same region in Settings → "Additional Schedules", and tap and hold one there to make it your primary.
+- 🗂️ **Multiple schedules by region**: New York City, Southern New England, Philadelphia, Denver, the San Francisco Bay Area, and Puget Sound group their agencies together. Turn on more schedules from the same region in Settings → "Additional Schedules", and tap and hold one there to make it your primary.
 
   <img src="docs/screenshots/NYCtransit.png" alt="Pico Transit screenshot" width="220">
 
-- 📅 **Schedules**: browse by Subway 🚇, Commuter Rail 🚆, or Bus 🚌, then pick a route, direction, and stop to see today's departures. Tap the Departures header to see tomorrow's instead.
+- 📅 **Schedules**: browse by Subway 🚇, Commuter Rail 🚆, Bus 🚌, or Ferry ⛴️, then pick a route, direction, and stop to see today's departures. Tap the Departures header to see tomorrow's instead.
 
   <img src="docs/screenshots/Screenshot_20260801_204325.png" alt="Pico Transit screenshot" width="220">
 
@@ -334,14 +339,14 @@ That's it, happy transit-ing! 🚏🚌🚆
 ## 🧪 A few nerdy notes
 
 - **Live data goes through `pico-transit-proxy`**, a small Cloudflare Worker at `gtfs.picotransit.com` (in its own repo). It only fetches a fixed list of upstream URLs, keeps every API key server-side, caches responses so riders share upstream requests, and accepts only the kinds of requests the app makes.
-- **Feeds fetched over plain HTTP** (RIPTA, LTC) reach the app over HTTPS through the proxy, so the app never uses cleartext.
+- **Feeds fetched over plain HTTP** reach the app over HTTPS through the proxy, so the app never uses cleartext.
 - **Explore's GPS** uses the Light SDK's location APIs and needs a LightOS update to work. Address search uses Nominatim (OpenStreetMap), so please be kind to their free API! 🙏
 - **Stations are grouped by GTFS `parent_station`**, so a big hub shows up once. Entrances, elevators, and escalators are left out of its platform map.
 - **Boarding is a saved reference, not a background tracker.** Live feeds are only polled while Trip Detail or the home screen is on screen.
 - **Agency APIs alongside GTFS-RT**: Pico Transit uses MBTA's V3 API for commuter rail tracks and positions, and matches CTA Bus Tracker data to scheduled trips by route and scheduled start time.
 - **"Closest match"** pairs live CTA 'L' runs and MBTA subway trains that Pico Transit can't match exactly with the nearest scheduled trip, in order. These aren't plotted on the map yet.
 - **NYC Subway's 8 line-group feeds** are merged by the proxy into one, and their trip IDs are decoded back to real scheduled trips.
-- **One upstream feed for the SF Bay Area**: the proxy fetches 511.org's regional feed once and slices it per agency.
+- **One upstream feed for the San Francisco Bay Area**: the proxy fetches 511.org's regional feed once and slices it per agency.
 - **Map tiles** come from CARTO through the proxy. Each 512px tile is cut into four, which keeps requests down and makes street names easier to read.
 
 ## 🙌 Credits
