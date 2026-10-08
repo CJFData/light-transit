@@ -40,6 +40,7 @@ object SampleAudioCatalog {
             kind = AudioContentKind.Music,
             durationMs = 20_036L,
             formatLabel = "MP3",
+            id = "seletores-de-frequencia",
         ),
         AudioClip(
             source = AudioClipSource.AssetSource("audio/small-talk-build-iv.ogg"),
@@ -48,6 +49,7 @@ object SampleAudioCatalog {
             kind = AudioContentKind.Music,
             durationMs = 20_000L,
             formatLabel = "OGG",
+            id = "small-talk-build-iv",
         ),
         AudioClip(
             source = AudioClipSource.AssetSource("audio/audrey-tang-interview.mp3"),
@@ -56,6 +58,7 @@ object SampleAudioCatalog {
             kind = AudioContentKind.Speech,
             durationMs = 20_036L,
             formatLabel = "MP3",
+            id = "audrey-tang-interview",
         ),
         AudioClip(
             source = AudioClipSource.UrlSource(
@@ -67,6 +70,7 @@ object SampleAudioCatalog {
             kind = AudioContentKind.Speech,
             durationMs = 1_148_000L,
             formatLabel = "MP3 stream",
+            id = "dawn-of-everything",
         ),
         AudioClip(
             source = AudioClipSource.UrlSource(
@@ -77,6 +81,7 @@ object SampleAudioCatalog {
             kind = AudioContentKind.Music,
             durationMs = 0L,
             formatLabel = "STREAM",
+            id = "somafm-groove-salad",
         ),
         AudioClip(
             source = AudioClipSource.UrlSource(SHAKA_DASH_URL),
@@ -94,6 +99,7 @@ object SampleAudioCatalog {
             kind = AudioContentKind.Music,
             durationMs = 0L,
             formatLabel = "BROKEN URL",
+            id = "demo-expired-dawn",
         ),
     )
 }

@@ -30,6 +30,7 @@ import com.thelightphone.sdk.audio.LightCacheEviction
 import com.thelightphone.sdk.audio.LightMediaCache
 import com.thelightphone.sdk.audio.LightMediaMetadata
 import com.thelightphone.sdk.audio.LightPlayerSpec
+import com.thelightphone.sdk.audio.LightQueueItem
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcons
@@ -50,8 +51,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 
@@ -118,10 +119,19 @@ class PlayerViewModel(
     private val playerFlow = MutableStateFlow(audio.newPlayer(playerSpec(mode.playback.value)))
     private val currentPlayer: LightAudioPlayer get() = playerFlow.value
     val clips = AudioLibraryRepository(filesDir).list()
-    val currentClip: StateFlow<AudioClip?> = playerFlow
+    val currentItem = playerFlow
+        .flatMapLatest { player -> combine(player.queue, player.currentMediaItemIndex, ::queueItemAt) }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            queueItemAt(currentPlayer.queue.value, currentPlayer.currentMediaItemIndex.value),
+        )
+    val queue = playerFlow
+        .flatMapLatest { it.queue }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, currentPlayer.queue.value)
+    val currentIndex = playerFlow
         .flatMapLatest { it.currentMediaItemIndex }
-        .map(clips::getOrNull)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, clips.getOrNull(currentPlayer.currentMediaItemIndex.value))
+        .stateIn(viewModelScope, SharingStarted.Eagerly, currentPlayer.currentMediaItemIndex.value)
     val positionMs = playerFlow
         .flatMapLatest { it.positionMs }
         .stateIn(viewModelScope, SharingStarted.Eagerly, currentPlayer.positionMs.value)
@@ -169,6 +179,22 @@ class PlayerViewModel(
     fun skipToPrevious() = currentPlayer.skipToPrevious()
     fun skipToNext() = currentPlayer.skipToNext()
 
+    fun addToQueue(clip: AudioClip) {
+        currentPlayer.addMediaItem(clip.toLightAudioItem())
+    }
+
+    fun moveUp(index: Int) {
+        if (index > 0) currentPlayer.moveMediaItem(index, index - 1)
+    }
+
+    fun moveDown(index: Int) {
+        if (index < queue.value.lastIndex) currentPlayer.moveMediaItem(index, index + 1)
+    }
+
+    fun removeFromQueue(index: Int) {
+        currentPlayer.removeMediaItem(index)
+    }
+
     fun cycleSpeed() {
         val next = SPEEDS[(SPEEDS.indexOf(speed.value) + 1).mod(SPEEDS.size)]
         _speed.value = next
@@ -211,13 +237,16 @@ private fun playerSpec(playback: LightAudioPlayback) = LightPlayerSpec(
     caches = listOf(LightMediaCache("demo-stream", LightCacheEviction.LeastRecentlyUsed(64L * 1024 * 1024))),
 )
 
-private fun AudioClip.toLightAudioItem() = LightAudioItem(
+internal fun queueItemAt(queue: List<LightQueueItem>, index: Int): LightQueueItem? = queue.getOrNull(index)
+
+internal fun AudioClip.toLightAudioItem() = LightAudioItem(
     source = when (val source = source) {
         is AudioClipSource.FileSource -> LightAudioSource.FileSource(source.file)
         is AudioClipSource.AssetSource -> LightAudioSource.AssetSource(source.assetPath)
         is AudioClipSource.UrlSource -> LightAudioSource.UrlSource(source.url)
     },
     metadata = toLightMediaMetadata(),
+    id = id,
 )
 
 private fun AudioClip.toLightMediaMetadata() = LightMediaMetadata(
@@ -253,7 +282,9 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) :
     @Composable
     override fun Content() {
         val colors by LightThemeController.colors.collectAsState()
-        val current by viewModel.currentClip.collectAsState()
+        val current by viewModel.currentItem.collectAsState()
+        val queue by viewModel.queue.collectAsState()
+        val currentIndex by viewModel.currentIndex.collectAsState()
         val position by viewModel.positionMs.collectAsState()
         val duration by viewModel.durationMs.collectAsState()
         val playing by viewModel.isPlaying.collectAsState()
@@ -275,8 +306,30 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) :
                         .weight(1f)
                         .padding(horizontal = 1f.gridUnitsAsDp()),
                 ) {
+                    LightText(text = "LIBRARY · TAP TO PLAY, ADD TO QUEUE", variant = LightTextVariant.Superfine)
                     viewModel.clips.forEachIndexed { index, clip ->
-                        AudioClipRow(index + 1, clip, selected = clip == current) { viewModel.play(clip) }
+                        AudioClipRow(
+                            index + 1,
+                            clip,
+                            selected = clip.displayName == current?.metadata?.title,
+                            onPlay = { viewModel.play(clip) },
+                            onAdd = { viewModel.addToQueue(clip) },
+                        )
+                    }
+                    LightText(
+                        text = "QUEUE · ${queue.size} ITEMS",
+                        variant = LightTextVariant.Superfine,
+                        modifier = Modifier.padding(top = 1f.gridUnitsAsDp()),
+                    )
+                    queue.forEachIndexed { index, item ->
+                        QueueItemRow(
+                            index = index,
+                            item = item,
+                            selected = index == currentIndex,
+                            onUp = { viewModel.moveUp(index) },
+                            onDown = { viewModel.moveDown(index) },
+                            onRemove = { viewModel.removeFromQueue(index) },
+                        )
                     }
                 }
                 LightText(
@@ -352,24 +405,78 @@ internal fun playbackErrorMessage(error: LightAudioError): String =
     "${error.kind}: ${error.diagnostic}. Select another item to continue."
 
 @Composable
-private fun AudioClipRow(number: Int, clip: AudioClip, selected: Boolean, onClick: () -> Unit) {
+private fun AudioClipRow(
+    number: Int,
+    clip: AudioClip,
+    selected: Boolean,
+    onPlay: () -> Unit,
+    onAdd: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
-            .lightClickable(onClick = onClick)
             .padding(vertical = 0.5f.gridUnitsAsDp()),
     ) {
-        LightText(
-            text = if (selected) "> $number. ${clip.displayName}" else "$number. ${clip.displayName}",
-            variant = LightTextVariant.Copy,
-            maxLines = 1,
-        )
+        Row(Modifier.fillMaxWidth()) {
+            LightText(
+                text = if (selected) "> $number. ${clip.displayName}" else "$number. ${clip.displayName}",
+                variant = LightTextVariant.Copy,
+                maxLines = 1,
+                modifier = Modifier.weight(1f).lightClickable(onClick = onPlay),
+            )
+            LightText(
+                text = "ADD",
+                variant = LightTextVariant.Fine,
+                modifier = Modifier
+                    .lightClickable(onClick = onAdd)
+                    .padding(horizontal = 0.5f.gridUnitsAsDp()),
+            )
+        }
         LightText(
             text = "${clip.kind.name.uppercase()}  ${clip.formatLabel}",
             variant = LightTextVariant.Fine,
             lighten = true,
         )
     }
+}
+
+@Composable
+private fun QueueItemRow(
+    index: Int,
+    item: LightQueueItem,
+    selected: Boolean,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 0.5f.gridUnitsAsDp())) {
+        LightText(
+            text = "${if (selected) ">" else " "} ${index + 1}. ${item.metadata.title}",
+            variant = LightTextVariant.Copy,
+            maxLines = 1,
+        )
+        Row(Modifier.fillMaxWidth()) {
+            LightText(
+                text = "ID: ${item.id.take(24)}",
+                variant = LightTextVariant.Superfine,
+                modifier = Modifier.weight(1f),
+            )
+            QueueAction("UP", onUp)
+            QueueAction("DN", onDown)
+            QueueAction("DEL", onRemove)
+        }
+    }
+}
+
+@Composable
+private fun QueueAction(label: String, onClick: () -> Unit) {
+    LightText(
+        text = label,
+        variant = LightTextVariant.Fine,
+        modifier = Modifier
+            .lightClickable(onClick = onClick)
+            .padding(horizontal = 0.5f.gridUnitsAsDp()),
+    )
 }
 
 @Composable

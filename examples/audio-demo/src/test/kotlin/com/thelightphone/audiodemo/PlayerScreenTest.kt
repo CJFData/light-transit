@@ -3,11 +3,22 @@ package com.thelightphone.audiodemo
 import com.thelightphone.sdk.audio.LightAudioError
 import com.thelightphone.sdk.audio.LightAudioErrorKind
 import com.thelightphone.sdk.audio.LightAudioPlayback
+import com.thelightphone.sdk.audio.LightMediaMetadata
+import com.thelightphone.sdk.audio.LightQueueItem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.runBlocking
 
 class PlayerScreenTest {
+    @Test
+    fun currentItemFollowsReorderedQueue() {
+        val first = LightQueueItem("first", LightMediaMetadata("First"))
+        val second = LightQueueItem("second", LightMediaMetadata("Second"))
+
+        assertEquals(second, queueItemAt(listOf(second, first), 0))
+        assertEquals(null, queueItemAt(emptyList(), 0))
+    }
+
     @Test
     fun playbackModeAlternatesBetweenAttachedAndDetached() {
         assertEquals(LightAudioPlayback.Detached, nextPlaybackMode(LightAudioPlayback.Attached))
