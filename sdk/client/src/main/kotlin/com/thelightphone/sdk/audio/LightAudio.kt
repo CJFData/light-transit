@@ -4,14 +4,16 @@ import android.content.Context
 import android.media.AudioManager
 import com.thelightphone.sdk.SealedLightActivity
 
+data class LightPlayerSpec(
+    val usage: LightAudioUsage = LightAudioUsage.Music,
+    val playback: LightAudioPlayback = LightAudioPlayback.Attached,
+    val caches: List<LightMediaCache> = emptyList(),
+)
+
 interface LightAudio {
     val capabilities: AudioCapabilities
 
-    fun newPlayer(
-        usage: LightAudioUsage = LightAudioUsage.Music,
-        playback: LightAudioPlayback = LightAudioPlayback.Attached,
-        caches: List<LightMediaCache> = emptyList(),
-    ): LightAudioPlayer
+    fun newPlayer(spec: LightPlayerSpec = LightPlayerSpec()): LightAudioPlayer
     fun newRecorder(cfg: RecorderConfig = RecorderConfig()): LightAudioRecorder
     fun newCapture(cfg: CaptureConfig = CaptureConfig()): LightAudioCapture
     fun newVoice(
@@ -30,38 +32,25 @@ value class DefaultLightAudio(
         get() = sealedActivity.activity.readAudioCapabilities()
 
     /**
-     * Create a player that requests audio focus appropriate for [usage], reading
-     * through [caches] in the order given before reaching the network.
+     * Create a player that requests audio focus appropriate for [spec], reading
+     * through its caches in the order given before reaching the network.
      *
      * Only one [LightAudioPlayback.Detached] player handle may exist in the
      * process at a time. Reconnecting to a live detached session cannot change
-     * where that session's player reads from, so [caches] must match the ones it
-     * was built with.
+     * its configuration, so [spec] must match the live session's specification.
      */
-    override fun newPlayer(
-        usage: LightAudioUsage,
-        playback: LightAudioPlayback,
-        caches: List<LightMediaCache>,
-    ): LightAudioPlayer {
-        validateMediaCaches(caches)
-        if (playback == LightAudioPlayback.Attached) {
-            return LightAudioPlayer(sealedActivity.activity, usage, playback, caches)
+    override fun newPlayer(spec: LightPlayerSpec): LightAudioPlayer {
+        validateMediaCaches(spec.caches)
+        if (spec.playback == LightAudioPlayback.Attached) {
+            return LightAudioPlayer(sealedActivity.activity, spec)
         }
 
         sealedActivity.activity.requireDetachedAudioCapability()
-        val activeUsage = detachedSessionState.activeUsage()
-        if (!isDetachedUsageCompatible(activeUsage, usage)) {
+        val activeSpec = detachedSessionState.activeSpec()
+        if (!isDetachedSpecCompatible(activeSpec, spec)) {
             throw LightAudioPlayerException(
-                "Detached audio is already using $activeUsage; requested $usage. " +
-                    "Reconnect with the active usage or wait for the detached session to stop."
-            )
-        }
-        val activeCaches = detachedSessionState.activeCaches()
-        if (!isDetachedCacheCompatible(activeCaches, caches)) {
-            throw LightAudioPlayerException(
-                "Detached audio is already reading through $activeCaches; requested $caches. " +
-                    "Its player is already built, so reconnect with the active caches or " +
-                    "stop the detached session first."
+                "Detached audio is already using $activeSpec; requested $spec. " +
+                    "Reconnect with the active specification or stop the detached session first."
             )
         }
         if (!detachedSessionState.openHandle()) {
@@ -69,13 +58,11 @@ value class DefaultLightAudio(
                 "Only one detached LightAudioPlayer may exist at a time; release the existing player first"
             )
         }
-        detachedSessionState.stageCaches(caches)
+        detachedSessionState.stageSpec(spec)
         return try {
             LightAudioPlayer(
                 sealedActivity.activity,
-                usage,
-                playback,
-                caches,
+                spec,
                 detachedSessionState::closeHandle,
             )
         } catch (error: Throwable) {

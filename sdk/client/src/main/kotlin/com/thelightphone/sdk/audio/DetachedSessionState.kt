@@ -24,9 +24,8 @@ package com.thelightphone.sdk.audio
  */
 internal class DetachedSessionState {
     private var handleOpen = false
-    private var sessionUsage: LightAudioUsage? = null
-    private var stagedCaches: List<LightMediaCache> = emptyList()
-    private var sessionCaches: List<LightMediaCache>? = null
+    private var stagedSpec: LightPlayerSpec = LightPlayerSpec(playback = LightAudioPlayback.Detached)
+    private var sessionSpec: LightPlayerSpec? = null
     private var handleChanged: (() -> Unit)? = null
 
     /** Takes the single detached handle, or fails when one is already out. */
@@ -59,55 +58,33 @@ internal class DetachedSessionState {
     @Synchronized
     fun isHandleOpen(): Boolean = handleOpen
 
-    /** Service side: the live session settled on a usage. */
     @Synchronized
-    fun adoptUsage(usage: LightAudioUsage) {
-        sessionUsage = usage
+    fun adoptSpec(spec: LightPlayerSpec) {
+        sessionSpec = spec
     }
 
     /** Service side: the session is gone, so the next handle starts fresh. */
     @Synchronized
     fun clearSession() {
-        sessionUsage = null
-        sessionCaches = null
-        stagedCaches = emptyList()
+        sessionSpec = null
+        stagedSpec = LightPlayerSpec(playback = LightAudioPlayback.Detached)
     }
 
-    /** The live session's usage, or `null` when no session is running. */
     @Synchronized
-    fun activeUsage(): LightAudioUsage? = sessionUsage
+    fun activeSpec(): LightPlayerSpec? = sessionSpec
 
-    /** Staged for the service to read in `onCreate`. */
     @Synchronized
-    fun stageCaches(caches: List<LightMediaCache>) {
-        stagedCaches = caches
+    fun stageSpec(spec: LightPlayerSpec) {
+        stagedSpec = spec
     }
 
-    /** Service side: the caches left for the player being constructed. */
     @Synchronized
-    fun stagedCaches(): List<LightMediaCache> = stagedCaches
-
-    /** Service side: the live session settled on the caches it was built with. */
-    @Synchronized
-    fun adoptCaches(caches: List<LightMediaCache>) {
-        sessionCaches = caches
-        stagedCaches = emptyList()
-    }
-
-    /** The live session's caches, or `null` when no session is running. */
-    @Synchronized
-    fun activeCaches(): List<LightMediaCache>? = sessionCaches
-
+    fun stagedSpec(): LightPlayerSpec = stagedSpec
 }
 
 internal val detachedSessionState = DetachedSessionState()
 
-internal fun isDetachedUsageCompatible(
-    activeUsage: LightAudioUsage?,
-    requestedUsage: LightAudioUsage,
-): Boolean = activeUsage == null || activeUsage == requestedUsage
-
-internal fun isDetachedCacheCompatible(
-    activeCaches: List<LightMediaCache>?,
-    requestedCaches: List<LightMediaCache>,
-): Boolean = activeCaches == null || activeCaches == requestedCaches
+internal fun isDetachedSpecCompatible(
+    activeSpec: LightPlayerSpec?,
+    requestedSpec: LightPlayerSpec,
+): Boolean = activeSpec == null || activeSpec == requestedSpec

@@ -36,15 +36,15 @@ internal class LightAudioService : MediaSessionService() {
         assertSharedProcess()
 
         // Whatever the starting handle staged. Empty if the system revived the service.
-        val caches = detachedSessionState.stagedCaches()
-        player = buildSdkExoPlayer(this, LightAudioUsage.Music, caches).apply {
+        val spec = detachedSessionState.stagedSpec()
+        player = buildSdkExoPlayer(this, spec.usage, spec.caches).apply {
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     refreshIdleStop()
                 }
             })
         }
-        detachedSessionState.adoptCaches(caches)
+        detachedSessionState.adoptSpec(spec)
         session = MediaSession.Builder(this, player)
             .setId(packageName)
             .setCallback(SessionCallback())
@@ -77,7 +77,8 @@ internal class LightAudioService : MediaSessionService() {
                 val requestedUsage = controller.connectionHints.requestedUsage()
                 // newPlayer checks this synchronously. Repeat it here because the
                 // service state may change before the async controller connects.
-                if (!isDetachedUsageCompatible(detachedSessionState.activeUsage(), requestedUsage)) {
+                val requestedSpec = detachedSessionState.stagedSpec().copy(usage = requestedUsage)
+                if (!isDetachedSpecCompatible(detachedSessionState.activeSpec(), requestedSpec)) {
                     return MediaSession.ConnectionResult.reject()
                 }
                 // An empty player has no live playback to preserve, so this fresh
@@ -103,7 +104,7 @@ internal class LightAudioService : MediaSessionService() {
     /** A fresh session takes the connecting handle's usage; a live one keeps its own. */
     private fun adoptUsage(usage: LightAudioUsage) {
         player.setAudioAttributes(usage.toMedia3AudioAttributes(), true)
-        detachedSessionState.adoptUsage(usage)
+        detachedSessionState.activeSpec()?.let { detachedSessionState.adoptSpec(it.copy(usage = usage)) }
     }
 
     private fun refreshIdleStop() {

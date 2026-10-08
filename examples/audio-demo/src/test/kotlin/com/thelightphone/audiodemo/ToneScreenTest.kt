@@ -6,6 +6,7 @@ import com.thelightphone.sdk.audio.LightAudio
 import com.thelightphone.sdk.audio.LightAudioCapture
 import com.thelightphone.sdk.audio.LightAudioPlayer
 import com.thelightphone.sdk.audio.LightAudioPlayback
+import com.thelightphone.sdk.audio.LightPlayerSpec
 import com.thelightphone.sdk.audio.LightAudioRecorder
 import com.thelightphone.sdk.audio.LightAudioUsage
 import com.thelightphone.sdk.audio.LightAudioVoice
@@ -28,11 +29,7 @@ class ToneScreenTest {
         val vm = ToneViewModel(object : LightAudio {
             override val capabilities: AudioCapabilities = AudioCapabilities(67)
 
-            override fun newPlayer(
-                usage: LightAudioUsage,
-                playback: LightAudioPlayback,
-                caches: List<LightMediaCache>,
-            ): LightAudioPlayer {
+            override fun newPlayer(spec: LightPlayerSpec): LightAudioPlayer {
                 TODO("Should not be called")
             }
 

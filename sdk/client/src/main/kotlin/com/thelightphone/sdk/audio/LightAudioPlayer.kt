@@ -45,11 +45,10 @@ enum class LightAudioPlayerAvailability {
 @OptIn(UnstableApi::class)
 class LightAudioPlayer internal constructor(
     context: Context,
-    usage: LightAudioUsage = LightAudioUsage.Music,
-    internal val playback: LightAudioPlayback = LightAudioPlayback.Attached,
-    caches: List<LightMediaCache> = emptyList(),
+    spec: LightPlayerSpec = LightPlayerSpec(),
     private val onRelease: () -> Unit = {},
 ) {
+    internal val playback = spec.playback
     private val scopeJob = SupervisorJob()
     private val scope = CoroutineScope(scopeJob + Dispatchers.Main.immediate)
     private val _positionMs = MutableStateFlow(0L)
@@ -80,10 +79,10 @@ class LightAudioPlayer internal constructor(
     val availability: StateFlow<LightAudioPlayerAvailability> = commands.availability
 
     init {
-        when (playback) {
+        when (spec.playback) {
             LightAudioPlayback.Attached ->
-                connectPlayer(buildSdkExoPlayer(context, usage, caches))
-            LightAudioPlayback.Detached -> connectDetachedPlayer(context, usage)
+                connectPlayer(buildSdkExoPlayer(context, spec.usage, spec.caches))
+            LightAudioPlayback.Detached -> connectDetachedPlayer(context, spec.usage)
         }
     }
 

@@ -159,12 +159,12 @@ An item without an `id` is identified and cached by its location. Rotating signe
 A player can read through caches the tool describes. The SDK opens each store under your tool's private storage, shares one per directory across your process, and keeps it when the player is released:
 
 ```kotlin
-val player = audio.newPlayer(
+val player = audio.newPlayer(LightPlayerSpec(
     caches = listOf(
         LightMediaCache("stream", LightCacheEviction.LeastRecentlyUsed(256L * 1024 * 1024)),
         LightMediaCache("saved", LightCacheEviction.Never),
     ),
-)
+))
 ```
 
 Caches are consulted in the order given, and only then the network. Newly streamed bytes are written to the size-limited cache, so at most one cache may be size-limited and a player without one caches nothing it streams. The SDK never writes to a cache that never evicts. The current API has no way to fill that store; it is reserved for future offline downloads.
@@ -224,7 +224,7 @@ capabilities = ["detached-audio"]
 Wait for its controller before deciding whether the session is fresh:
 
 ```kotlin
-val player = audio.newPlayer(playback = LightAudioPlayback.Detached)
+val player = audio.newPlayer(LightPlayerSpec(playback = LightAudioPlayback.Detached))
 if (player.awaitReady() && player.currentMediaItemIndex.value == NO_MEDIA_ITEM) {
     player.setMediaQueue(items)
 }

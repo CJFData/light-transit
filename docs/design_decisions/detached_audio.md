@@ -36,7 +36,7 @@ This section zooms in on the components and their relationships:
 │       ▼                                                         │
 │  DefaultLightAudio : LightAudio                                 │
 │      wraps SealedLightActivity                                  │
-│       │  .newPlayer(usage, playback)                            │
+│       │  .newPlayer(spec)                                      │
 │       │                                                         │
 │       ├── checks ──▶ CAPABILITY_DETACHED_AUDIO marker           │
 │       ├── opens ───▶ DetachedSessionState                       │
@@ -118,7 +118,7 @@ The SDK maps its audio API onto the media3 components as follows:
 
 The controller identifies itself as a tool controller and sends its `LightAudioUsage` through connection hints. Other platform controllers, such as Bluetooth, may connect to the session, but they do not own the SDK's detached handle or select its audio usage.
 
-Caches and `LightMediaSourceFactory` are construction-time, so they are staged on `DetachedSessionState` before the controller starts the service. Reconnecting must match the live session's caches and must not pass a source factory.
+`LightPlayerSpec` is staged on `DetachedSessionState` before the controller starts the service. Reconnecting must match the live session spec.
 
 ## Foreground-service notification on LP3
 

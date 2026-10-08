@@ -53,58 +53,36 @@ class LightMediaCacheTest {
         }
     }
 
+    @Test
+    fun distinctNamesRemainRequired() {
+        assertFailsWith<IllegalArgumentException> {
+            validateMediaCaches(listOf(savedCache, savedCache))
+        }
+    }
 }
 
 class DetachedSessionCacheTest {
+    private val detachedSpec = LightPlayerSpec(
+        playback = LightAudioPlayback.Detached,
+        caches = listOf(streamCache),
+    )
+
     @Test
-    fun cacheCompatibilityAcceptsFreshSessionsAndMatchingRequestsOnly() {
-        assertTrue(isDetachedCacheCompatible(activeCaches = null, listOf(streamCache)))
-        assertTrue(isDetachedCacheCompatible(listOf(streamCache), listOf(streamCache)))
-        assertFalse(isDetachedCacheCompatible(emptyList(), listOf(streamCache)))
-        assertFalse(
-            isDetachedCacheCompatible(listOf(streamCache, savedCache), listOf(savedCache, streamCache)),
-        )
+    fun specCompatibilityAcceptsFreshAndMatchingSessionsOnly() {
+        assertTrue(isDetachedSpecCompatible(null, detachedSpec))
+        assertTrue(isDetachedSpecCompatible(detachedSpec, detachedSpec.copy()))
+        assertFalse(isDetachedSpecCompatible(detachedSpec, detachedSpec.copy(caches = listOf(savedCache))))
+        assertFalse(isDetachedSpecCompatible(detachedSpec, detachedSpec.copy(usage = LightAudioUsage.Alarm)))
     }
 
     @Test
-    fun stagedCachesSurviveUntilTheServiceBuildsItsPlayer() {
+    fun stagedSpecSurvivesServiceAdoptionAndClearsWithSession() {
         val state = DetachedSessionState()
-
-        state.stageCaches(listOf(streamCache))
-
-        assertEquals(listOf(streamCache), state.stagedCaches())
-        assertNull(state.activeCaches())
-    }
-
-    @Test
-    fun adoptingCachesPublishesThemAndConsumesTheStaging() {
-        val state = DetachedSessionState()
-        state.stageCaches(listOf(streamCache))
-
-        state.adoptCaches(state.stagedCaches())
-
-        assertEquals(listOf(streamCache), state.activeCaches())
-        assertEquals(emptyList(), state.stagedCaches())
-    }
-
-    @Test
-    fun aRevivedSessionRecordsThatItWasBuiltWithoutCaches() {
-        val state = DetachedSessionState()
-
-        state.adoptCaches(state.stagedCaches())
-
-        assertEquals(emptyList(), state.activeCaches())
-        assertFalse(isDetachedCacheCompatible(state.activeCaches(), listOf(streamCache)))
-    }
-
-    @Test
-    fun clearingTheSessionLetsTheNextHandleChooseCachesAgain() {
-        val state = DetachedSessionState()
-        state.adoptCaches(listOf(streamCache))
-
+        state.stageSpec(detachedSpec)
+        assertEquals(detachedSpec, state.stagedSpec())
+        state.adoptSpec(state.stagedSpec())
+        assertEquals(detachedSpec, state.activeSpec())
         state.clearSession()
-
-        assertNull(state.activeCaches())
-        assertTrue(isDetachedCacheCompatible(state.activeCaches(), listOf(savedCache)))
+        assertNull(state.activeSpec())
     }
 }
