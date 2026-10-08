@@ -1,5 +1,10 @@
 version: 2.1
 
+parameters:
+  push-dev-image:
+    type: boolean
+    default: false
+
 jobs:
   build-and-push-light-builder:
     machine:
@@ -138,6 +143,12 @@ jobs:
               builder/
 
       - run:
+          name: proxy starts without network access
+          command: |
+            set -euo pipefail
+            bash builder/tests/check_proxy_startup.sh light-sdk-builder:verify
+
+      - run:
           name: build sample tool and fixtures behind the Maven proxy
           no_output_timeout: 60m
           command: |
@@ -171,12 +182,11 @@ jobs:
           destination: dev-image.txt
 
 workflows:
+  # Manual: trigger a pipeline on the wanted branch with push-dev-image=true.
   verify-light-builder:
+    when: << pipeline.parameters.push-dev-image >>
     jobs:
-      - verify-light-builder:
-          filters:
-            branches:
-              only: feat/build-maven-proxy
+      - verify-light-builder
 
   build-light-builder:
     jobs:

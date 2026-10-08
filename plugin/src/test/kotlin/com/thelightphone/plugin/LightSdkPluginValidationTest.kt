@@ -424,4 +424,35 @@ class LightSdkPluginValidationTest {
         assertTrue(LightSdkPlugin.SDK_VERSION.isNotBlank())
         assertFalse("$" in LightSdkPlugin.SDK_VERSION, "unexpanded: ${LightSdkPlugin.SDK_VERSION}")
     }
+
+    @Test
+    fun `dependency violations are reported once with every configuration`() {
+        val violations = DependencyViolations()
+        violations.add("releaseCompileClasspath", "com.google.code.gson:gson:2.11.0")
+        violations.add("implementation", "com.google.code.gson:gson:2.11.0")
+        violations.add("implementation", "com.google.code.gson:gson:2.11.0")
+        assertEquals(
+            listOf("  com.google.code.gson:gson:2.11.0 (in implementation, releaseCompileClasspath)"),
+            violations.lines(),
+        )
+    }
+
+    @Test
+    fun `allowlist is only listed next to dependency violations`() {
+        val source = LightSdkPlugin.formatViolations(listOf("  Foo.kt:3: blocked import"), emptyList())!!
+        assertFalse("Allowed dependencies:" in source, source)
+
+        val dependency = LightSdkPlugin.formatViolations(emptyList(), listOf("  a:b:1 (in implementation)"))!!
+        assertTrue("Allowed dependencies:" in dependency, dependency)
+
+        assertEquals(null, LightSdkPlugin.formatViolations(emptyList(), emptyList()))
+    }
+
+    @Test
+    fun `test configurations are recognised`() {
+        listOf("testImplementation", "debugUnitTestCompileClasspath", "debugAndroidTestRuntimeClasspath", "kspTestKotlin")
+            .forEach { assertTrue(LightSdkPlugin.isTestConfig(it), it) }
+        listOf("releaseRuntimeClasspath", "releaseCompileClasspath", "kspRelease")
+            .forEach { assertFalse(LightSdkPlugin.isTestConfig(it), it) }
+    }
 }
