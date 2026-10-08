@@ -1065,13 +1065,13 @@ enum class GtfsAgency(
     ),
 
     //Northeastern Pennsylvania--no region yet starting with Lackawanna county/ Scranton area
-    COLT(
-        id="colt",
-        displayName = "County of Lackawanna Transit",
+    COLTS(
+        id="colts",
+        displayName = "County of Lackawanna Transit System (COLTS)",
         feedUrl = "https://coltsivl.availtec.com/InfoPoint/gtfs-zip.ashx",
-        realtimeTripUpdatesUrl="https://gtfs.picotransit.com/colt/tripupdates",
-        realtimeVehiclePositionsUrl = "https://gtfs.picotransit.com/colt/vehiclepositions",
-        realtimeAlertsUrl = "https://gtfs.picotransit.com/colt/alerts",
+        realtimeTripUpdatesUrl="https://gtfs.picotransit.com/colts/tripupdates",
+        realtimeVehiclePositionsUrl = "https://gtfs.picotransit.com/colts/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/colts/alerts",
         timeZoneId = "America/New_York",
     ),
 
