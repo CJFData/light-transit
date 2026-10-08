@@ -31,6 +31,8 @@ enum class AudioContentKind {
 
 object SampleAudioCatalog {
     const val SHAKA_DASH_URL = "https://storage.googleapis.com/shaka-demo-assets/dig-the-uke-clear/dash.mpd"
+    const val EXPIRED_DAWN_ID = "demo-expired-dawn"
+    const val DAWN_URL = "https://commons.wikimedia.org/wiki/Special:Redirect/file/Wikipedia_-_The_Dawn_of_Everything.mp3"
 
     val clips: List<AudioClip> = listOf(
         AudioClip(
@@ -61,10 +63,7 @@ object SampleAudioCatalog {
             id = "audrey-tang-interview",
         ),
         AudioClip(
-            source = AudioClipSource.UrlSource(
-                "https://commons.wikimedia.org/wiki/Special:Redirect/file/" +
-                    "Wikipedia_-_The_Dawn_of_Everything.mp3",
-            ),
+            source = AudioClipSource.UrlSource(DAWN_URL),
             displayName = "The Dawn of Everything",
             usage = LightAudioUsage.Music,
             kind = AudioContentKind.Speech,
@@ -94,12 +93,12 @@ object SampleAudioCatalog {
         ),
         AudioClip(
             source = AudioClipSource.UrlSource("http://127.0.0.1:1/missing.mp3"),
-            displayName = "Broken source (error demo)",
+            displayName = "The Dawn of Everything (expired URL)",
             usage = LightAudioUsage.Music,
-            kind = AudioContentKind.Music,
+            kind = AudioContentKind.Speech,
             durationMs = 0L,
             formatLabel = "BROKEN URL",
-            id = "demo-expired-dawn",
+            id = EXPIRED_DAWN_ID,
         ),
     )
 }

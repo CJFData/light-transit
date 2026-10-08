@@ -18,7 +18,7 @@ class AudioLibraryRepositoryTest {
         assertEquals(7, clips.size)
         assertEquals(3, clips.count { it.source is AudioClipSource.AssetSource })
         assertEquals(4, clips.count { it.source is AudioClipSource.UrlSource })
-        assertEquals(2, clips.count { it.kind == AudioContentKind.Speech })
+        assertEquals(3, clips.count { it.kind == AudioContentKind.Speech })
         assertTrue(clips.all { it.usage == LightAudioUsage.Music })
         assertTrue(clips.any { it.formatLabel == "OGG" })
         assertTrue(clips.any { it.formatLabel == "STREAM" && it.durationMs == 0L })

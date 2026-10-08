@@ -22,6 +22,7 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.audio.DefaultLightAudio
 import com.thelightphone.sdk.audio.LightAudio
 import com.thelightphone.sdk.audio.LightAudioError
+import com.thelightphone.sdk.audio.LightAudioErrorKind
 import com.thelightphone.sdk.audio.LightAudioItem
 import com.thelightphone.sdk.audio.LightAudioPlayback
 import com.thelightphone.sdk.audio.LightAudioPlayer
@@ -195,6 +196,13 @@ class PlayerViewModel(
         currentPlayer.removeMediaItem(index)
     }
 
+    fun repairFailedSource() {
+        val index = repairIndex(error.value, queue.value) ?: return
+        val expired = clips.first { it.id == SampleAudioCatalog.EXPIRED_DAWN_ID }
+        currentPlayer.replaceMediaItem(index, expired.repairedDawnItem())
+        currentPlayer.play()
+    }
+
     fun cycleSpeed() {
         val next = SPEEDS[(SPEEDS.indexOf(speed.value) + 1).mod(SPEEDS.size)]
         _speed.value = next
@@ -238,6 +246,16 @@ private fun playerSpec(playback: LightAudioPlayback) = LightPlayerSpec(
 )
 
 internal fun queueItemAt(queue: List<LightQueueItem>, index: Int): LightQueueItem? = queue.getOrNull(index)
+
+internal fun repairIndex(error: LightAudioError?, queue: List<LightQueueItem>): Int? =
+    error?.takeIf { it.kind == LightAudioErrorKind.Source }
+        ?.itemIndex
+        ?.takeIf { queue.getOrNull(it)?.id == SampleAudioCatalog.EXPIRED_DAWN_ID }
+
+internal fun AudioClip.repairedDawnItem(): LightAudioItem = copy(
+    source = AudioClipSource.UrlSource(SampleAudioCatalog.DAWN_URL),
+    displayName = "The Dawn of Everything (repaired)",
+).toLightAudioItem()
 
 internal fun AudioClip.toLightAudioItem() = LightAudioItem(
     source = when (val source = source) {
@@ -350,6 +368,17 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) :
                             .fillMaxWidth()
                             .padding(bottom = 0.5f.gridUnitsAsDp()),
                     )
+                    if (repairIndex(it, queue) != null) {
+                        LightText(
+                            text = "REPLACE EXPIRED URL + PLAY",
+                            variant = LightTextVariant.Fine,
+                            align = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .lightClickable(onClick = viewModel::repairFailedSource)
+                                .padding(bottom = 0.5f.gridUnitsAsDp()),
+                        )
+                    }
                 }
                 Row(
                     Modifier

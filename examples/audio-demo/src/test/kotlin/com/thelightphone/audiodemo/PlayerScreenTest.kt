@@ -3,6 +3,7 @@ package com.thelightphone.audiodemo
 import com.thelightphone.sdk.audio.LightAudioError
 import com.thelightphone.sdk.audio.LightAudioErrorKind
 import com.thelightphone.sdk.audio.LightAudioPlayback
+import com.thelightphone.sdk.audio.LightAudioSource
 import com.thelightphone.sdk.audio.LightMediaMetadata
 import com.thelightphone.sdk.audio.LightQueueItem
 import kotlin.test.Test
@@ -17,6 +18,23 @@ class PlayerScreenTest {
 
         assertEquals(second, queueItemAt(listOf(second, first), 0))
         assertEquals(null, queueItemAt(emptyList(), 0))
+    }
+
+    @Test
+    fun repairTargetsTheFailedItemAfterQueueMoves() {
+        val expired = SampleAudioCatalog.clips.first { it.id == SampleAudioCatalog.EXPIRED_DAWN_ID }
+        val queue = listOf(
+            LightQueueItem("other", LightMediaMetadata("Other")),
+            LightQueueItem(expired.id!!, LightMediaMetadata(expired.displayName)),
+        )
+        val error = LightAudioError(LightAudioErrorKind.Source, "ERROR_CODE_IO_UNSPECIFIED", 1)
+
+        assertEquals(1, repairIndex(error, queue))
+        val repaired = expired.repairedDawnItem()
+        assertEquals(expired.id, repaired.id)
+        assertEquals(LightAudioSource.UrlSource(SampleAudioCatalog.DAWN_URL), repaired.source)
+        assertEquals(null, repairIndex(error.copy(itemIndex = 0), queue))
+        assertEquals(null, repairIndex(error.copy(kind = LightAudioErrorKind.Unsupported), queue))
     }
 
     @Test
