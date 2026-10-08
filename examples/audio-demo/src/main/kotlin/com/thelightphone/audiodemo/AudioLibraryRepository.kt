@@ -15,6 +15,7 @@ data class AudioClip(
     val kind: AudioContentKind,
     val durationMs: Long,
     val formatLabel: String,
+    val id: String? = null,
 )
 
 sealed interface AudioClipSource {
@@ -29,6 +30,8 @@ enum class AudioContentKind {
 }
 
 object SampleAudioCatalog {
+    const val SHAKA_DASH_URL = "https://storage.googleapis.com/shaka-demo-assets/dig-the-uke-clear/dash.mpd"
+
     val clips: List<AudioClip> = listOf(
         AudioClip(
             source = AudioClipSource.AssetSource("audio/seletores-de-frequencia.mp3"),
@@ -74,6 +77,15 @@ object SampleAudioCatalog {
             kind = AudioContentKind.Music,
             durationMs = 0L,
             formatLabel = "STREAM",
+        ),
+        AudioClip(
+            source = AudioClipSource.UrlSource(SHAKA_DASH_URL),
+            displayName = "Dig the Uke (Shaka test)",
+            usage = LightAudioUsage.Music,
+            kind = AudioContentKind.Music,
+            durationMs = 177_622L,
+            formatLabel = "DASH",
+            id = "shaka-dig-the-uke",
         ),
         AudioClip(
             source = AudioClipSource.UrlSource("http://127.0.0.1:1/missing.mp3"),

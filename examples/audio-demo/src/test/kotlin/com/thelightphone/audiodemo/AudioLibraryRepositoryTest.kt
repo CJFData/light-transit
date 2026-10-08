@@ -15,13 +15,14 @@ class AudioLibraryRepositoryTest {
     fun sampleCatalogIncludesBundledMusicSpeechAndRemoteStreams() {
         val clips = SampleAudioCatalog.clips
 
-        assertEquals(6, clips.size)
+        assertEquals(7, clips.size)
         assertEquals(3, clips.count { it.source is AudioClipSource.AssetSource })
-        assertEquals(3, clips.count { it.source is AudioClipSource.UrlSource })
+        assertEquals(4, clips.count { it.source is AudioClipSource.UrlSource })
         assertEquals(2, clips.count { it.kind == AudioContentKind.Speech })
         assertTrue(clips.all { it.usage == LightAudioUsage.Music })
         assertTrue(clips.any { it.formatLabel == "OGG" })
         assertTrue(clips.any { it.formatLabel == "STREAM" && it.durationMs == 0L })
+        assertTrue(clips.any { it.formatLabel == "DASH" && it.id == "shaka-dig-the-uke" })
     }
 
     @Test
