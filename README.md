@@ -61,6 +61,7 @@ Using the Dashboard, developers are able to queue up a build of your tool on our
   - If you believe the build error is due to an issue on our end (e.g. with light-sdk or our infrastructure), please feel free to open an Issue on this repo!
   - In case of success, the "download apk" button should appear. A new "Version" entry will be created with "pending approval" status.
 7. Our team will review the builds and reach out to you via e-mail if we have any feedback regarding the approval process.
+8. If you have any questions, please e-mail us at tools@thelightphone.com
 
 ### Sharing Your Tool
 Once we release a version of LightOS that supports community tools, users will have an option to choose what kind of tools they want to be able to run on their device:
