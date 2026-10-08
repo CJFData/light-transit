@@ -55,7 +55,7 @@ class LightAudioPlayer internal constructor(
     private val _durationMs = MutableStateFlow(0L)
     private val _isPlaying = MutableStateFlow(false)
     private val _currentMediaItemIndex = MutableStateFlow(NO_MEDIA_ITEM)
-    private val _mediaItemCount = MutableStateFlow(0)
+    private val _queue = MutableStateFlow<List<LightQueueItem>>(emptyList())
     private val _error = MutableStateFlow<LightAudioError?>(null)
     private val commands = PendingPlayerCommands()
     private var positionJob: Job? = null
@@ -71,8 +71,8 @@ class LightAudioPlayer internal constructor(
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
     /** Current queue index, or `-1` when the queue is empty. */
     val currentMediaItemIndex: StateFlow<Int> = _currentMediaItemIndex.asStateFlow()
-    /** Number of items in the queue, including ones added by another controller. */
-    val mediaItemCount: StateFlow<Int> = _mediaItemCount.asStateFlow()
+    /** Queue entries visible to this player, including edits by another controller. */
+    val queue: StateFlow<List<LightQueueItem>> = _queue.asStateFlow()
     /** Current playback failure, or `null` after successful re-preparation. */
     val error: StateFlow<LightAudioError?> = _error.asStateFlow()
     /** Connection and command-acceptance lifecycle of this player. */
@@ -131,7 +131,7 @@ class LightAudioPlayer internal constructor(
         })
         val state = connectedPlayer.snapshotState()
         _currentMediaItemIndex.value = state.currentMediaItemIndex
-        _mediaItemCount.value = state.mediaItemCount
+        _queue.value = state.queue
         _positionMs.value = state.positionMs
         _durationMs.value = state.durationMs
         _isPlaying.value = state.isPlaying
@@ -385,7 +385,7 @@ class LightAudioPlayer internal constructor(
 
     private fun refreshQueueState(player: Player) {
         val state = player.snapshotState()
-        _mediaItemCount.value = state.mediaItemCount
+        _queue.value = state.queue
         _currentMediaItemIndex.value = state.currentMediaItemIndex
         _durationMs.value = state.durationMs
     }
@@ -433,7 +433,7 @@ internal fun skipPosition(positionMs: Long, durationMs: Long, deltaMs: Long): Lo
 
 internal data class ConnectedPlayerState(
     val currentMediaItemIndex: Int,
-    val mediaItemCount: Int,
+    val queue: List<LightQueueItem>,
     val positionMs: Long,
     val durationMs: Long,
     val isPlaying: Boolean,
@@ -441,10 +441,22 @@ internal data class ConnectedPlayerState(
 
 internal fun Player.snapshotState(): ConnectedPlayerState = ConnectedPlayerState(
     currentMediaItemIndex = if (mediaItemCount == 0) NO_MEDIA_ITEM else currentMediaItemIndex,
-    mediaItemCount = mediaItemCount,
+    queue = (0 until mediaItemCount).map { index -> getMediaItemAt(index).toLightQueueItem() },
     positionMs = currentPosition.coerceAtLeast(0L),
     durationMs = duration.validDuration(),
     isPlaying = isPlaying,
+)
+
+data class LightQueueItem(val id: String, val metadata: LightMediaMetadata)
+
+internal fun MediaItem.toLightQueueItem(): LightQueueItem = LightQueueItem(
+    id = mediaId,
+    metadata = LightMediaMetadata(
+        title = mediaMetadata.title?.toString().orEmpty(),
+        artist = mediaMetadata.artist?.toString(),
+        album = mediaMetadata.albumTitle?.toString(),
+        durationMs = mediaMetadata.durationMs,
+    ),
 )
 
 private fun Long.validDuration(): Long = takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L

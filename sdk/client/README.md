@@ -112,7 +112,7 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) : LightScree
 
 #### Player
 
-`LightAudioPlayer` plays files, bundled assets, and local or remote URLs. A player owns one queue and exposes its state through `StateFlow` objects: `positionMs`, `durationMs`, `isPlaying`, `currentMediaItemIndex`, `error`, and `availability`.
+`LightAudioPlayer` plays files, bundled assets, and local or remote URLs. A player owns one queue and exposes its state through `StateFlow` objects: `positionMs`, `durationMs`, `isPlaying`, `currentMediaItemIndex`, `queue`, `error`, and `availability`.
 `currentMediaItemIndex` is `NO_MEDIA_ITEM` while the queue is empty.
 
 ```kotlin
@@ -129,7 +129,7 @@ player.play()
 
 - Use `pause`, `stop`, and `seekTo` for transport controls.
 - `skipBack()` and `skipForward()` seek 15 seconds within the current item; `skipToPrevious()` and `skipToNext()` move through the queue.
-- Edit the queue in place with `addMediaItem`, `removeMediaItem`, `moveMediaItem`, and `replaceMediaItem`. `mediaItemCount` reports its length.
+- Edit the queue in place with `addMediaItem`, `removeMediaItem`, `moveMediaItem`, and `replaceMediaItem`. `queue.value` exposes item IDs and metadata; `queue.value.size` reports its length.
 - Set `speed` to change playback rate; values at or below zero clamp to the minimum supported rate.
 - Use `setSource(File)` as a convenience for a one-item local-file queue.
 - Playback requests audio focus automatically.
@@ -238,7 +238,7 @@ The player `availability` field exposes the connection lifecycle:
 
 `awaitReady()` suspends through initialization and returns `true` only when the player reaches `Ready`. Returns `false` if the player is released first.
 
-A non-empty queue belongs to the surviving service. Reuse it instead of setting the queue again, which would replace live playback. Position, duration, playing state, queue index, and playback error are populated when the controller connects.
+A non-empty queue belongs to the surviving service. Reuse it instead of setting the queue again, which would replace live playback. Position, duration, playing state, queue, queue index, and playback error are populated when the controller connects.
 Once the service stops, the next player is fresh and restoring its queue and position is the tool's responsibility.
 
 `release()` disconnects a detached handle but does not stop its playback.

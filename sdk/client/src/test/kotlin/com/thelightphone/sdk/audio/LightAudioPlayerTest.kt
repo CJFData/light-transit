@@ -1,8 +1,10 @@
 package com.thelightphone.sdk.audio
 
 import androidx.media3.common.C
-import androidx.media3.common.Player
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -54,9 +56,13 @@ class LightAudioPlayerTest {
         val livePlayer = Proxy.newProxyInstance(
             Player::class.java.classLoader,
             arrayOf(Player::class.java),
-        ) { _, method, _ ->
+        ) { _, method, args ->
             when (method.name) {
                 "getMediaItemCount" -> 3
+                "getMediaItemAt" -> MediaItem.Builder()
+                    .setMediaId("track-${args?.get(0)}")
+                    .setMediaMetadata(MediaMetadata.Builder().setTitle("Track").build())
+                    .build()
                 "getCurrentMediaItemIndex" -> 1
                 "getCurrentPosition" -> 12_345L
                 "getDuration" -> 60_000L
@@ -68,7 +74,7 @@ class LightAudioPlayerTest {
         assertEquals(
             ConnectedPlayerState(
                 currentMediaItemIndex = 1,
-                mediaItemCount = 3,
+                queue = (0 until 3).map { LightQueueItem("track-$it", LightMediaMetadata("Track")) },
                 positionMs = 12_345L,
                 durationMs = 60_000L,
                 isPlaying = true,
@@ -95,7 +101,7 @@ class LightAudioPlayerTest {
 
         val state = freshPlayer.snapshotState()
         assertEquals(NO_MEDIA_ITEM, state.currentMediaItemIndex)
-        assertEquals(0, state.mediaItemCount)
+        assertEquals(emptyList(), state.queue)
         assertEquals(0L, state.durationMs)
     }
 
@@ -112,6 +118,21 @@ class LightAudioPlayerTest {
             source = LightAudioSource.UrlSource("https://cdn.example.com/a.mp3?token=second"),
         )
         assertEquals(identified.stableId(), reResolved.stableId())
+    }
+
+    @Test
+    fun queueItemKeepsIdentityAndMetadataWithoutAUri() {
+        val mediaItem = MediaItem.Builder()
+            .setMediaId("album:track")
+            .setMediaMetadata(
+                MediaMetadata.Builder().setTitle("Track").setArtist("Artist").build()
+            )
+            .build()
+
+        assertEquals(
+            LightQueueItem("album:track", LightMediaMetadata("Track", artist = "Artist")),
+            mediaItem.toLightQueueItem(),
+        )
     }
 
     @Test
