@@ -152,7 +152,7 @@ val track = LightAudioItem(
 player.replaceMediaItem(index, track)
 ```
 
-An item without an `id` is identified by its location, which is right whenever the location is stable.
+An item without an `id` is identified and cached by its location. Rotating signed URLs need a stable explicit ID to reuse cached bytes. IDs must be globally unique for distinct audio, including across playlists.
 
 ##### Caching what you stream
 
@@ -167,32 +167,11 @@ val player = audio.newPlayer(
 )
 ```
 
-Caches are consulted in the order given, and only then the network. Newly streamed bytes are written to the size-limited cache, so at most one cache may be size-limited and a player without one caches nothing it streams. The SDK never writes to a cache that never evicts, since streaming into one would pin every byte played; filling it is the tool's decision, through a source factory or by writing the store directly.
+Caches are consulted in the order given, and only then the network. Newly streamed bytes are written to the size-limited cache, so at most one cache may be size-limited and a player without one caches nothing it streams. The SDK never writes to a cache that never evicts. The current API has no way to fill that store; it is reserved for future offline downloads.
 
 Cached bytes are filed under `LightAudioItem.id`, so an item whose URL is re-resolved still finds what it already cached. Files and bundled assets bypass caching, since they are already on the device.
 
 A detached session's caches are fixed when its player is built. Reconnecting with a different set throws `LightAudioPlayerException`, the same way a conflicting `LightAudioUsage` does.
-
-##### Audio media3 cannot fetch
-
-A cache says where bytes are kept, which is enough when media3 can fetch them itself. Audio that has to be decrypted or pulled out of a session your tool owns cannot be described that way, so supply the read path instead:
-
-```kotlin
-val player = audio.newPlayer(
-    caches = listOf(LightMediaCache("stream", LightCacheEviction.LeastRecentlyUsed(64L * 1024 * 1024))),
-    sourceFactory = { env ->
-        // env.caches["stream"] is already open; env.dataSourceFactory reads
-        // files, assets, and HTTP with no caching of its own.
-        MyDecryptingMediaSourceFactory(env.caches.getValue("stream"))
-    },
-)
-```
-
-A source factory replaces the SDK's HTTP read path. Requested caches are still opened and handed over in `env`. The one-size-limited-cache rule does not apply.
-
-Do not capture UI state: in detached playback the factory runs inside the service. Reconnecting to a live session must pass `sourceFactory = null`.
-
-This exposes media3 types (`MediaSource.Factory`, `Cache`, `DataSource.Factory`). Tools that only play URLs never need it.
 
 ##### Streaming DASH
 

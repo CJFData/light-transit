@@ -48,7 +48,6 @@ class LightAudioPlayer internal constructor(
     usage: LightAudioUsage = LightAudioUsage.Music,
     internal val playback: LightAudioPlayback = LightAudioPlayback.Attached,
     caches: List<LightMediaCache> = emptyList(),
-    sourceFactory: LightMediaSourceFactory? = null,
     private val onRelease: () -> Unit = {},
 ) {
     private val scopeJob = SupervisorJob()
@@ -83,7 +82,7 @@ class LightAudioPlayer internal constructor(
     init {
         when (playback) {
             LightAudioPlayback.Attached ->
-                connectPlayer(buildSdkExoPlayer(context, usage, caches, sourceFactory))
+                connectPlayer(buildSdkExoPlayer(context, usage, caches))
             LightAudioPlayback.Detached -> connectDetachedPlayer(context, usage)
         }
     }

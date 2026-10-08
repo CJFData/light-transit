@@ -1,7 +1,5 @@
 package com.thelightphone.sdk.audio
 
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -14,10 +12,6 @@ private val streamCache = LightMediaCache(
     eviction = LightCacheEviction.LeastRecentlyUsed(maxBytes = 256L * 1024 * 1024),
 )
 private val savedCache = LightMediaCache(name = "saved", eviction = LightCacheEviction.Never)
-
-/** Never invoked: these tests only care whether a factory was supplied. */
-@OptIn(UnstableApi::class)
-private val someSourceFactory = LightMediaSourceFactory { error("not built in this test") }
 
 class LightMediaCacheTest {
     @Test
@@ -42,38 +36,23 @@ class LightMediaCacheTest {
 
     @Test
     fun readThroughOrderAcceptsOneWritableCacheAheadOfSavedOnes() {
-        validateMediaCaches(emptyList(), hasCustomSource = false)
-        validateMediaCaches(listOf(streamCache, savedCache), hasCustomSource = false)
-        validateMediaCaches(listOf(savedCache), hasCustomSource = false)
+        validateMediaCaches(emptyList())
+        validateMediaCaches(listOf(streamCache, savedCache))
+        validateMediaCaches(listOf(savedCache))
     }
 
     @Test
     fun cachesCannotShareANameOrBothClaimTheStreamedBytes() {
         assertFailsWith<IllegalArgumentException> {
-            validateMediaCaches(listOf(savedCache, savedCache), hasCustomSource = false)
+            validateMediaCaches(listOf(savedCache, savedCache))
         }
         assertFailsWith<IllegalArgumentException> {
             validateMediaCaches(
                 listOf(streamCache, streamCache.copy(name = "other")),
-                hasCustomSource = false,
             )
         }
     }
 
-    @Test
-    fun aCustomSourceMayFillSeveralSizeLimitedCaches() {
-        validateMediaCaches(
-            listOf(streamCache, streamCache.copy(name = "other")),
-            hasCustomSource = true,
-        )
-    }
-
-    @Test
-    fun namesStayDistinctEvenWithACustomSource() {
-        assertFailsWith<IllegalArgumentException> {
-            validateMediaCaches(listOf(savedCache, savedCache), hasCustomSource = true)
-        }
-    }
 }
 
 class DetachedSessionCacheTest {
@@ -127,58 +106,5 @@ class DetachedSessionCacheTest {
 
         assertNull(state.activeCaches())
         assertTrue(isDetachedCacheCompatible(state.activeCaches(), listOf(savedCache)))
-    }
-}
-
-class DetachedSourceFactoryTest {
-    @Test
-    fun aLiveSessionAcceptsAReconnectOnlyWithoutAFactory() {
-        assertTrue(isDetachedSourceFactoryCompatible(null, someSourceFactory))
-        assertTrue(isDetachedSourceFactoryCompatible(true, null))
-        assertTrue(isDetachedSourceFactoryCompatible(false, null))
-        assertFalse(isDetachedSourceFactoryCompatible(true, someSourceFactory))
-        assertFalse(isDetachedSourceFactoryCompatible(false, someSourceFactory))
-    }
-
-    @Test
-    fun stagedFactorySurvivesUntilTheServiceBuildsItsPlayer() {
-        val state = DetachedSessionState()
-
-        state.stageSourceFactory(someSourceFactory)
-
-        assertEquals(someSourceFactory, state.stagedSourceFactory())
-        assertNull(state.activeSourceFactoryPresence())
-    }
-
-    @Test
-    fun adoptingRecordsPresenceAndReleasesTheFactory() {
-        val state = DetachedSessionState()
-        state.stageSourceFactory(someSourceFactory)
-
-        state.adoptSourceFactory(state.stagedSourceFactory() != null)
-
-        assertEquals(true, state.activeSourceFactoryPresence())
-        assertNull(state.stagedSourceFactory())
-    }
-
-    @Test
-    fun aRevivedSessionRecordsThatItWasBuiltWithoutAFactory() {
-        val state = DetachedSessionState()
-
-        state.adoptSourceFactory(state.stagedSourceFactory() != null)
-
-        assertEquals(false, state.activeSourceFactoryPresence())
-        assertFalse(isDetachedSourceFactoryCompatible(state.activeSourceFactoryPresence(), someSourceFactory))
-    }
-
-    @Test
-    fun clearingTheSessionLetsTheNextHandleBringAFactoryAgain() {
-        val state = DetachedSessionState()
-        state.adoptSourceFactory(true)
-
-        state.clearSession()
-
-        assertNull(state.activeSourceFactoryPresence())
-        assertTrue(isDetachedSourceFactoryCompatible(state.activeSourceFactoryPresence(), someSourceFactory))
     }
 }

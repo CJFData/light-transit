@@ -37,8 +37,7 @@ internal class LightAudioService : MediaSessionService() {
 
         // Whatever the starting handle staged. Empty if the system revived the service.
         val caches = detachedSessionState.stagedCaches()
-        val sourceFactory = detachedSessionState.stagedSourceFactory()
-        player = buildSdkExoPlayer(this, LightAudioUsage.Music, caches, sourceFactory).apply {
+        player = buildSdkExoPlayer(this, LightAudioUsage.Music, caches).apply {
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     refreshIdleStop()
@@ -46,7 +45,6 @@ internal class LightAudioService : MediaSessionService() {
             })
         }
         detachedSessionState.adoptCaches(caches)
-        detachedSessionState.adoptSourceFactory(sourceFactory != null)
         session = MediaSession.Builder(this, player)
             .setId(packageName)
             .setCallback(SessionCallback())

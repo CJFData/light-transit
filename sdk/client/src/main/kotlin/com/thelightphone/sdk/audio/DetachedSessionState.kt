@@ -1,8 +1,5 @@
 package com.thelightphone.sdk.audio
 
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
-
 /**
  * The one detached session a tool process can have.
  *
@@ -25,14 +22,11 @@ import androidx.media3.common.util.UnstableApi
  * would stop itself 60s into any pause with a tool still attached. The service
  * asserts its process on startup rather than letting that happen quietly.
  */
-@OptIn(UnstableApi::class)
 internal class DetachedSessionState {
     private var handleOpen = false
     private var sessionUsage: LightAudioUsage? = null
     private var stagedCaches: List<LightMediaCache> = emptyList()
     private var sessionCaches: List<LightMediaCache>? = null
-    private var stagedSourceFactory: LightMediaSourceFactory? = null
-    private var sessionHasSourceFactory: Boolean? = null
     private var handleChanged: (() -> Unit)? = null
 
     /** Takes the single detached handle, or fails when one is already out. */
@@ -77,8 +71,6 @@ internal class DetachedSessionState {
         sessionUsage = null
         sessionCaches = null
         stagedCaches = emptyList()
-        sessionHasSourceFactory = null
-        stagedSourceFactory = null
     }
 
     /** The live session's usage, or `null` when no session is running. */
@@ -106,25 +98,6 @@ internal class DetachedSessionState {
     @Synchronized
     fun activeCaches(): List<LightMediaCache>? = sessionCaches
 
-    /** Staged for the service to read in `onCreate`. */
-    @Synchronized
-    fun stageSourceFactory(factory: LightMediaSourceFactory?) {
-        stagedSourceFactory = factory
-    }
-
-    @Synchronized
-    fun stagedSourceFactory(): LightMediaSourceFactory? = stagedSourceFactory
-
-    /** Records whether a factory was used, then drops the lambda. */
-    @Synchronized
-    fun adoptSourceFactory(present: Boolean) {
-        sessionHasSourceFactory = present
-        stagedSourceFactory = null
-    }
-
-    /** Whether the live session has a custom read path, or `null` when idle. */
-    @Synchronized
-    fun activeSourceFactoryPresence(): Boolean? = sessionHasSourceFactory
 }
 
 internal val detachedSessionState = DetachedSessionState()
@@ -138,10 +111,3 @@ internal fun isDetachedCacheCompatible(
     activeCaches: List<LightMediaCache>?,
     requestedCaches: List<LightMediaCache>,
 ): Boolean = activeCaches == null || activeCaches == requestedCaches
-
-/** Live sessions already have a factory; reconnect must pass none. */
-@OptIn(UnstableApi::class)
-internal fun isDetachedSourceFactoryCompatible(
-    activeSourceFactoryPresence: Boolean?,
-    requestedFactory: LightMediaSourceFactory?,
-): Boolean = activeSourceFactoryPresence == null || requestedFactory == null

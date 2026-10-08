@@ -36,21 +36,20 @@ sealed interface LightCacheEviction {
     }
 
     /**
-     * Discards nothing. The SDK never writes here during streaming; a
-     * [LightMediaSourceFactory] may.
+     * Discards nothing. The SDK does not write here during streaming; nothing
+     * in the current API fills this cache yet.
      */
     data object Never : LightCacheEviction
 }
 
-/** Distinct names always. At most one LRU unless [hasCustomSource] is writing. */
-internal fun validateMediaCaches(caches: List<LightMediaCache>, hasCustomSource: Boolean) {
+/** Distinct names and at most one size-limited cache. */
+internal fun validateMediaCaches(caches: List<LightMediaCache>) {
     val names = caches.map(LightMediaCache::name)
     require(names.size == names.toSet().size) {
         "Each cache must have a distinct name, but got $names"
     }
     require(
-        hasCustomSource ||
-            caches.count { it.eviction is LightCacheEviction.LeastRecentlyUsed } <= 1
+        caches.count { it.eviction is LightCacheEviction.LeastRecentlyUsed } <= 1
     ) {
         "At most one cache may be size-limited, since that is the one written while streaming"
     }

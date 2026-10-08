@@ -21,23 +21,18 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Builds the player the SDK owns, in the one place both playback modes reach.
  *
- * A [sourceFactory] replaces the SDK HTTP path. Requested caches still open
- * and are handed to the factory.
+ * Requested caches wrap HTTP before the platform data source.
  */
 @OptIn(UnstableApi::class)
 internal fun buildSdkExoPlayer(
     context: Context,
     usage: LightAudioUsage,
     caches: List<LightMediaCache>,
-    sourceFactory: LightMediaSourceFactory? = null,
 ): ExoPlayer {
     val builder = ExoPlayer.Builder(context)
     val opened = caches.associate { it.name to mediaCacheStore.open(context, it) }
-    when {
-        sourceFactory != null -> builder.setMediaSourceFactory(
-            sourceFactory.create(LightMediaEnv(opened, platformDataSourceFactory(context)))
-        )
-        caches.isNotEmpty() -> builder.setMediaSourceFactory(
+    if (caches.isNotEmpty()) {
+        builder.setMediaSourceFactory(
             DefaultMediaSourceFactory(cachingDataSourceFactory(context, caches, opened))
         )
     }
@@ -45,11 +40,6 @@ internal fun buildSdkExoPlayer(
         setAudioAttributes(usage.toMedia3AudioAttributes(), true)
     }
 }
-
-/** Everything the platform can read without help, and nothing cached. */
-@OptIn(UnstableApi::class)
-private fun platformDataSourceFactory(context: Context): DataSource.Factory =
-    DefaultDataSource.Factory(context, DefaultHttpDataSource.Factory())
 
 /**
  * Caches wrap HTTP only; [DefaultDataSource] wraps them so local files are

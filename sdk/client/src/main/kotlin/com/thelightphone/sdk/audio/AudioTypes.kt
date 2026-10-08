@@ -216,8 +216,9 @@ sealed interface LightAudioSource {
  *
  * @property source playable media location
  * @property metadata descriptive values forwarded to playback surfaces
- * @property id stable identity, unique within the queue. Use when [source] can
- *   change while naming the same audio. Defaults to the source location.
+ * @property id stable identity and cache key, globally unique for each distinct
+ *   piece of audio and stable over time. Defaults to the source URL; rotating
+ *   signed URLs need an explicit id to reuse cached bytes.
  */
 data class LightAudioItem(
     val source: LightAudioSource,

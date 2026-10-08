@@ -2,19 +2,15 @@ package com.thelightphone.sdk.audio
 
 import android.content.Context
 import android.media.AudioManager
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
 import com.thelightphone.sdk.SealedLightActivity
 
 interface LightAudio {
     val capabilities: AudioCapabilities
 
-    @OptIn(UnstableApi::class)
     fun newPlayer(
         usage: LightAudioUsage = LightAudioUsage.Music,
         playback: LightAudioPlayback = LightAudioPlayback.Attached,
         caches: List<LightMediaCache> = emptyList(),
-        sourceFactory: LightMediaSourceFactory? = null,
     ): LightAudioPlayer
     fun newRecorder(cfg: RecorderConfig = RecorderConfig()): LightAudioRecorder
     fun newCapture(cfg: CaptureConfig = CaptureConfig()): LightAudioCapture
@@ -37,24 +33,19 @@ value class DefaultLightAudio(
      * Create a player that requests audio focus appropriate for [usage], reading
      * through [caches] in the order given before reaching the network.
      *
-     * Pass a [sourceFactory] for audio media3 cannot fetch on its own; it
-     * replaces that read path and receives the opened [caches].
-     *
      * Only one [LightAudioPlayback.Detached] player handle may exist in the
      * process at a time. Reconnecting to a live detached session cannot change
      * where that session's player reads from, so [caches] must match the ones it
-     * was built with and [sourceFactory] must be null.
+     * was built with.
      */
-    @OptIn(UnstableApi::class)
     override fun newPlayer(
         usage: LightAudioUsage,
         playback: LightAudioPlayback,
         caches: List<LightMediaCache>,
-        sourceFactory: LightMediaSourceFactory?,
     ): LightAudioPlayer {
-        validateMediaCaches(caches, hasCustomSource = sourceFactory != null)
+        validateMediaCaches(caches)
         if (playback == LightAudioPlayback.Attached) {
-            return LightAudioPlayer(sealedActivity.activity, usage, playback, caches, sourceFactory)
+            return LightAudioPlayer(sealedActivity.activity, usage, playback, caches)
         }
 
         sealedActivity.activity.requireDetachedAudioCapability()
@@ -73,29 +64,18 @@ value class DefaultLightAudio(
                     "stop the detached session first."
             )
         }
-        val activeSourceFactory = detachedSessionState.activeSourceFactoryPresence()
-        if (!isDetachedSourceFactoryCompatible(activeSourceFactory, sourceFactory)) {
-            throw LightAudioPlayerException(
-                "Detached audio already built its player" +
-                    (if (activeSourceFactory == true) " with a source factory" else "") +
-                    ", so a reconnecting player cannot supply one. " +
-                    "Reconnect without a sourceFactory or stop the detached session first."
-            )
-        }
         if (!detachedSessionState.openHandle()) {
             throw LightAudioPlayerException(
                 "Only one detached LightAudioPlayer may exist at a time; release the existing player first"
             )
         }
         detachedSessionState.stageCaches(caches)
-        detachedSessionState.stageSourceFactory(sourceFactory)
         return try {
             LightAudioPlayer(
                 sealedActivity.activity,
                 usage,
                 playback,
                 caches,
-                sourceFactory,
                 detachedSessionState::closeHandle,
             )
         } catch (error: Throwable) {

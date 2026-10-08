@@ -62,10 +62,9 @@ dependencies {
     api(libs.androidx.room.runtime)
     api(libs.androidx.room.ktx)
     implementation(libs.androidx.work.runtime)
-    // api: LightMediaSourceFactory exposes media3 types to tools.
-    api(libs.androidx.media3.common)
-    api(libs.androidx.media3.exoplayer)
-    api(libs.androidx.media3.datasource)
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.datasource)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.database)
     api(libs.light.toolmanager.client)
