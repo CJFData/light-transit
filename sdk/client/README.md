@@ -265,27 +265,28 @@ capture.asFlow().collect { pcm ->
 
 ### Vibration
 
-`LightVibrator` plays vibration waveforms. `DefaultLightVibrator` is constructed from the `SealedLightActivity` your screen receives, and holds only the application context, so it can outlive the screen (e.g. to vibrate from a session that keeps running after the user navigates away).
+Use `sealedActivity.vibrator` for touch feedback or vibration waveforms. It holds only the application context, so it can outlive the screen.
 
 ```kotlin
 import kotlin.time.Duration.Companion.milliseconds
 
-val vibrator: LightVibrator = DefaultLightVibrator(sealedActivity)
+val vibrator: LightVibrator = sealedActivity.vibrator
 
 vibrator.click() // short touch feedback
-vibrator.vibrateForDuration(100.milliseconds) // custom touch feedback
+vibrator.vibrate(100.milliseconds) // default intensity
+vibrator.vibrate(100.milliseconds, VibrationAmplitude(128)) // custom intensity
 
 vibrator.vibrate(
     LightVibrationWaveform(
-        timingsMs = longArrayOf(100, 400, 500),
-        amplitudes = intArrayOf(255, 120, 40),
+        durations = arrayOf(100.milliseconds, 400.milliseconds, 500.milliseconds),
+        amplitudes = arrayOf(VibrationAmplitude(255), VibrationAmplitude(120), VibrationAmplitude(40)),
     ),
     usage = LightVibrationUsage.Alarm,
 )
 ```
 
-- Segment `i` lasts `timingsMs[i]` at `amplitudes[i]`, where `0` is off and `255` is the motor's maximum.
-- Without amplitude control (`hasAmplitudeControl == false`), each segment becomes an on/off pulse whose on-time is proportional to its amplitude.
+- Segment `i` lasts `durations[i]` at `amplitudes[i]`, where `0` is off and `255` is the motor's maximum.
+- Without motor amplitude control, each segment becomes an on/off pulse whose on-time is proportional to its amplitude.
 - `LightVibrationUsage.Touch` is for direct touch feedback. `LightVibrationUsage.Alarm` is for alarms and timers the user set, and vibrates while the screen is off.
 - `cancel()` stops the current vibration. Devices without a vibrator ignore all calls.
 - The `android.permission.VIBRATE` permission is merged from the SDK; listing it in `lighttool.toml` documents the tool's intent.

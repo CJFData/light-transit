@@ -4,13 +4,14 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.time.Duration.Companion.milliseconds
 
 class LightVibratorTest {
     @Test
     fun pulseWidthTimingsStartOffThenAlternateOnOff() {
         val waveform = LightVibrationWaveform(
-            timingsMs = longArrayOf(100L, 100L, 100L),
-            amplitudes = intArrayOf(255, 51, 0),
+            durations = arrayOf(100.milliseconds, 100.milliseconds, 100.milliseconds),
+            amplitudes = arrayOf(VibrationAmplitude(255), VibrationAmplitude(51), VibrationAmplitude(0)),
         )
 
         assertContentEquals(
@@ -22,24 +23,37 @@ class LightVibratorTest {
     @Test
     fun pulseWidthTimingsKeepTotalDuration() {
         val waveform = LightVibrationWaveform(
-            timingsMs = longArrayOf(50L, 70L, 30L),
-            amplitudes = intArrayOf(200, 99, 7),
+            durations = arrayOf(50.milliseconds, 70.milliseconds, 30.milliseconds),
+            amplitudes = arrayOf(VibrationAmplitude(200), VibrationAmplitude(99), VibrationAmplitude(7)),
         )
 
-        assertEquals(waveform.durationMs, pulseWidthTimings(waveform).sum())
+        assertEquals(waveform.duration.inWholeMilliseconds, pulseWidthTimings(waveform).sum())
     }
 
     @Test
     fun waveformRejectsMismatchedArrays() {
         assertFailsWith<IllegalArgumentException> {
-            LightVibrationWaveform(longArrayOf(10L, 10L), intArrayOf(255))
+            LightVibrationWaveform(
+                arrayOf(10.milliseconds, 10.milliseconds),
+                arrayOf(VibrationAmplitude(255)),
+            )
         }
     }
 
     @Test
-    fun waveformRejectsOutOfRangeAmplitude() {
+    fun amplitudeRejectsOutOfRangeValue() {
         assertFailsWith<IllegalArgumentException> {
-            LightVibrationWaveform(longArrayOf(10L), intArrayOf(256))
+            VibrationAmplitude(256)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            VibrationAmplitude(-1)
+        }
+    }
+
+    @Test
+    fun waveformRejectsNegativeDuration() {
+        assertFailsWith<IllegalArgumentException> {
+            LightVibrationWaveform(arrayOf((-1).milliseconds), arrayOf(VibrationAmplitude(255)))
         }
     }
 }

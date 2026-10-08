@@ -8,6 +8,16 @@ import android.os.VibratorManager
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
+@JvmInline
+value class VibrationAmplitude(val value: Int) {
+    init {
+        require(value in 0..255) { "Amplitude must be in 0..255" }
+    }
+}
+
+typealias DurationArray = Array<Duration>
+typealias VibrationAmplitudeArray = Array<VibrationAmplitude>
+
 /** Why the tool vibrates, so the platform applies the matching user settings. */
 enum class LightVibrationUsage {
     /** Feedback for a direct touch. */
@@ -17,35 +27,26 @@ enum class LightVibrationUsage {
 }
 
 /**
- * Segment `i` lasts `timingsMs[i]` milliseconds at intensity `amplitudes[i]`,
+ * Segment `i` lasts `durations[i]` at intensity `amplitudes[i]`,
  * where `0` is off and `255` is the motor's maximum.
  */
 class LightVibrationWaveform(
-    val timingsMs: LongArray,
-    val amplitudes: IntArray,
+    val durations: DurationArray,
+    val amplitudes: VibrationAmplitudeArray,
 ) {
     init {
-        require(timingsMs.size == amplitudes.size) { "Each timing needs one amplitude" }
-        require(timingsMs.all { it >= 0L }) { "Timings must not be negative" }
-        require(amplitudes.all { it in 0..MAX_AMPLITUDE }) { "Amplitudes must be in 0..$MAX_AMPLITUDE" }
+        require(durations.size == amplitudes.size) { "Each duration needs one amplitude" }
+        require(durations.all { it >= Duration.ZERO }) { "Durations must not be negative" }
     }
 
-    val durationMs: Long get() = timingsMs.sum()
-
-    companion object {
-        const val MAX_AMPLITUDE = 255
-    }
+    val duration: Duration get() = durations.fold(Duration.ZERO, Duration::plus)
 }
 
 interface LightVibrator {
-    /**
-     * Whether the motor can vary its intensity. Without it, waveforms are
-     * approximated by on/off pulses whose on-time is proportional to amplitude.
-     */
-    val hasAmplitudeControl: Boolean
     fun click()
-    fun vibrateForDuration(duration: Duration)
-    fun vibrate(waveform: LightVibrationWaveform, usage: LightVibrationUsage = LightVibrationUsage.Touch)
+    fun vibrate(duration: Duration)
+    fun vibrate(duration: Duration, amplitude: VibrationAmplitude)
+    fun vibrate(waveform: LightVibrationWaveform, usage: LightVibrationUsage)
     fun cancel()
 }
 
@@ -59,12 +60,9 @@ class ContextLightVibrator(context: Context) : LightVibrator {
         ?.defaultVibrator
         ?.takeIf { it.hasVibrator() }
 
-    override val hasAmplitudeControl: Boolean
-        get() = vibrator?.hasAmplitudeControl() == true
+    override fun click() = vibrate(45.milliseconds)
 
-    override fun click() = vibrateForDuration(45.milliseconds)
-
-    override fun vibrateForDuration(duration: Duration) {
+    override fun vibrate(duration: Duration) {
         val vibrator = vibrator ?: return
         val durationMs = duration.inWholeMilliseconds
         if (durationMs <= 0L) return
@@ -74,11 +72,30 @@ class ContextLightVibrator(context: Context) : LightVibrator {
         )
     }
 
+    override fun vibrate(duration: Duration, amplitude: VibrationAmplitude) {
+        val vibrator = vibrator ?: return
+        val durationMs = duration.inWholeMilliseconds
+        if (durationMs <= 0L || amplitude.value == 0) return
+        val effect = if (vibrator.hasAmplitudeControl()) {
+            VibrationEffect.createOneShot(durationMs, amplitude.value)
+        } else {
+            VibrationEffect.createWaveform(
+                pulseWidthTimings(LightVibrationWaveform(arrayOf(duration), arrayOf(amplitude))),
+                NO_REPEAT,
+            )
+        }
+        vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_TOUCH))
+    }
+
     override fun vibrate(waveform: LightVibrationWaveform, usage: LightVibrationUsage) {
         val vibrator = vibrator ?: return
-        if (waveform.durationMs <= 0L) return
+        if (waveform.duration <= Duration.ZERO) return
         val effect = if (vibrator.hasAmplitudeControl()) {
-            VibrationEffect.createWaveform(waveform.timingsMs, waveform.amplitudes, NO_REPEAT)
+            VibrationEffect.createWaveform(
+                waveform.durations.map(Duration::inWholeMilliseconds).toLongArray(),
+                waveform.amplitudes.map(VibrationAmplitude::value).toIntArray(),
+                NO_REPEAT,
+            )
         } else {
             VibrationEffect.createWaveform(pulseWidthTimings(waveform), NO_REPEAT)
         }
@@ -106,8 +123,9 @@ private fun LightVibrationUsage.toPlatformUsage(): Int = when (this) {
  */
 internal fun pulseWidthTimings(waveform: LightVibrationWaveform): LongArray {
     val timings = mutableListOf(0L)
-    waveform.timingsMs.forEachIndexed { index, durationMs ->
-        val onMs = durationMs * waveform.amplitudes[index] / LightVibrationWaveform.MAX_AMPLITUDE
+    waveform.durations.forEachIndexed { index, duration ->
+        val durationMs = duration.inWholeMilliseconds
+        val onMs = durationMs * waveform.amplitudes[index].value / 255
         timings += onMs
         timings += durationMs - onMs
     }
