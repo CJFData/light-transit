@@ -49,7 +49,7 @@ def test_image_inventory_collects_every_cached_aar(tmp_path: Path) -> None:
     doc = native.image_inventory(tmp_path)
 
     assert doc == {
-        "schema_version": 1,
+        "schemaVersion": 1,
         "libraries": {"lib/arm64-v8a/libx.so": sorted([_sha(b"v1"), _sha(b"v2")])},
     }
 
@@ -122,11 +122,11 @@ def test_build_inventory_adds_allowlisted_served_aars_from_upstream() -> None:
     "document",
     [
         {},
-        {"schema_version": 2, "libraries": {}},
-        {"schema_version": 1, "libraries": []},
-        {"schema_version": 1, "libraries": {"assets/x.so": ["0" * 64]}},
-        {"schema_version": 1, "libraries": {"lib/arm64-v8a/x.so": "0" * 64}},
-        {"schema_version": 1, "libraries": {"lib/arm64-v8a/x.so": ["nothex"]}},
+        {"schemaVersion": 2, "libraries": {}},
+        {"schemaVersion": 1, "libraries": []},
+        {"schemaVersion": 1, "libraries": {"assets/x.so": ["0" * 64]}},
+        {"schemaVersion": 1, "libraries": {"lib/arm64-v8a/x.so": "0" * 64}},
+        {"schemaVersion": 1, "libraries": {"lib/arm64-v8a/x.so": ["nothex"]}},
     ],
 )
 def test_build_inventory_rejects_malformed_image_inventory(document: dict) -> None:
