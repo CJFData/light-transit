@@ -136,6 +136,28 @@ class LightAudioPlayerTest {
     }
 
     @Test
+    fun sessionPlayPreparesAnIdlePlayerBeforePlaying() {
+        val calls = mutableListOf<String>()
+        val idlePlayer = Proxy.newProxyInstance(
+            Player::class.java.classLoader,
+            arrayOf(Player::class.java),
+        ) { _, method, _ ->
+            when (method.name) {
+                "getPlaybackState" -> Player.STATE_IDLE
+                "prepare", "play" -> {
+                    calls += method.name
+                    null
+                }
+                else -> null
+            }
+        } as Player
+
+        PreparingPlayer(idlePlayer).play()
+
+        assertEquals(listOf("prepare", "play"), calls)
+    }
+
+    @Test
     fun commandsRunImmediatelyAfterReady() {
         val commands = PendingPlayerCommands()
         val calls = mutableListOf<Int>()

@@ -209,7 +209,7 @@ player.error.collect { error ->
 
 When an item fails, playback stops rather than skipping to the next item.
 The SDK does not advance automatically, because unplayable content would advance in a loop.
-Setting a queue again or selecting a healthy item clears `error`.
+Setting a queue again or replacing a failed item and calling `play()` clears `error` through re-preparation. Queue edits alone do not start playback.
 
 ##### Detached playback and reconnecting
 

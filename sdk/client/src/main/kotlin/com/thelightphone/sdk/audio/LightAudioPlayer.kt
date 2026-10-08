@@ -213,13 +213,12 @@ class LightAudioPlayer internal constructor(
     }
 
     /**
-     * Appends [item] to the queue, preparing playback when the queue was idle.
+     * Appends [item] to the queue.
      */
     fun addMediaItem(item: LightAudioItem) {
         val mediaItem = item.toMediaItem()
         commands.dispatch { player ->
             player.addMediaItem(mediaItem)
-            prepareIfIdle(player)
         }
     }
 
@@ -234,7 +233,6 @@ class LightAudioPlayer internal constructor(
         val mediaItem = item.toMediaItem()
         commands.dispatch { player ->
             player.addMediaItem(index.coerceAtMost(player.mediaItemCount), mediaItem)
-            prepareIfIdle(player)
         }
     }
 
@@ -289,7 +287,10 @@ class LightAudioPlayer internal constructor(
      * Observe [isPlaying] for the actual playback state.
      */
     fun play() {
-        commands.dispatch(Player::play)
+        commands.dispatch { player ->
+            if (player.playbackState == Player.STATE_IDLE) player.prepare()
+            player.play()
+        }
     }
 
     /** Pauses playback. */
@@ -300,6 +301,7 @@ class LightAudioPlayer internal constructor(
     /** Stops playback and returns to position zero. */
     fun stop() {
         commands.dispatch { player ->
+            player.playWhenReady = false
             player.stop()
             player.seekTo(0L)
             updatePosition(player)
@@ -390,10 +392,6 @@ class LightAudioPlayer internal constructor(
         _durationMs.value = state.durationMs
     }
 
-    /** Prepare after a mutation if the player is idle. */
-    private fun prepareIfIdle(player: Player) {
-        if (player.playbackState == Player.STATE_IDLE) player.prepare()
-    }
 }
 
 internal suspend fun awaitPlayerReady(
