@@ -26,6 +26,7 @@ import com.thelightphone.sdk.audio.LightAudioErrorKind
 import com.thelightphone.sdk.audio.LightAudioItem
 import com.thelightphone.sdk.audio.LightAudioPlayback
 import com.thelightphone.sdk.audio.LightAudioPlayer
+import com.thelightphone.sdk.audio.LightAudioPlayerAvailability
 import com.thelightphone.sdk.audio.LightAudioSource
 import com.thelightphone.sdk.audio.LightCacheEviction
 import com.thelightphone.sdk.audio.LightMediaCache
@@ -133,6 +134,9 @@ class PlayerViewModel(
     val currentIndex = playerFlow
         .flatMapLatest { it.currentMediaItemIndex }
         .stateIn(viewModelScope, SharingStarted.Eagerly, currentPlayer.currentMediaItemIndex.value)
+    val availability = playerFlow
+        .flatMapLatest { it.availability }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, currentPlayer.availability.value)
     val positionMs = playerFlow
         .flatMapLatest { it.positionMs }
         .stateIn(viewModelScope, SharingStarted.Eagerly, currentPlayer.positionMs.value)
@@ -172,41 +176,46 @@ class PlayerViewModel(
     }
 
     fun togglePlayPause() {
+        if (!canCommand()) return
         if (isPlaying.value) currentPlayer.pause() else currentPlayer.play()
     }
 
-    fun skipBack() = currentPlayer.skipBack()
-    fun skipForward() = currentPlayer.skipForward()
-    fun skipToPrevious() = currentPlayer.skipToPrevious()
-    fun skipToNext() = currentPlayer.skipToNext()
+    fun skipBack() { if (canCommand()) currentPlayer.skipBack() }
+    fun skipForward() { if (canCommand()) currentPlayer.skipForward() }
+    fun skipToPrevious() { if (canCommand()) currentPlayer.skipToPrevious() }
+    fun skipToNext() { if (canCommand()) currentPlayer.skipToNext() }
 
     fun addToQueue(clip: AudioClip) {
-        currentPlayer.addMediaItem(clip.toLightAudioItem())
+        if (canCommand()) currentPlayer.addMediaItem(clip.toLightAudioItem())
     }
 
     fun moveUp(index: Int) {
-        if (index > 0) currentPlayer.moveMediaItem(index, index - 1)
+        if (canCommand() && index > 0) currentPlayer.moveMediaItem(index, index - 1)
     }
 
     fun moveDown(index: Int) {
-        if (index < queue.value.lastIndex) currentPlayer.moveMediaItem(index, index + 1)
+        if (canCommand() && index < queue.value.lastIndex) currentPlayer.moveMediaItem(index, index + 1)
     }
 
     fun removeFromQueue(index: Int) {
-        currentPlayer.removeMediaItem(index)
+        if (canCommand()) currentPlayer.removeMediaItem(index)
     }
 
     fun repairFailedSource() {
+        if (!canCommand()) return
         val index = repairIndex(error.value, queue.value) ?: return
         val expired = clips.first { it.id == SampleAudioCatalog.EXPIRED_DAWN_ID }
         currentPlayer.replaceMediaItem(index, expired.repairedDawnItem())
         currentPlayer.play()
     }
 
+    private fun canCommand(): Boolean = currentPlayer.availability.value != LightAudioPlayerAvailability.Refused &&
+        currentPlayer.availability.value != LightAudioPlayerAvailability.Released
+
     fun cycleSpeed() {
         val next = SPEEDS[(SPEEDS.indexOf(speed.value) + 1).mod(SPEEDS.size)]
         _speed.value = next
-        currentPlayer.speed = next
+        if (canCommand()) currentPlayer.speed = next
     }
 
     fun toggleDetached() {
@@ -220,8 +229,10 @@ class PlayerViewModel(
 
     private fun replacePlayer(nextPlayback: LightAudioPlayback) {
         val oldPlayer = currentPlayer
-        oldPlayer.stop()
-        oldPlayer.setMediaQueue(emptyList())
+        if (canCommand()) {
+            oldPlayer.stop()
+            oldPlayer.setMediaQueue(emptyList())
+        }
         oldPlayer.release()
 
         val nextPlayer = audio.newPlayer(playerSpec(nextPlayback)).apply {
@@ -303,6 +314,7 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) :
         val current by viewModel.currentItem.collectAsState()
         val queue by viewModel.queue.collectAsState()
         val currentIndex by viewModel.currentIndex.collectAsState()
+        val availability by viewModel.availability.collectAsState()
         val position by viewModel.positionMs.collectAsState()
         val duration by viewModel.durationMs.collectAsState()
         val playing by viewModel.isPlaying.collectAsState()
@@ -380,6 +392,12 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) :
                         )
                     }
                 }
+                LightText(
+                    text = "CONNECTION: ${availability.name.uppercase()} · STREAM CACHE: 64 MB",
+                    variant = LightTextVariant.Superfine,
+                    align = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Row(
                     Modifier
                         .fillMaxWidth()
