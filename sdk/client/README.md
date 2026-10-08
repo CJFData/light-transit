@@ -268,7 +268,12 @@ capture.asFlow().collect { pcm ->
 `LightVibrator` plays vibration waveforms. `DefaultLightVibrator` is constructed from the `SealedLightActivity` your screen receives, and holds only the application context, so it can outlive the screen (e.g. to vibrate from a session that keeps running after the user navigates away).
 
 ```kotlin
+import kotlin.time.Duration.Companion.milliseconds
+
 val vibrator: LightVibrator = DefaultLightVibrator(sealedActivity)
+
+vibrator.click() // short touch feedback
+vibrator.vibrateForDuration(100.milliseconds) // custom touch feedback
 
 vibrator.vibrate(
     LightVibrationWaveform(

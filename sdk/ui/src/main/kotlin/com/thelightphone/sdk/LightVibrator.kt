@@ -1,9 +1,12 @@
 package com.thelightphone.sdk
 
+import android.content.Context
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Why the tool vibrates, so the platform applies the matching user settings. */
 enum class LightVibrationUsage {
@@ -40,6 +43,8 @@ interface LightVibrator {
      * approximated by on/off pulses whose on-time is proportional to amplitude.
      */
     val hasAmplitudeControl: Boolean
+    fun click()
+    fun vibrateForDuration(duration: Duration)
     fun vibrate(waveform: LightVibrationWaveform, usage: LightVibrationUsage = LightVibrationUsage.Touch)
     fun cancel()
 }
@@ -48,14 +53,26 @@ interface LightVibrator {
  * Holds only the application context, so it may outlive the screen that
  * created it. Does nothing on devices without a vibrator.
  */
-class DefaultLightVibrator(sealedActivity: SealedLightActivity) : LightVibrator {
-    private val vibrator: Vibrator? = sealedActivity.activity.applicationContext
+class ContextLightVibrator(context: Context) : LightVibrator {
+    private val vibrator: Vibrator? = context.applicationContext
         .getSystemService(VibratorManager::class.java)
         ?.defaultVibrator
         ?.takeIf { it.hasVibrator() }
 
     override val hasAmplitudeControl: Boolean
         get() = vibrator?.hasAmplitudeControl() == true
+
+    override fun click() = vibrateForDuration(45.milliseconds)
+
+    override fun vibrateForDuration(duration: Duration) {
+        val vibrator = vibrator ?: return
+        val durationMs = duration.inWholeMilliseconds
+        if (durationMs <= 0L) return
+        vibrator.vibrate(
+            VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE),
+            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_TOUCH),
+        )
+    }
 
     override fun vibrate(waveform: LightVibrationWaveform, usage: LightVibrationUsage) {
         val vibrator = vibrator ?: return
