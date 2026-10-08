@@ -10,8 +10,8 @@ class LightVibratorTest {
     @Test
     fun pulseWidthTimingsStartOffThenAlternateOnOff() {
         val waveform = LightVibrationWaveform(
-            durations = arrayOf(100.milliseconds, 100.milliseconds, 100.milliseconds),
-            amplitudes = arrayOf(VibrationAmplitude(255), VibrationAmplitude(51), VibrationAmplitude(0)),
+            durations = listOf(100.milliseconds, 100.milliseconds, 100.milliseconds),
+            amplitudes = vibrationAmplitudesOf(255, 51, 0),
         )
 
         assertContentEquals(
@@ -23,19 +23,19 @@ class LightVibratorTest {
     @Test
     fun pulseWidthTimingsKeepTotalDuration() {
         val waveform = LightVibrationWaveform(
-            durations = arrayOf(50.milliseconds, 70.milliseconds, 30.milliseconds),
-            amplitudes = arrayOf(VibrationAmplitude(200), VibrationAmplitude(99), VibrationAmplitude(7)),
+            durations = listOf(50.milliseconds, 70.milliseconds, 30.milliseconds),
+            amplitudes = vibrationAmplitudesOf(200, 99, 7),
         )
 
         assertEquals(waveform.duration.inWholeMilliseconds, waveform.pulseWidthTimings().sum())
     }
 
     @Test
-    fun waveformRejectsMismatchedArrays() {
+    fun waveformRejectsMismatchedLists() {
         assertFailsWith<IllegalArgumentException> {
             LightVibrationWaveform(
-                arrayOf(10.milliseconds, 10.milliseconds),
-                arrayOf(VibrationAmplitude(255)),
+                listOf(10.milliseconds, 10.milliseconds),
+                vibrationAmplitudesOf(255),
             )
         }
     }
@@ -53,7 +53,7 @@ class LightVibratorTest {
     @Test
     fun waveformRejectsNegativeDuration() {
         assertFailsWith<IllegalArgumentException> {
-            LightVibrationWaveform(arrayOf((-1).milliseconds), arrayOf(VibrationAmplitude(255)))
+            LightVibrationWaveform(listOf((-1).milliseconds), vibrationAmplitudesOf(255))
         }
     }
 }

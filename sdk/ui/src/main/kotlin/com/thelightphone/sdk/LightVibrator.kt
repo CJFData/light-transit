@@ -15,11 +15,8 @@ value class VibrationAmplitude(val value: Int) {
     }
 }
 
-typealias DurationArray = Array<Duration>
-typealias VibrationAmplitudeArray = Array<VibrationAmplitude>
-
-fun vibrationAmplitudeArrayOf(vararg values: Int): VibrationAmplitudeArray =
-    Array(values.size) { VibrationAmplitude(values[it]) }
+fun vibrationAmplitudesOf(vararg values: Int): List<VibrationAmplitude> =
+    values.map(::VibrationAmplitude)
 
 enum class LightVibrationUsage {
     /** Feedback for a direct touch. */
@@ -33,8 +30,8 @@ enum class LightVibrationUsage {
  * where `0` is off and `255` is the motor's maximum.
  */
 class LightVibrationWaveform(
-    val durations: DurationArray,
-    val amplitudes: VibrationAmplitudeArray,
+    val durations: List<Duration>,
+    val amplitudes: List<VibrationAmplitude>,
 ) {
     init {
         require(durations.size == amplitudes.size) { "Each duration needs one amplitude" }
@@ -78,7 +75,7 @@ class ContextLightVibrator(context: Context) : LightVibrator {
             VibrationEffect.createOneShot(durationMs, amplitude.value)
         } else {
             VibrationEffect.createWaveform(
-                LightVibrationWaveform(arrayOf(duration), arrayOf(amplitude)).pulseWidthTimings(),
+                LightVibrationWaveform(listOf(duration), listOf(amplitude)).pulseWidthTimings(),
                 NO_REPEAT,
             )
         }
