@@ -11,13 +11,15 @@ room = "2.7.0"
 work = "2.10.0"
 media3 = "1.10.1"
 kotlinxDatetime = "0.8.0"
-bouncycastle = "1.85"
+bouncycastle = "1.86"
 sol4k = "0.7.0"
 zxing = "3.5.4"
+toolmanager = "0.0.13"
 
 [libraries]
 unifiedpush-connector = { module = "org.unifiedpush.android:connector", version.ref = "connector" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+apksig = { module = "com.android.tools.build:apksig", version.ref = "agp" }
 
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-ui = { module = "androidx.compose.ui:ui" }
@@ -45,9 +47,11 @@ ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-serialization-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
-light-keyboard = { module = "com.github.lightphone:light-keyboard", version = "v0.0.18"}
+light-keyboard = { module = "com.github.lightphone:light-keyboard", version = "v0.0.19"}
 # for local dev
 # light-keyboard = { module = "com.thelightphone.lp3keyboard:ui", version = "0.0.17-dirty"}
+light-toolmanager-server = { module = "com.thelightphone.toolmanager:server-android", version.ref = "toolmanager"}
+light-toolmanager-client = { module = "com.thelightphone.toolmanager:client-android", version.ref = "toolmanager"}
 bouncycastle-provider = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 sol4k = { module = "org.sol4k:sol4k", version.ref = "sol4k" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }

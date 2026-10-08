@@ -60,6 +60,19 @@ capabilities = ["audio-dash"]
 
 `audio-dash` adds the media3 DASH source to your tool's dependencies, at the media3 version the SDK is built against. It is a capability rather than a dependency you declare because every tool would otherwise carry a format almost none of them play.
 
+A tool that syncs with a server on the user's own network uses:
+
+```toml
+[tool]
+capabilities = ["cleartext-http"]
+```
+
+`cleartext-http` sets `android:usesCleartextTraffic="true"` on the generated
+`<application>`. Android otherwise refuses plain-HTTP connections, which are
+the norm for self-hosted servers on a home network (a NAS, a printer, a
+personal sync server at a `192.168.x` address). Declaring it here keeps the
+opt-out reviewable in `lighttool.toml` rather than hidden in a manifest.
+
 ### `orientation` — optional screen orientation lock
 Set to `"portrait"` to keep the tool in portrait orientation. Omit this field to
 let the system choose the orientation.

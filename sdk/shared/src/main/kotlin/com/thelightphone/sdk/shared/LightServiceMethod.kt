@@ -144,6 +144,60 @@ sealed interface LightServiceMethod<TRequest, TResponse> {
             val phoneNumber: String,
         )
     }
+
+    // Gets the latest cached device location as stored by LightOS
+    // Requires location permission
+    object GetCurrentLocation : LightServiceMethod<Unit, GetCurrentLocation.Response> {
+        override val id = "GetCurrentLocation"
+        override val requestSerializer = serializer<Unit>()
+        override val responseSerializer = serializer<Response>()
+
+        @Serializable
+        data class Response(
+            val latitude: Double? = null,
+            val longitude: Double? = null,
+            val accuracyMeters: Double? = null,
+            val timestampMs: Long? = null,
+        )
+    }
+
+    // In LightOS, users are able to set a default location for tools like rideshare/directions
+    // if a tool is granted permission, this can be used to query that
+    object GetDefaultLocation : LightServiceMethod<Unit, GetDefaultLocation.Response> {
+        override val id = "GetDefaultLocation"
+        override val requestSerializer = serializer<Unit>()
+        override val responseSerializer = serializer<Response>()
+
+        @Serializable
+        data class Response(
+            val latitude: Double? = null,
+            val longitude: Double? = null,
+        )
+    }
+
+    // Tells LightOS to start listening for location updates
+    // as long as any one tool has requested this in the past ~1 minute, listening will stay active
+    // Requires location permission
+    object RequestLocationUpdates : LightServiceMethod<Unit, Unit> {
+        override val id = "RequestLocationUpdates"
+        override val requestSerializer = serializer<Unit>()
+        override val responseSerializer = serializer<Unit>()
+    }
+
+    // Signals that this tool no longer needs LightOS to listen for location updates
+    // If this was the only tool that had requested updates, LightOS will stop listening immediately
+    // Requires location permission
+    object ReleaseLocationUpdates : LightServiceMethod<Unit, Unit> {
+        override val id = "ReleaseLocationUpdates"
+        override val requestSerializer = serializer<Unit>()
+        override val responseSerializer = serializer<Unit>()
+    }
+
+    /**
+     * Base type for tool-defined methods that are not part of [allMethods].
+     * The server routes these through [com.thelightphone.sdk.server.LightSdkServer.customServiceMethodResolver].
+     */
+    abstract class CustomServiceMethod<Req, Res> : LightServiceMethod<Req, Res>
 }
 
 val allMethods: Map<String, LightServiceMethod<*, *>> = listOf(
@@ -156,4 +210,8 @@ val allMethods: Map<String, LightServiceMethod<*, *>> = listOf(
     LightServiceMethod.DeviceKeyEvent,
     LightServiceMethod.GetUserPreferences,
     LightServiceMethod.OpenDialer,
+    LightServiceMethod.GetCurrentLocation,
+    LightServiceMethod.GetDefaultLocation,
+    LightServiceMethod.RequestLocationUpdates,
+    LightServiceMethod.ReleaseLocationUpdates,
 ).associateBy { it.id }

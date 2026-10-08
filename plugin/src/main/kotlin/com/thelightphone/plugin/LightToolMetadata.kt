@@ -189,8 +189,16 @@ object LightToolPolicy {
 
     const val DETACHED_AUDIO: String = "detached-audio"
     const val AUDIO_DASH: String = "audio-dash"
+    const val TOOL_MANAGER_PROVIDER: String = "tool-manager-provider"
+    /**
+     * Allows a tool to access resources over plain HTTP, which Android blocks by
+     * default. Useful for tools that need to reach self-hosted servers on the
+     * user's own network.
+     */
+    const val CLEARTEXT_HTTP: String = "cleartext-http"
 
-    val ALLOWED_CAPABILITIES: Set<String> = setOf(DETACHED_AUDIO, AUDIO_DASH)
+    val ALLOWED_CAPABILITIES: Set<String> =
+        setOf(DETACHED_AUDIO, AUDIO_DASH, TOOL_MANAGER_PROVIDER, CLEARTEXT_HTTP)
 
     /** media3 version the SDK is built against. Keep in sync with the catalog. */
     const val MEDIA3_VERSION: String = "1.10.1"
@@ -221,6 +229,10 @@ object LightToolPolicy {
     fun capabilityMarker(capability: String): String =
         "com.thelightphone.sdk.CAPABILITY_" + capability.uppercase().replace('-', '_')
 
+    // <provider> <meta-data> key a LightFileProvider-compatible provider must
+    // declare (value "true") to be discoverable by the tool manager.
+    const val META_DATA_TOOL_MANAGER_PROVIDER: String = "com.thelightphone.toolmanager.TOOL_MANAGER_PROVIDER"
+
     /**
      * Permissions that Play Store / lint infer as also requiring a hardware
      * feature. Lacking a matching `<uses-feature>` element triggers
@@ -235,6 +247,16 @@ object LightToolPolicy {
         "android.permission.ACCESS_FINE_LOCATION" to listOf("android.hardware.location.gps"),
         "android.permission.ACCESS_COARSE_LOCATION" to listOf("android.hardware.location.network"),
         "android.permission.NFC" to listOf("android.hardware.nfc"),
+    )
+
+    /**
+     * Permissions that pull in another permission's `<uses-permission>` element.
+     * Android/Play Store lint (`CoarseFineLocation`) flags requesting FINE
+     * without also requesting COARSE, so we emit both any time a tool declares
+     * just FINE rather than making every tool remember to list both.
+     */
+    val PERMISSION_IMPLIED_PERMISSIONS: Map<String, List<String>> = mapOf(
+        "android.permission.ACCESS_FINE_LOCATION" to listOf("android.permission.ACCESS_COARSE_LOCATION"),
     )
 }
 

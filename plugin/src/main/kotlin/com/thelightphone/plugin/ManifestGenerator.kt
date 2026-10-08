@@ -17,10 +17,16 @@ object ManifestGenerator {
         appendLine("""<manifest xmlns:android="http://schemas.android.com/apk/res/android">""")
         // A capability declares what the tool does and the permissions it needs
         // follow from that, so they are unioned in here rather than written by the tool.
+        // Some bare permissions likewise imply another one (e.g. FINE location
+        // implies COARSE, to keep lint quiet), so those are unioned in too.
         val permissions = (
-            metadata.permissions + metadata.capabilities.flatMap {
-                LightToolPolicy.CAPABILITY_IMPLIED_PERMISSIONS[it].orEmpty()
-            }
+            metadata.permissions +
+                metadata.permissions.flatMap {
+                    LightToolPolicy.PERMISSION_IMPLIED_PERMISSIONS[it].orEmpty()
+                } +
+                metadata.capabilities.flatMap {
+                    LightToolPolicy.CAPABILITY_IMPLIED_PERMISSIONS[it].orEmpty()
+                }
         ).distinct()
         for (perm in permissions) {
             appendLine("""    <uses-permission android:name="${xmlAttr(perm)}" />""")
@@ -61,12 +67,31 @@ object ManifestGenerator {
                 """        </service>""",
             )
         )
+
+        val toolManagerProvider = marginBlock(
+            if (LightToolPolicy.TOOL_MANAGER_PROVIDER !in metadata.capabilities) emptyList() else listOf(
+                """        <provider""",
+                """            android:name="com.thelightphone.toolmanager.LightFileProvider"""",
+                """            android:authorities="${'$'}{applicationId}.lightfileprovider"""",
+                """            android:exported="true">""",
+                """            <meta-data""",
+                """                android:name="${xmlAttr(LightToolPolicy.META_DATA_TOOL_MANAGER_PROVIDER)}"""",
+                """                android:value="true" />""",
+                """        </provider>""",
+            )
+        )
+
+        val cleartext = marginBlock(
+            if (LightToolPolicy.CLEARTEXT_HTTP !in metadata.capabilities) emptyList() else listOf(
+                """        android:usesCleartextTraffic="true"""",
+            )
+        )
         appendLine(
             """
             |    <application
             |        android:name="com.thelightphone.sdk.LightSdkApplication"
             |        android:label="${xmlAttr(metadata.label)}"
-            |        android:supportsRtl="true"
+            |        android:supportsRtl="true"$cleartext
             |        android:theme="@style/LightSdk.Theme.Splash">
             |        <meta-data
             |            android:name="com.thelightphone.sdk.LIGHT_SERVER_PACKAGE"
@@ -91,7 +116,7 @@ object ManifestGenerator {
             |            <meta-data
             |                android:name="com.thelightphone.sdk.SDK_VERSION"
             |                android:value="${'$'}{sdkVersion}" />
-            |        </receiver>$detachedAudioService
+            |        </receiver>$detachedAudioService$toolManagerProvider
             |    </application>
             |    <queries>
             |        <intent>

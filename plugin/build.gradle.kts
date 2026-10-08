@@ -12,11 +12,6 @@ val rootProps = Properties().apply {
 group = rootProps.getProperty("sdkGroup")
 version = rootProps.getProperty("sdkVersion")
 
-repositories {
-    google()
-    mavenCentral()
-}
-
 dependencies {
     implementation(gradleApi())
     implementation("com.google.devtools.ksp:symbol-processing-api:2.3.6")
@@ -40,6 +35,14 @@ tasks.test {
         "light.versionCatalog",
         rootDir.resolve("../gradle/libs.versions.toml").absolutePath,
     )
+}
+
+tasks.processResources {
+    val sdkVersion = version.toString()
+    inputs.property("sdkVersion", sdkVersion)
+    filesMatching("**/sdk-version.txt") {
+        expand("sdkVersion" to sdkVersion)
+    }
 }
 
 gradlePlugin {
