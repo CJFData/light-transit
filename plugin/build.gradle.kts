@@ -12,11 +12,6 @@ val rootProps = Properties().apply {
 group = rootProps.getProperty("sdkGroup")
 version = rootProps.getProperty("sdkVersion")
 
-repositories {
-    google()
-    mavenCentral()
-}
-
 dependencies {
     implementation(gradleApi())
     implementation("com.google.devtools.ksp:symbol-processing-api:2.3.6")

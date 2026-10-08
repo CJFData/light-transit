@@ -263,6 +263,34 @@ capture.asFlow().collect { pcm ->
 - A capture startup failure throws `LightAudioCaptureException` from collection.
 - Set `CaptureConfig.source` to `Unprocessed` to request raw input when supported; `Mic` uses the standard processed microphone path.
 
+### Vibration
+
+Use `sealedActivity.vibrator` for touch feedback or vibration waveforms. It holds only the application context, so it can outlive the screen.
+
+```kotlin
+import kotlin.time.Duration.Companion.milliseconds
+
+val vibrator: LightVibrator = sealedActivity.vibrator
+
+vibrator.click() // short touch feedback
+vibrator.vibrate(100.milliseconds) // default intensity
+vibrator.vibrate(100.milliseconds, VibrationAmplitude(128)) // custom intensity
+
+vibrator.vibrate(
+    LightVibrationWaveform(
+        durations = listOf(100.milliseconds, 400.milliseconds, 500.milliseconds),
+        amplitudes = vibrationAmplitudesOf(255, 120, 40),
+    ),
+    usage = LightVibrationUsage.Alarm,
+)
+```
+
+- Segment `i` lasts `durations[i]` at `amplitudes[i]`, where `0` is off and `255` is the motor's maximum.
+- Without motor amplitude control, each segment becomes an on/off pulse whose on-time is proportional to its amplitude.
+- `LightVibrationUsage.Touch` is for direct touch feedback. `LightVibrationUsage.Alarm` is for alarms and timers the user set, and vibrates while the screen is off.
+- `cancel()` stops the current vibration. Devices without a vibrator ignore all calls.
+- The `android.permission.VIBRATE` permission is merged from the SDK; listing it in `lighttool.toml` documents the tool's intent.
+
 ### NFC
 
 `LightNfc` reads NFC tags — and other phones presenting a tag — while your tool is in the foreground.
