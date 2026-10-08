@@ -188,6 +188,54 @@ class InfoScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, InfoSc
                     )
 
                     LightText(
+                        text = "Your data",
+                        variant = LightTextVariant.Copy,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    LightText(
+                        text = "Pico Transit has no accounts, ads, or tracking. Your settings and " +
+                            "downloaded schedules stay on your phone.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    LightText(
+                        text = "To show live arrivals, vehicles, alerts, and maps, Pico Transit asks " +
+                            "gtfs.picotransit.com for the transit feeds and map tiles you're viewing. That " +
+                            "service relays public transit data and counts how often each feed is used, " +
+                            "since agencies limit requests and some ask for usage numbers. It has no " +
+                            "accounts and doesn't track individual riders. Schedules download from each " +
+                            "agency or through the same service.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    LightText(
+                        text = "Location is off until you turn it on in Explore or Settings. Then Pico " +
+                            "Transit only asks LightOS for your location when you open Explore. It takes one " +
+                            "reading, calculates distances to nearby stops on your phone, and never sends " +
+                            "your location anywhere. Searching an address sends what you type to " +
+                            "OpenStreetMap. A default location you set is saved on your phone, so it's " +
+                            "only looked up once.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    LightText(
+                        text = "Vehicle locations on the map and on your trip come from the agencies' " +
+                            "public transit feeds, not from your phone.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    LightText(
+                        text = "Pico Transit is built on Light's SDK and is open source on GitHub.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 24.dp),
+                    )
+
+                    LightText(
                         text = "Menu Icons",
                         variant = LightTextVariant.Copy,
                         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),

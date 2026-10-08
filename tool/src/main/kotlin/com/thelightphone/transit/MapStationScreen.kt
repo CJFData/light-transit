@@ -112,7 +112,7 @@ class MapStationViewModel(
     private val _state = MutableStateFlow<MapStationState>(MapStationState.Loading)
     val state: StateFlow<MapStationState> = _state
 
-    /** Platforms tapped open to show their names. Also the selection for "Filter by stop". */
+    /** Platforms tapped open to show their names. Also the stops "Track tapped stops" filters by. */
     val expandedStopIds = MutableStateFlow<Set<String>>(emptySet())
 
     /** Vehicles tapped open in "See everything" mode to show their full label. */
@@ -121,7 +121,7 @@ class MapStationViewModel(
     private var loadJob: Job? = null
     private var loadedContext: LoadedStationContext? = null
 
-    /** Wakes the poll loop early when the "Filter by stop" selection changes. */
+    /** Wakes the poll loop early when the tapped-stop selection changes. */
     private val refreshTrigger = Channel<Unit>(Channel.CONFLATED)
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -139,7 +139,8 @@ class MapStationViewModel(
                 val darkMode = mapPreferences.darkMapEnabledFlow.first()
                 val tapHoldArrivalsEnabled = mapPreferences.tapHoldArrivalsEnabledFlow.first()
                 val seeEverythingEnabled = mapPreferences.seeEverythingEnabledFlow.first()
-                val filterByStopEnabled = mapPreferences.filterByStopEnabledFlow.first()
+                // With "See everything", tracking tapped stops filters to their vehicles.
+                val filterByStopEnabled = mapPreferences.trackTappedStopsEnabledFlow.first()
                 val seeEverythingShowBus = mapPreferences.seeEverythingShowBusFlow.first()
                 val seeEverythingShowSubway = mapPreferences.seeEverythingShowSubwayFlow.first()
                 val seeEverythingShowCommuterRail = mapPreferences.seeEverythingShowCommuterRailFlow.first()
@@ -297,8 +298,14 @@ class MapStationScreen(
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background)
             ) {
+                // The same gesture reminders as the main map.
+                val loadedState = state as? MapStationState.Loaded
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                    center = mapGestureHints(
+                        doubleTapEnabled = loadedState?.doubleTapStationEnabled == true,
+                        tapHoldEnabled = loadedState?.tapHoldArrivalsEnabled == true,
+                    ),
                     rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
                         navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
                     },

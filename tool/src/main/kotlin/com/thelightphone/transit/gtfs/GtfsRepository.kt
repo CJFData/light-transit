@@ -182,11 +182,11 @@ class GtfsRepository(dbFile: File) {
     }
 
     
-/**
- * One entry per direction and headsign actually running on the route, so branches and short turns
- * stay separately selectable. Entries carry directions.txt data when the feed has it. Trips without
- * a headsign are told apart by their last stop instead.
- */
+    /**
+     * One entry per direction and headsign actually running on the route, so branches and short turns
+     * stay separately selectable. Entries carry directions.txt data when the feed has it. Trips without
+     * a headsign are told apart by their last stop instead.
+     */
     fun getDirections(routeId: String): List<DirectionOption> =
         // The last-stop lookup is scoped to this route's trips so it doesn't scan all of
         // stop_times.
@@ -222,18 +222,18 @@ class GtfsRepository(dbFile: File) {
         }
 
     
-/**
- * Whether the route has any trips, to tell a route with no directions apart from one with no
- * service.
- */
+    /**
+     * Whether the route has any trips, to tell a route with no directions apart from one with no
+     * service.
+     */
     fun routeHasTrips(routeId: String): Boolean =
         db.rawQuery("SELECT 1 FROM trips WHERE route_id = ? LIMIT 1", arrayOf(routeId)).use { it.moveToFirst() }
 
     
-/**
- * Stops served by [routeId] and [directionId] with a departure left today, in rough route order.
- * Used when trips have no direction; a chosen direction uses [getStopsForVariant].
- */
+    /**
+     * Stops served by [routeId] and [directionId] with a departure left today, in rough route order.
+     * Used when trips have no direction; a chosen direction uses [getStopsForVariant].
+     */
     fun getStops(routeId: String, directionId: Int?, afterTime: String, today: LocalDate): List<StopOption> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
@@ -273,10 +273,10 @@ class GtfsRepository(dbFile: File) {
     }
 
     
-/**
- * Stops for the exact direction variant the rider picked, matched by [headsign] (or [lastStopId]
- * when trips have no headsign).
- */
+    /**
+     * Stops for the exact direction variant the rider picked, matched by [headsign] (or [lastStopId]
+     * when trips have no headsign).
+     */
     fun getStopsForVariant(routeId: String, directionId: Int, headsign: String?, lastStopId: String?, afterTime: String, today: LocalDate): List<StopOption> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()
@@ -328,10 +328,10 @@ class GtfsRepository(dbFile: File) {
     }
 
     
-/**
- * Departures from [stopId] on [routeId] and [directionId] for trips running today. Used when trips
- * have no direction; a chosen direction uses [getDeparturesForVariant].
- */
+    /**
+     * Departures from [stopId] on [routeId] and [directionId] for trips running today. Used when trips
+     * have no direction; a chosen direction uses [getDeparturesForVariant].
+     */
     fun getDepartures(routeId: String, directionId: Int?, stopId: String, today: LocalDate): List<Departure> {
         val todayGtfs = today.toGtfsDateString()
         val dayColumn = today.dayOfWeek.toGtfsColumnName()

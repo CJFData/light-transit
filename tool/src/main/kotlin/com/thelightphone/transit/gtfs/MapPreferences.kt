@@ -12,7 +12,6 @@ private val tapHoldArrivalsKey = booleanPreferencesKey("MAP_TAP_HOLD_ARRIVALS_EN
 private val doubleTapStationKey = booleanPreferencesKey("MAP_DOUBLE_TAP_STATION_ENABLED")
 private val trackTappedStopsKey = booleanPreferencesKey("MAP_TRACK_TAPPED_STOPS_ENABLED")
 private val seeEverythingKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_ENABLED")
-private val filterByStopKey = booleanPreferencesKey("MAP_FILTER_BY_STOP_ENABLED")
 private val seeEverythingShowBusKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_SHOW_BUS")
 private val seeEverythingShowSubwayKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_SHOW_SUBWAY")
 private val seeEverythingShowCommuterRailKey = booleanPreferencesKey("MAP_SEE_EVERYTHING_SHOW_COMMUTER_RAIL")
@@ -43,7 +42,11 @@ class MapPreferences(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { prefs -> prefs[doubleTapStationKey] = enabled }
     }
 
-    /** Off by default. Also tracks vehicles for nearby stops the rider taps open. */
+    /**
+     * Off by default. Also tracks vehicles for nearby stops the rider taps open. With "See
+     * everything" on, tapped stops filter the map to vehicles whose trip visits one, labeled
+     * TO/FROM/AT.
+     */
     val trackTappedStopsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[trackTappedStopsKey] ?: false }
 
     suspend fun setTrackTappedStopsEnabled(enabled: Boolean) {
@@ -58,16 +61,6 @@ class MapPreferences(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setSeeEverythingEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[seeEverythingKey] = enabled }
-    }
-
-    /**
-     * Off by default; only applies with "See everything" on. Keeps vehicles whose trip visits a
-     * selected stop, labeled TO/FROM/AT.
-     */
-    val filterByStopEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[filterByStopKey] ?: false }
-
-    suspend fun setFilterByStopEnabled(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[filterByStopKey] = enabled }
     }
 
     /** On by default. Per-mode toggles for "See everything". */

@@ -49,6 +49,7 @@ import com.thelightphone.transit.gtfs.GtfsRtStopTimeUpdate
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
 import com.thelightphone.transit.gtfs.FuzzyRunTrips
 import com.thelightphone.transit.gtfs.LiveVehicleSource
+import com.thelightphone.transit.gtfs.DefaultLocation
 import com.thelightphone.transit.gtfs.LocationPreferences
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.MultiGtfsFeed
@@ -437,12 +438,13 @@ class HomeScreenViewModel(
     }
 
     /**
-     * Called when Explore is tapped: unless location is off, starts warming up GPS, and asks for
-     * permission if it's never been asked.
+     * Called when Explore is tapped: unless location is off or Explore will open on a saved place,
+     * starts warming up GPS, and asks for permission if it's never been asked.
      */
     fun primeLocation(requestPermission: () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             if (!locationPreferences.locationEnabledFlow.first()) return@launch
+            if (locationPreferences.defaultLocationFlow.first() is DefaultLocation.Place) return@launch
             callRemoteServiceMethod(LightServiceMethod.RequestLocationUpdates, Unit)
             val result = checkPermission(Manifest.permission.ACCESS_FINE_LOCATION).getOrNull()?.permissionResult
             if (result == LightServiceMethod.GetPermission.Result.Unknown) {

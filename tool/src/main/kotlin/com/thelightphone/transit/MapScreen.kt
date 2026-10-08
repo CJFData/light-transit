@@ -164,13 +164,13 @@ data class BusMarker(
     val lon: Double,
     /** The platform the vehicle is heading to or at, for multi-platform stations. */
     val platformLabel: String? = null,
-    /** TO/AT/FROM relative to the selected stop, for "Filter by stop". */
+    /** TO/AT/FROM relative to a tapped stop, when tapped stops filter "See everything". */
     val stopRelation: StopRelation? = null,
     
-/**
- * Live status text (e.g. "In transit") for a "See everything" vehicle with no stop to give an ETA
- * for.
- */
+    /**
+     * Live status text (e.g. "In transit") for a "See everything" vehicle with no stop to give an ETA
+     * for.
+     */
     val liveStatusText: String? = null,
     /** The agency's time zone, for showing the ETA. */
     val zoneId: ZoneId,
@@ -248,7 +248,7 @@ sealed class MapState {
         val darkMapEnabled: Boolean,
         val doubleTapStationEnabled: Boolean,
         
-/** The selected stop's station, when it's a multi-platform station. */
+        /** The selected stop's station, when it's a multi-platform station. */
         val centerStation: StopLocation?,
         val seeEverythingEnabled: Boolean,
         val tapHoldVehicleEnabled: Boolean,
@@ -293,14 +293,14 @@ class MapViewModel(
 
     val nearbyVehiclesEnabled = MutableStateFlow(false)
     
-/**
- * Nearby stops the rider has tapped open. Shows their names, adds their vehicles when "Track tapped
- * stops" is on, and is the selection for "Filter by stop".
- */
+    /**
+     * Nearby stops the rider has tapped open. Shows their names, adds their vehicles when "Track tapped
+     * stops" is on, and with "See everything" they filter the map.
+     */
     val expandedStopIds = MutableStateFlow<Set<String>>(emptySet())
 
     
-/** Vehicles tapped open in "See everything" mode to show their full label. */
+    /** Vehicles tapped open in "See everything" mode to show their full label. */
     val expandedVehicleTripIds = MutableStateFlow<Set<String>>(emptySet())
 
     private var pollJob: Job? = null
@@ -309,10 +309,10 @@ class MapViewModel(
     private val scheduledArrivalsByStopId = mutableMapOf<String, List<ScheduledArrival>>()
 
     
-/**
- * Wakes the poll loop early. Conflated, so several requests wake it once and refreshes never
- * overlap.
- */
+    /**
+     * Wakes the poll loop early. Conflated, so several requests wake it once and refreshes never
+     * overlap.
+     */
     private val refreshTrigger = Channel<Unit>(Channel.CONFLATED)
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -331,7 +331,8 @@ class MapViewModel(
                 val doubleTapStationEnabled = mapPreferences.doubleTapStationEnabledFlow.first()
                 nearbyVehiclesEnabled.value = mapPreferences.trackTappedStopsEnabledFlow.first()
                 val seeEverythingEnabled = mapPreferences.seeEverythingEnabledFlow.first()
-                val filterByStopEnabled = mapPreferences.filterByStopEnabledFlow.first()
+                // With "See everything", tracking tapped stops filters to their vehicles.
+                val filterByStopEnabled = nearbyVehiclesEnabled.value
                 val seeEverythingShowBus = mapPreferences.seeEverythingShowBusFlow.first()
                 val seeEverythingShowSubway = mapPreferences.seeEverythingShowSubwayFlow.first()
                 val seeEverythingShowCommuterRail = mapPreferences.seeEverythingShowCommuterRailFlow.first()
@@ -339,7 +340,7 @@ class MapViewModel(
                 val mergeFeedStationsEnabled = agencyPreferences.mergeFeedStationsEnabledFlow.first()
                 val centerStation = repository.getStationContaining(stopId, mergeFeedStationsEnabled)
                 
-// For a station, snapshot every platform's schedule, not just the one passed in.
+                // For a station, snapshot every platform's schedule, not just the one passed in.
                 val primaryStopIds = centerStation?.memberStopIds ?: listOf(stopId)
                 // Scheduled trips from now (minus the grace window). Only these trips are matched
                 // against live data.
@@ -371,7 +372,7 @@ class MapViewModel(
                 )
 
                 
-// Map tiles are fetched once, for the area visible at this zoom; nearby stops use the same radius.
+                // Map tiles are fetched once, for the area visible at this zoom; nearby stops use the same radius.
                 val fetchRadiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(stop.lat, zoom)
                 val mapTiles = try {
                     tileClient.fetchTilesAround(stop.lat, stop.lon, zoom, fetchRadiusMeters, darkMode)
@@ -419,7 +420,7 @@ class MapViewModel(
     /** Shows or hides the stop's name, and refreshes right away when its vehicles are tracked. */
     fun toggleStopExpanded(stopId: String) {
         expandedStopIds.value = expandedStopIds.value.let { if (stopId in it) it - stopId else it + stopId }
-        if (nearbyVehiclesEnabled.value || loadedContext?.filterByStopEnabled == true) refreshNow()
+        if (nearbyVehiclesEnabled.value) refreshNow()
     }
 
     fun toggleVehicleExpanded(tripId: String) {
@@ -436,10 +437,10 @@ class MapViewModel(
         val nowEpochSeconds = System.currentTimeMillis() / 1000
 
         
-// The primary stop (every platform of a station) plus expanded nearby stops while tracking is on.
+        // The primary stop (every platform of a station) plus expanded nearby stops while tracking is on.
         val activeStopIds = buildSet {
             addAll(context.centerStation?.memberStopIds ?: listOf(stopId))
-            if (nearbyVehiclesEnabled.value) {
+            if (nearbyVehiclesEnabled.value && !context.seeEverythingEnabled) {
                 val nearbyIds = context.nearbyStops.mapTo(mutableSetOf()) { it.stopId }
                 addAll(expandedStopIds.value.filter { it in nearbyIds })
             }
@@ -519,8 +520,8 @@ class MapViewModel(
             } ?: emptyMap()
 
         
-// Live trips heading to the primary station that aren't in the schedule snapshot are looked up and
-// added.
+        // Live trips heading to the primary station that aren't in the schedule snapshot are looked up and
+        // added.
         val knownPrimaryTripIds = primaryStopIds.flatMapTo(mutableSetOf()) { id ->
             scheduledArrivalsByStopId[id].orEmpty().map { it.tripId }
         }
@@ -569,7 +570,7 @@ class MapViewModel(
                 }
 
                 
-// Stopped at this stop counts as arrived, even after its predicted departure.
+                // Stopped at this stop counts as arrived, even after its predicted departure.
                 val isArrived = currentStatus == GtfsRtVehicleStatus.STOPPED_AT && currentSeq == arrival.stopSequence
 
                 val rtStopUpdate = tripUpdatesByTripId[arrival.tripId]
@@ -577,22 +578,22 @@ class MapViewModel(
                 val eta = computeArrivalEta(arrival.departureTime, today, rtStopUpdate, agency.zoneId) ?: return@mapNotNull null
 
                 
-// Gone if it has moved past this stop, or its departure time here has passed, unless it's still at
-// the stop.
+                // Gone if it has moved past this stop, or its departure time here has passed, unless it's still at
+                // the stop.
                 val hasDeparted = !isArrived && (
                     (currentSeq != null && currentSeq > arrival.stopSequence) || eta.etaEpochSeconds < nowEpochSeconds
                 )
                 if (hasDeparted) return@mapNotNull null
 
                 
-// Stopped somewhere else with a distant arrival isn't coming soon.
+                // Stopped somewhere else with a distant arrival isn't coming soon.
                 val isDwellingFar = currentStatus == GtfsRtVehicleStatus.STOPPED_AT && !isArrived &&
                     eta.etaEpochSeconds - nowEpochSeconds > DWELLING_FAR_ETA_THRESHOLD_SECONDS
                 if (isDwellingFar) return@mapNotNull null
 
                 
-// Commuter rail only shows a platform from a confirmed track assignment; its scheduled stop_id is
-// often a generic placeholder.
+                // Commuter rail only shows a platform from a confirmed track assignment; its scheduled stop_id is
+                // often a generic placeholder.
                 val assignedStopId = preferredLiveVehicle?.assignedStopId
                 val platformLabel = if (lineType == LineType.COMMUTER_RAIL) {
                     assignedStopId?.let { platformLabelByStopId[it] }
@@ -624,8 +625,8 @@ class MapViewModel(
             }
 
         
-// All of the primary station's platforms share one allotment; each expanded nearby stop gets its
-// own.
+        // All of the primary station's platforms share one allotment; each expanded nearby stop gets its
+        // own.
         val primaryBuses = activeStopIds.filter { it in primaryStopIds }
             .flatMap { candidatesFor(it) }
             .sortedWith(busComparator)
@@ -664,10 +665,22 @@ class MapViewModel(
     }
 }
 
+/** The map top bar's reminder of which gestures are on, or null when neither is. */
+fun mapGestureHints(doubleTapEnabled: Boolean, tapHoldEnabled: Boolean): LightTopBarCenter? {
+    val doubleTapHint = "Double-tap zooms stations".takeIf { doubleTapEnabled }
+    val tapHoldHint = "Tap & hold shows arrivals".takeIf { tapHoldEnabled }
+    return when {
+        doubleTapHint != null && tapHoldHint != null -> LightTopBarCenter.TwoLineDetail(doubleTapHint, tapHoldHint)
+        doubleTapHint != null -> LightTopBarCenter.Text(doubleTapHint)
+        tapHoldHint != null -> LightTopBarCenter.Text(tapHoldHint)
+        else -> null
+    }
+}
+
 /**
  * "See everything": every live vehicle within the map's radius, whether or not it serves a stop on
- * screen. GTFS-RT only. With "Filter by stop" and stops selected, keeps vehicles whose trip visits
- * one, labeled TO/AT/FROM with an ETA. Shared by the map and station view.
+ * screen. GTFS-RT only. With "Track tapped stops" and stops tapped, keeps only vehicles whose trip
+ * visits one of [selectedStopIds], labeled TO/AT/FROM with an ETA. Shared by the map and station view.
  */
 internal fun buildSeeEverythingBuses(
     repository: GtfsRepository,
@@ -804,17 +817,13 @@ class MapScreen(
                     .background(LightThemeTokens.colors.background)
             ) {
 
-// A real top bar above the map. Its title reminds the rider of whichever map gestures are turned
-// on.
+                // A real top bar above the map. Its title reminds the rider of whichever map gestures are turned
+                // on.
                 val loadedState = state as? MapState.Loaded
-                val doubleTapHint = "Double-tap zooms stations".takeIf { loadedState?.doubleTapStationEnabled == true }
-                val tapHoldHint = "Tap & hold shows arrivals".takeIf { loadedState?.tapHoldArrivalsEnabled == true }
-                val topBarCenter = when {
-                    doubleTapHint != null && tapHoldHint != null -> LightTopBarCenter.TwoLineDetail(doubleTapHint, tapHoldHint)
-                    doubleTapHint != null -> LightTopBarCenter.Text(doubleTapHint)
-                    tapHoldHint != null -> LightTopBarCenter.Text(tapHoldHint)
-                    else -> null
-                }
+                val topBarCenter = mapGestureHints(
+                    doubleTapEnabled = loadedState?.doubleTapStationEnabled == true,
+                    tapHoldEnabled = loadedState?.tapHoldArrivalsEnabled == true,
+                )
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = topBarCenter,
@@ -965,15 +974,15 @@ internal fun MapCanvas(
     /** Double-tap on the station name: back to the main map. */
     onScrimTitleDoubleTapped: (() -> Unit)? = null,
     
-/**
- * Only changes vehicle labels (short until tapped); the caller decides which vehicles are shown.
- */
+    /**
+     * Only changes vehicle labels (short until tapped); the caller decides which vehicles are shown.
+     */
     seeEverythingEnabled: Boolean = false,
     expandedVehicleTripIds: Set<String> = emptySet(),
     /** Tap on a vehicle in "See everything": toggles its full label. */
     onToggleVehicle: (String) -> Unit = {},
     
-/** Whether a long press on a vehicle opens its trip. */
+    /** Whether a long press on a vehicle opens its trip. */
     tapHoldVehicleEnabled: Boolean = true,
     /** Long press on a vehicle: opens its Trip Detail. */
     onVehicleLongPressed: (BusMarker) -> Unit = {},
@@ -983,7 +992,7 @@ internal fun MapCanvas(
     val iconTint = if (darkMapEnabled) Color.White else Color.Black
     val centerMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_ARRIVAL, CENTER_MARKER_ICON_PX, iconTint)
     
-// Stations use the same station icon as other screens, anchored at its center.
+    // Stations use the same station icon as other screens, anchored at its center.
     val centerStationMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_MIDDLE_FORK, CENTER_MARKER_ICON_PX, iconTint)
     val nearbyMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_ARRIVAL, NEARBY_MARKER_ICON_PX, iconTint)
     val nearbyStationMarkerBitmap = rememberIconBitmap(LightIcons.DIRECTIONS_MIDDLE_FORK, NEARBY_MARKER_ICON_PX, iconTint)
@@ -1021,7 +1030,7 @@ internal fun MapCanvas(
                     val hitScrimTitle = scrimTitle != null && down.position.y < scrimHeightPx
 
                     
-// Vehicle hit testing uses the same arrived-snap position as drawing.
+                    // Vehicle hit testing uses the same arrived-snap position as drawing.
                     val hitBus = run {
                         val primaryStopIdsForHitTest = if (centerIsStation) centerStationMemberIds else listOf(stopId)
                         val stopCoordsForHitTest = buildMap {
@@ -1049,7 +1058,7 @@ internal fun MapCanvas(
                     down.consume()
 
                     
-// The station under the touch, if any, for double-tap.
+                    // The station under the touch, if any, for double-tap.
                     val tappedStationMemberIds: List<String>? = when {
                         hitStop != null && hitStop.isStation -> hitStop.memberStopIds
                         hitCenter && centerIsStation -> centerStationMemberIds
@@ -1058,8 +1067,8 @@ internal fun MapCanvas(
                     val tappedStationLabel = hitStop?.takeIf { it.isStation }?.stopName ?: stopLabel
 
                     
-// Double-tap opens a station view from a station marker, or returns to the map from the station
-// name.
+                    // Double-tap opens a station view from a station marker, or returns to the map from the station
+                    // name.
                     val onDoubleTapAction: (() -> Unit)? = when {
                         hitScrimTitle -> onScrimTitleDoubleTapped
                         tappedStationMemberIds != null -> {
@@ -1069,8 +1078,8 @@ internal fun MapCanvas(
                     }
 
                     
-// Long press opens arrivals or a trip, when that gesture is on. If several targets overlap,
-// stations win, then vehicles, then stops.
+                    // Long press opens arrivals or a trip, when that gesture is on. If several targets overlap,
+                    // stations win, then vehicles, then stops.
                     val stopTapHoldActive = tapHoldArrivalsEnabled && (hitStop != null || hitCenter || hitScrimTitle)
                     val vehicleTapHoldActive = tapHoldVehicleEnabled && hitBus != null
                     if (stopTapHoldActive || vehicleTapHoldActive) {
@@ -1156,7 +1165,7 @@ internal fun MapCanvas(
         val vehicleSmallLabelPaint = Paint(smallLabelPaint).apply { textAlign = Paint.Align.LEFT }
         val vehicleSmallLabelOutlinePaint = Paint(smallLabelOutlinePaint).apply { textAlign = Paint.Align.LEFT }
         
-// Stop labels: white with a black outline, left-aligned to the right of the marker.
+        // Stop labels: white with a black outline, left-aligned to the right of the marker.
         val nearbyStopLabelPaint = Paint().apply {
             textSize = 26f
             textAlign = Paint.Align.LEFT
@@ -1170,7 +1179,7 @@ internal fun MapCanvas(
         }
 
         
-// Data credits on a solid black bar at the top of the map.
+        // Data credits on a solid black bar at the top of the map.
         val scrimHeightPx = if (scrimTitle != null) STATION_SCRIM_HEIGHT_PX else SCRIM_HEIGHT_PX
         val scrimPaint = Paint().apply {
             color = android.graphics.Color.BLACK
@@ -1199,7 +1208,7 @@ internal fun MapCanvas(
         }
 
         
-// North-up compass letters, each the same distance from its screen edge.
+        // North-up compass letters, each the same distance from its screen edge.
         val compassEdgeMarginPx = scrimHeightPx + COMPASS_SCRIM_MARGIN_PX
         listOf(
             "N" to Offset(center.x, compassEdgeMarginPx),
@@ -1212,8 +1221,8 @@ internal fun MapCanvas(
         }
 
         
-// Nearby stops are drawn first, under the vehicles. Stations are drawn after the vehicles so
-// arrived vehicles don't cover them.
+        // Nearby stops are drawn first, under the vehicles. Stations are drawn after the vehicles so
+        // arrived vehicles don't cover them.
         val stopPoints = nearbyStops.map { stop ->
             val rel = projectRelativeToCenter(centerLat, centerLon, stop.lat, stop.lon, zoom)
             val point = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
@@ -1229,7 +1238,7 @@ internal fun MapCanvas(
         }
 
         
-// Where a stop's label starts: the marker's bottom edge.
+        // Where a stop's label starts: the marker's bottom edge.
         fun nearbyMarkerBottomEdgeOffset(stop: NearbyStopMarker): Float =
             if (stop.isStation) NEARBY_MARKER_ICON_PX / 2f else NEARBY_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
         val expandedLabels = stopPoints
@@ -1270,8 +1279,8 @@ internal fun MapCanvas(
         }
 
         
-// Vehicles at their projected positions. An arrived vehicle snaps to its stop's marker. Far
-// outliers are clipped to the edge.
+        // Vehicles at their projected positions. An arrived vehicle snaps to its stop's marker. Far
+        // outliers are clipped to the edge.
         buses.forEach { bus ->
             val (lat, lon) = if (bus.isArrived) {
                 stopCoordsById[bus.targetStopId] ?: (bus.lat to bus.lon)
@@ -1288,7 +1297,7 @@ internal fun MapCanvas(
         }
 
         
-// Station markers drawn on top of vehicles.
+        // Station markers drawn on top of vehicles.
         stopPoints.filter { (stop, _) -> stop.isStation }.forEach { (_, point) ->
             nativeCanvas.drawBitmap(
                 nearbyStationMarkerBitmap,
@@ -1299,8 +1308,8 @@ internal fun MapCanvas(
         }
 
         
-// The selected stop's pin and name, drawn after vehicles so they're never covered. Skipped in
-// station view.
+        // The selected stop's pin and name, drawn after vehicles so they're never covered. Skipped in
+        // station view.
         if (showCenterPin) {
             if (centerIsStation) {
                 nativeCanvas.drawBitmap(
@@ -1433,7 +1442,7 @@ private fun drawBusMarker(
     }
 
     
-// All three lines share the side of the widest one.
+    // All three lines share the side of the widest one.
     val tripText = bus.tripDescription()
     val secondLineText = bus.liveStatusText ?: bus.etaDisplay()
     val statusText = bus.statusLabel()

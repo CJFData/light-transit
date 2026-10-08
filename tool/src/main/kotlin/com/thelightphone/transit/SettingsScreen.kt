@@ -12,6 +12,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
@@ -23,6 +24,7 @@ import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
 import com.thelightphone.transit.gtfs.clearAllCachedSchedules
 import com.thelightphone.transit.gtfs.LocationPreferences
+import com.thelightphone.transit.gtfs.DefaultLocation
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.RegionalGroup
@@ -112,9 +114,6 @@ class SettingsViewModel(
         get() = _seeEverythingEnabled
     private val _seeEverythingEnabled = MutableStateFlow(true)
 
-    val filterByStopEnabled: StateFlow<Boolean>
-        get() = _filterByStopEnabled
-    private val _filterByStopEnabled = MutableStateFlow(false)
 
     val seeEverythingShowBus: StateFlow<Boolean>
         get() = _seeEverythingShowBus
@@ -236,9 +235,6 @@ class SettingsViewModel(
             mapPreferences.seeEverythingEnabledFlow.collect { _seeEverythingEnabled.value = it }
         }
         viewModelScope.launch {
-            mapPreferences.filterByStopEnabledFlow.collect { _filterByStopEnabled.value = it }
-        }
-        viewModelScope.launch {
             mapPreferences.seeEverythingShowBusFlow.collect { _seeEverythingShowBus.value = it }
         }
         viewModelScope.launch {
@@ -283,6 +279,9 @@ class SettingsViewModel(
         viewModelScope.launch {
             locationPreferences.locationEnabledFlow.collect { _locationEnabled.value = it }
         }
+        viewModelScope.launch {
+            locationPreferences.defaultLocationFlow.collect { _defaultLocation.value = it }
+        }
     }
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -297,6 +296,15 @@ class SettingsViewModel(
 
     fun setLocationEnabled(enabled: Boolean) {
         viewModelScope.launch { locationPreferences.setLocationEnabled(enabled) }
+    }
+
+    /** Where Explore opens, if set. */
+    val defaultLocation: StateFlow<DefaultLocation?>
+        get() = _defaultLocation
+    private val _defaultLocation = MutableStateFlow<DefaultLocation?>(null)
+
+    fun clearDefaultLocation() {
+        viewModelScope.launch { locationPreferences.clearDefaultLocation() }
     }
 
     /** Saves the new default agency; Home's defaultAgencyFlow collector switches to it. */
@@ -342,9 +350,6 @@ class SettingsViewModel(
         viewModelScope.launch { mapPreferences.setSeeEverythingEnabled(enabled) }
     }
 
-    fun setFilterByStopEnabled(enabled: Boolean) {
-        viewModelScope.launch { mapPreferences.setFilterByStopEnabled(enabled) }
-    }
 
     fun setSeeEverythingShowBus(enabled: Boolean) {
         viewModelScope.launch { mapPreferences.setSeeEverythingShowBus(enabled) }
@@ -482,7 +487,6 @@ class SettingsScreen(
         val doubleTapStationEnabled by viewModel.doubleTapStationEnabled.collectAsState()
         val trackTappedStopsEnabled by viewModel.trackTappedStopsEnabled.collectAsState()
         val seeEverythingEnabled by viewModel.seeEverythingEnabled.collectAsState()
-        val filterByStopEnabled by viewModel.filterByStopEnabled.collectAsState()
         val seeEverythingShowBus by viewModel.seeEverythingShowBus.collectAsState()
         val seeEverythingShowSubway by viewModel.seeEverythingShowSubway.collectAsState()
         val seeEverythingShowCommuterRail by viewModel.seeEverythingShowCommuterRail.collectAsState()
@@ -503,6 +507,7 @@ class SettingsScreen(
         val showStopsBeforeBoardingEnabled by viewModel.showStopsBeforeBoardingEnabled.collectAsState()
         val locationEnabled by viewModel.locationEnabled.collectAsState()
         val locationPermissionStatus by viewModel.locationPermissionStatus.collectAsState()
+        val defaultLocation by viewModel.defaultLocation.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
         val locationPermissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.ACCESS_FINE_LOCATION)
 
@@ -659,37 +664,74 @@ class SettingsScreen(
                 ToggleRow("Swipe between alerts", alertsSwipe, viewModel::setAlertsSwipe, available = alertsEnabled)
 
                 LightText(
-                    text = "Location (Testing)",
+                    text = "Explore",
                     variant = LightTextVariant.Copy,
                     lighten = true,
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "Explore sorts nearby stops by where you are, not just by an address you search.",
+                    text = "Find stops near your location or a default place you choose. Both stay on " +
+                        "your phone. Using your location is still in testing.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
-                ToggleRow("Use my location", locationEnabled, viewModel::setLocationEnabled)
-                if (locationEnabled) {
-                    val statusText = when (locationPermissionStatus) {
-                        LightServiceMethod.GetPermission.Result.Granted -> "Location access is enabled."
-                        LightServiceMethod.GetPermission.Result.Denied,
-                        LightServiceMethod.GetPermission.Result.BlockedByServer -> "Location access was denied."
-                        LightServiceMethod.GetPermission.Result.Unknown, null -> "Location access hasn't been granted yet."
+                // Indented under the Explore heading.
+                Column(modifier = Modifier.padding(start = 24.dp)) {
+                    ToggleRow("Use my location", locationEnabled, viewModel::setLocationEnabled)
+                    if (locationEnabled) {
+                        val statusText = when (locationPermissionStatus) {
+                            LightServiceMethod.GetPermission.Result.Granted -> "Location access is enabled."
+                            LightServiceMethod.GetPermission.Result.Denied,
+                            LightServiceMethod.GetPermission.Result.BlockedByServer -> "Location access was denied."
+                            LightServiceMethod.GetPermission.Result.Unknown, null -> "Location access hasn't been granted yet."
+                        }
+                        LightText(
+                            text = statusText,
+                            variant = LightTextVariant.Detail,
+                            lighten = true,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+                        )
+                        if (locationPermissionStatus != LightServiceMethod.GetPermission.Result.Granted) {
+                            LightText(
+                                text = "Enable Location Access",
+                                variant = LightTextVariant.Copy,
+                                modifier = Modifier
+                                    .lightClickable { locationPermissionLauncher?.launch() }
+                                    .padding(bottom = 16.dp),
+                            )
+                        }
                     }
+
                     LightText(
-                        text = statusText,
+                        text = "Default location",
                         variant = LightTextVariant.Detail,
                         lighten = true,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
                     )
-                    if (locationPermissionStatus != LightServiceMethod.GetPermission.Result.Granted) {
+                    LightText(
+                        text = when (val d = defaultLocation) {
+                            is DefaultLocation.Place -> d.location.label
+                            DefaultLocation.Current -> "Current location"
+                            null -> "Set a default location"
+                        },
+                        variant = LightTextVariant.Copy,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable {
+                                navigateTo(screenFactory = { activity -> DefaultLocationScreen(activity) })
+                            }
+                            .padding(bottom = 12.dp),
+                    )
+                    if (defaultLocation != null) {
                         LightText(
-                            text = "Enable Location Access",
+                            text = "Clear default location",
                             variant = LightTextVariant.Copy,
+                            lighten = true,
                             modifier = Modifier
-                                .lightClickable { locationPermissionLauncher?.launch() }
+                                .lightClickable { viewModel.clearDefaultLocation() }
                                 .padding(bottom = 16.dp),
                         )
                     }
@@ -849,8 +891,7 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "On the map, double-tap a station to see its platforms. Double-tap its " +
-                        "name to zoom back out.",
+                    text = "Double-tap to zoom in/out of station maps to see its platforms.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -864,7 +905,9 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "When you tap a stop on the map, its live vehicles show too.",
+                    text = "When you tap a stop on the map, its live vehicles show too. With See " +
+                        "everything also on, tapping stops shows only vehicles heading to, at, or leaving " +
+                        "them; untap them to see everything again.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -887,20 +930,6 @@ class SettingsScreen(
                 ToggleRow("See everything", seeEverythingEnabled, viewModel::setSeeEverythingEnabled)
 
                 if (seeEverythingEnabled) {
-                    LightText(
-                        text = "Filter by stop",
-                        variant = LightTextVariant.Copy,
-                        lighten = true,
-                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                    )
-                    LightText(
-                        text = "Tap a stop to show only vehicles heading to, at, or leaving it.",
-                        variant = LightTextVariant.Detail,
-                        lighten = true,
-                        modifier = Modifier.padding(bottom = 16.dp),
-                    )
-                    ToggleRow("Filter by stop", filterByStopEnabled, viewModel::setFilterByStopEnabled)
-
                     LightText(
                         text = "Modes shown",
                         variant = LightTextVariant.Copy,

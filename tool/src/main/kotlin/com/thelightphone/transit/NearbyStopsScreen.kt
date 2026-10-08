@@ -25,11 +25,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3KeyboardViewModel
+import com.thelightphone.transit.gtfs.DefaultLocation
 import com.thelightphone.transit.gtfs.GeocodeResult
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.LocationPreferences
 import com.thelightphone.transit.gtfs.NominatimGeocoder
+import com.thelightphone.transit.gtfs.SavedLocation
 import com.thelightphone.transit.gtfs.StopWithDistance
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -71,6 +73,28 @@ private const val NEARBY_STOP_LIMIT = 20
 private const val LOCATION_POLL_ATTEMPTS = 8
 private const val LOCATION_POLL_INTERVAL_MS = 1500L
 
+/**
+ * One GPS reading from LightOS, or null if none arrives in time. Holds a location lease only while
+ * waiting for it.
+ */
+suspend fun readGpsOnce(): Pair<Double, Double>? {
+    callRemoteServiceMethod(LightServiceMethod.RequestLocationUpdates, Unit)
+    try {
+        repeat(LOCATION_POLL_ATTEMPTS) { attempt ->
+            val fix = callRemoteServiceMethod(LightServiceMethod.GetCurrentLocation, Unit).getOrNull()
+            val lat = fix?.latitude
+            val lon = fix?.longitude
+            if (lat != null && lon != null) return lat to lon
+            if (attempt < LOCATION_POLL_ATTEMPTS - 1) delay(LOCATION_POLL_INTERVAL_MS)
+        }
+        return null
+    } finally {
+        withContext(NonCancellable) {
+            callRemoteServiceMethod(LightServiceMethod.ReleaseLocationUpdates, Unit)
+        }
+    }
+}
+
 /** What "Try Again" does: retry GPS, or reopen address entry after a search failure. */
 enum class NearbyStopsErrorRetry { Location, Search }
 
@@ -93,9 +117,13 @@ sealed class NearbyStopsMode {
     object Ranking : NearbyStopsMode()
     /**
      * [anchorLabel] is null for GPS, or the searched address's name. Sets the Search row's text and
-     * which retry a failure offers.
+     * which retry a failure offers. [isDefault] is true when ranked around the default location.
      */
-    data class NearbyStops(val stops: List<StopWithDistance>, val anchorLabel: String?) : NearbyStopsMode()
+    data class NearbyStops(
+        val stops: List<StopWithDistance>,
+        val anchorLabel: String?,
+        val isDefault: Boolean = false,
+    ) : NearbyStopsMode()
     data class Error(val message: String, val retry: NearbyStopsErrorRetry) : NearbyStopsMode()
 }
 
@@ -114,6 +142,9 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     /** The last GPS fix, so switching back to Current Location is instant. */
     private var lastGpsFix: Pair<Double, Double>? = null
 
+    /** Where the current list is ranked from, for "Set as default"; null for GPS. */
+    private var lastAnchor: SavedLocation? = null
+
     /** The mode before [openSearch], restored when search is cancelled. */
     private var modeBeforeSearch: NearbyStopsMode? = null
 
@@ -126,7 +157,7 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     /** Whether Search offers "Current Location". */
     val locationEnabled: StateFlow<Boolean>
         get() = _locationEnabled
-    private val _locationEnabled = MutableStateFlow(true)
+    private val _locationEnabled = MutableStateFlow(false)
 
     init {
         viewModelScope.launch {
@@ -142,7 +173,31 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
             _mode.value !is NearbyStopsMode.NeedsPermission &&
             _mode.value !is NearbyStopsMode.LocationOff
         ) return
-        retryLocation()
+        start()
+    }
+
+    /** Opens on the default location when there is one, otherwise tries GPS. */
+    private fun start() {
+        locateJob?.cancel()
+        locateJob = viewModelScope.launch(Dispatchers.IO) {
+            val default = locationPreferences.defaultLocationFlow.first()
+            if (default is DefaultLocation.Place) {
+                val place = default.location
+                rankAndShow(place.lat, place.lon, anchorLabel = place.label, isDefault = true)
+            } else {
+                locateFromGps()
+            }
+        }
+    }
+
+    /** Makes the list's place the default: the searched address, or current location for GPS. */
+    fun setAsDefault() {
+        val anchor = lastAnchor
+        viewModelScope.launch(Dispatchers.IO) {
+            if (anchor != null) locationPreferences.setDefaultLocation(anchor)
+            else locationPreferences.setDefaultToCurrentLocation()
+            (_mode.value as? NearbyStopsMode.NearbyStops)?.let { _mode.value = it.copy(isDefault = true) }
+        }
     }
 
     private suspend fun locateFromGps() {
@@ -157,32 +212,22 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
             return
         }
         _mode.value = NearbyStopsMode.Locating
-        // Home may already have requested this when Explore was tapped; asking again just renews
-        // it.
-        callRemoteServiceMethod(LightServiceMethod.RequestLocationUpdates, Unit)
-        try {
-            repeat(LOCATION_POLL_ATTEMPTS) { attempt ->
-                val fix = callRemoteServiceMethod(LightServiceMethod.GetCurrentLocation, Unit).getOrNull()
-                val lat = fix?.latitude
-                val lon = fix?.longitude
-                if (lat != null && lon != null) {
-                    lastGpsFix = lat to lon
-                    rankAndShow(lat, lon, anchorLabel = null)
-                    return
-                }
-                if (attempt < LOCATION_POLL_ATTEMPTS - 1) delay(LOCATION_POLL_INTERVAL_MS)
-            }
+        // Home may already have requested location when Explore was tapped; asking again just
+        // renews it.
+        val fix = readGpsOnce()
+        if (fix != null) {
+            lastGpsFix = fix
+            val isDefault = locationPreferences.defaultLocationFlow.first() is DefaultLocation.Current
+            rankAndShow(fix.first, fix.second, anchorLabel = null, isDefault = isDefault)
+        } else {
             _mode.value = NearbyStopsMode.Error("Couldn't find your location.", NearbyStopsErrorRetry.Location)
-        } finally {
-            withContext(NonCancellable) {
-                callRemoteServiceMethod(LightServiceMethod.ReleaseLocationUpdates, Unit)
-            }
         }
     }
 
-    private suspend fun rankAndShow(lat: Double, lon: Double, anchorLabel: String?) {
+    private suspend fun rankAndShow(lat: Double, lon: Double, anchorLabel: String?, isDefault: Boolean = false) {
+        lastAnchor = anchorLabel?.let { SavedLocation(lat, lon, it) }
         _mode.value = try {
-            NearbyStopsMode.NearbyStops(repository.rankStopsByDistance(lat, lon, NEARBY_STOP_LIMIT), anchorLabel)
+            NearbyStopsMode.NearbyStops(repository.rankStopsByDistance(lat, lon, NEARBY_STOP_LIMIT), anchorLabel, isDefault)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -197,6 +242,21 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
     fun retryLocation() {
         locateJob?.cancel()
         locateJob = viewModelScope.launch(Dispatchers.IO) { locateFromGps() }
+    }
+
+    /**
+     * Explore's "Use my location": turns the setting on, asks for permission if it's never been
+     * asked, then looks up the location.
+     */
+    fun enableLocation(requestPermission: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            locationPreferences.setLocationEnabled(true)
+            val result = checkPermission(Manifest.permission.ACCESS_FINE_LOCATION).getOrNull()?.permissionResult
+            if (result == LightServiceMethod.GetPermission.Result.Unknown) {
+                withContext(Dispatchers.Main) { requestPermission() }
+            }
+            retryLocation()
+        }
     }
 
     /** Switches back to ranking by GPS, from Search's "Current Location" option. */
@@ -223,7 +283,7 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
         if (restore != null && restore !is NearbyStopsMode.Locating) {
             _mode.value = restore
         } else {
-            retryLocation()
+            start()
         }
     }
 
@@ -375,6 +435,7 @@ class NearbyStopsScreen(
                     // location: the searched address, or "Current Location" with a crosshair.
                     // Tapping it opens Search.
                     val searchedLabel = (m as? NearbyStopsMode.NearbyStops)?.anchorLabel
+                    val locationOn by viewModel.locationEnabled.collectAsState()
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -397,6 +458,8 @@ class NearbyStopsScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
                             )
+                        } else if (!locationOn) {
+                            LightText(text = "Search an address", variant = LightTextVariant.Copy, lighten = true)
                         } else {
                             LightText(text = "Current Location", variant = LightTextVariant.Copy, lighten = true)
                             LightIcon(
@@ -406,6 +469,15 @@ class NearbyStopsScreen(
                                 modifier = Modifier.padding(start = 8.dp),
                             )
                         }
+                    }
+                    if (m is NearbyStopsMode.NearbyStops && !m.isDefault) {
+                        LightText(
+                            text = "Set as default location",
+                            variant = LightTextVariant.Detail,
+                            modifier = Modifier
+                                .lightClickable { viewModel.setAsDefault() }
+                                .padding(bottom = 12.dp),
+                        )
                     }
                     when (m) {
                         is NearbyStopsMode.Locating -> LightText(
@@ -430,16 +502,17 @@ class NearbyStopsScreen(
 
                         is NearbyStopsMode.LocationOff -> {
                             LightText(
-                                text = "Location is turned off.",
+                                text = "Search an address above, or use your location to see stops near you. " +
+                                    "It's only used on your phone.",
                                 variant = LightTextVariant.Copy,
                                 lighten = true,
                                 modifier = Modifier.padding(bottom = 16.dp),
                             )
                             LightText(
-                                text = "Go to Settings",
+                                text = "Use my location",
                                 variant = LightTextVariant.Copy,
                                 modifier = Modifier.lightClickable {
-                                    navigateTo(screenFactory = { activity -> SettingsScreen(activity) })
+                                    viewModel.enableLocation(requestPermission = { locationPermissionLauncher?.launch() })
                                 },
                             )
                         }
