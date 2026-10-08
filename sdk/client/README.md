@@ -279,7 +279,7 @@ vibrator.vibrate(100.milliseconds, VibrationAmplitude(128)) // custom intensity
 vibrator.vibrate(
     LightVibrationWaveform(
         durations = arrayOf(100.milliseconds, 400.milliseconds, 500.milliseconds),
-        amplitudes = arrayOf(VibrationAmplitude(255), VibrationAmplitude(120), VibrationAmplitude(40)),
+        amplitudes = vibrationAmplitudeArrayOf(255, 120, 40),
     ),
     usage = LightVibrationUsage.Alarm,
 )

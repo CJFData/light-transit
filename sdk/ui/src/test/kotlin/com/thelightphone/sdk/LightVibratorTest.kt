@@ -16,7 +16,7 @@ class LightVibratorTest {
 
         assertContentEquals(
             longArrayOf(0L, 100L, 0L, 20L, 80L, 0L, 100L),
-            pulseWidthTimings(waveform),
+            waveform.pulseWidthTimings(),
         )
     }
 
@@ -27,7 +27,7 @@ class LightVibratorTest {
             amplitudes = arrayOf(VibrationAmplitude(200), VibrationAmplitude(99), VibrationAmplitude(7)),
         )
 
-        assertEquals(waveform.duration.inWholeMilliseconds, pulseWidthTimings(waveform).sum())
+        assertEquals(waveform.duration.inWholeMilliseconds, waveform.pulseWidthTimings().sum())
     }
 
     @Test

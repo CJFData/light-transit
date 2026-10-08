@@ -5,7 +5,6 @@
     <uses-feature
         android:name="android.hardware.usb.host"
         android:required="false" />
-    <!-- LightVibrator. Already merged into every tool via :sdk:ui. -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <application>
         <service

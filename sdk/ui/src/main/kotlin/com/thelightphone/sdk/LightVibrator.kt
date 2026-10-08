@@ -18,7 +18,9 @@ value class VibrationAmplitude(val value: Int) {
 typealias DurationArray = Array<Duration>
 typealias VibrationAmplitudeArray = Array<VibrationAmplitude>
 
-/** Why the tool vibrates, so the platform applies the matching user settings. */
+fun vibrationAmplitudeArrayOf(vararg values: Int): VibrationAmplitudeArray =
+    Array(values.size) { VibrationAmplitude(values[it]) }
+
 enum class LightVibrationUsage {
     /** Feedback for a direct touch. */
     Touch,
@@ -50,10 +52,6 @@ interface LightVibrator {
     fun cancel()
 }
 
-/**
- * Holds only the application context, so it may outlive the screen that
- * created it. Does nothing on devices without a vibrator.
- */
 class ContextLightVibrator(context: Context) : LightVibrator {
     private val vibrator: Vibrator? = context.applicationContext
         .getSystemService(VibratorManager::class.java)
@@ -80,7 +78,7 @@ class ContextLightVibrator(context: Context) : LightVibrator {
             VibrationEffect.createOneShot(durationMs, amplitude.value)
         } else {
             VibrationEffect.createWaveform(
-                pulseWidthTimings(LightVibrationWaveform(arrayOf(duration), arrayOf(amplitude))),
+                LightVibrationWaveform(arrayOf(duration), arrayOf(amplitude)).pulseWidthTimings(),
                 NO_REPEAT,
             )
         }
@@ -97,7 +95,7 @@ class ContextLightVibrator(context: Context) : LightVibrator {
                 NO_REPEAT,
             )
         } else {
-            VibrationEffect.createWaveform(pulseWidthTimings(waveform), NO_REPEAT)
+            VibrationEffect.createWaveform(waveform.pulseWidthTimings(), NO_REPEAT)
         }
         vibrator.vibrate(effect, VibrationAttributes.createForUsage(usage.toPlatformUsage()))
     }
@@ -121,11 +119,11 @@ private fun LightVibrationUsage.toPlatformUsage(): Int = when (this) {
  * alternating off/on durations, starting with off. Each segment is on for
  * the fraction of its duration given by its amplitude, then off.
  */
-internal fun pulseWidthTimings(waveform: LightVibrationWaveform): LongArray {
+internal fun LightVibrationWaveform.pulseWidthTimings(): LongArray {
     val timings = mutableListOf(0L)
-    waveform.durations.forEachIndexed { index, duration ->
+    durations.forEachIndexed { index, duration ->
         val durationMs = duration.inWholeMilliseconds
-        val onMs = durationMs * waveform.amplitudes[index].value / 255
+        val onMs = durationMs * amplitudes[index].value / 255
         timings += onMs
         timings += durationMs - onMs
     }
