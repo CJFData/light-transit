@@ -234,6 +234,7 @@ The player `availability` field exposes the connection lifecycle:
 
 - `Initializing` — the detached controller is connecting.
 - `Ready` — commands can be handled. Attached players start here.
+- `Refused` — the detached controller connection was rejected or failed.
 - `Released` — the handle is closed and cannot accept commands.
 
 `awaitReady()` suspends through initialization and returns `true` only when the player reaches `Ready`. Returns `false` if the player is released first.

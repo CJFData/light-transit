@@ -136,6 +136,17 @@ class LightAudioPlayerTest {
     }
 
     @Test
+    fun refusedConnectionIsTerminalAndDistinctFromRelease() {
+        val commands = PendingPlayerCommands()
+        commands.refuse()
+        commands.release()
+
+        assertEquals(LightAudioPlayerAvailability.Refused, commands.availability.value)
+        assertEquals(false, runBlocking { awaitPlayerReady(commands.availability) })
+        assertFailsWith<IllegalStateException> { commands.dispatch { } }
+    }
+
+    @Test
     fun sessionPlayPreparesAnIdlePlayerBeforePlaying() {
         val calls = mutableListOf<String>()
         val idlePlayer = Proxy.newProxyInstance(

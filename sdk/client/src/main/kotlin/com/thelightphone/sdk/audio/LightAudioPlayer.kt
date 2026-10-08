@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.first
 enum class LightAudioPlayerAvailability {
     Initializing,
     Ready,
+    Refused,
     Released,
 }
 
@@ -156,10 +157,16 @@ class LightAudioPlayer internal constructor(
                 cancelPendingConnection = null
                 runCatching(future::get)
                     .onSuccess(::connectPlayer)
-                    .onFailure { release() }
+                    .onFailure { refuse() }
             },
             context.mainExecutor,
         )
+    }
+
+    private fun refuse() {
+        if (released) return
+        commands.refuse()
+        release()
     }
 
     /** Playback rate, clamped to a minimum positive rate. */
