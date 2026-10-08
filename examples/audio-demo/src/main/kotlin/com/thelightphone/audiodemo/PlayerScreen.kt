@@ -26,6 +26,8 @@ import com.thelightphone.sdk.audio.LightAudioItem
 import com.thelightphone.sdk.audio.LightAudioPlayback
 import com.thelightphone.sdk.audio.LightAudioPlayer
 import com.thelightphone.sdk.audio.LightAudioSource
+import com.thelightphone.sdk.audio.LightCacheEviction
+import com.thelightphone.sdk.audio.LightMediaCache
 import com.thelightphone.sdk.audio.LightMediaMetadata
 import com.thelightphone.sdk.audio.LightPlayerSpec
 import com.thelightphone.sdk.ui.LightBarButton
@@ -113,7 +115,7 @@ class PlayerViewModel(
     private val mode = PlayerDemoMode(modeStore)
     // The playback toggle swaps the player instance, so screen state follows
     // the flow rather than one player's own flows, which would go stale.
-    private val playerFlow = MutableStateFlow(audio.newPlayer(LightPlayerSpec(playback = mode.playback.value)))
+    private val playerFlow = MutableStateFlow(audio.newPlayer(playerSpec(mode.playback.value)))
     private val currentPlayer: LightAudioPlayer get() = playerFlow.value
     val clips = AudioLibraryRepository(filesDir).list()
     val currentClip: StateFlow<AudioClip?> = playerFlow
@@ -188,7 +190,7 @@ class PlayerViewModel(
         oldPlayer.setMediaQueue(emptyList())
         oldPlayer.release()
 
-        val nextPlayer = audio.newPlayer(LightPlayerSpec(playback = nextPlayback)).apply {
+        val nextPlayer = audio.newPlayer(playerSpec(nextPlayback)).apply {
             speed = this@PlayerViewModel.speed.value
         }
         playerFlow.value = nextPlayer
@@ -203,6 +205,11 @@ class PlayerViewModel(
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
     }
 }
+
+private fun playerSpec(playback: LightAudioPlayback) = LightPlayerSpec(
+    playback = playback,
+    caches = listOf(LightMediaCache("demo-stream", LightCacheEviction.LeastRecentlyUsed(64L * 1024 * 1024))),
+)
 
 private fun AudioClip.toLightAudioItem() = LightAudioItem(
     source = when (val source = source) {
