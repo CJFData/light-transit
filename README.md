@@ -10,6 +10,10 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 
 ## 🔄 Recent updates
 
+**v0.5.2**
+- 🚌 **COLTS**: Scranton's County of Lackawanna Transit System now goes by its full name, and searching "COLTS" finds it.
+- 🔧 **Light SDK update**: brought up to date with the latest `light-sdk`.
+
 **v0.5.1**
 - 🚋 **Cleveland, live**: GCRTA's buses, Red Line, and light rail, with live arrivals, vehicles, and service alerts.
 - 🔔 **SEPTA, live**: SEPTA's buses, Metro, and trolleys now show live arrivals, vehicles, and service alerts. Regional Rail stays schedules-only for now.
