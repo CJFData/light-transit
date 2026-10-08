@@ -1064,6 +1064,17 @@ enum class GtfsAgency(
         timeZoneId = "America/New_York",
     ),
 
+    //Northeastern Pennsylvania--no region yet starting with Lackawanna county/ Scranton area
+    COLT(
+        id="colt",
+        displayName = "County of Lackawanna Transit",
+        feedUrl = "https://coltsivl.availtec.com/InfoPoint/gtfs-zip.ashx",
+        realtimeTripUpdatesUrl="https://gtfs.picotransit.com/colt/tripupdates",
+        realtimeVehiclePositionsUrl = "https://gtfs.picotransit.com/colt/vehiclepositions",
+        realtimeAlertsUrl = "https://gtfs.picotransit.com/colt/alerts",
+        timeZoneId = "America/New_York",
+    ),
+
     // Southern New England region (see RegionalGroup.SOUTHERN_NEW_ENGLAND), with MBTA and RIPTA.
     // Schedules only.
     SRTA(

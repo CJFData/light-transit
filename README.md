@@ -2,7 +2,7 @@
 
 Pico Transit is a friendly little companion for getting around on public transit: real schedules, live arrivals, connections at any stop, and a live map showing where your ride actually is. No ads, no clutter, no infinite scroll. Just "where's my bus," answered nicely. 🚏✨
 
-It covers **133 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, **Cleveland's GCRTA**, **SEPTA**'s buses, Metro, and trolleys, the San Francisco Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more), and all 9 **Puget Sound** agencies (King County Metro, Sound Transit, and more). The rest have schedules only for now: about 40 Colorado agencies, SEPTA Regional Rail, Southern New England's regional transit authorities and ferries, Metra, Pace, and LA Metro.
+It covers **134 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denver** (with Bustang), **LTC** (London, Ontario), **STM Montréal**, **CTA**, **NYC Subway**, **LIRR**, **Metro-North**, NYC buses (all 5 boroughs plus MTA Bus Company), **Nashville's WeGo**, **Cleveland's GCRTA**, **SEPTA**'s buses, Metro, and trolleys, **COLT** in Scranton, the San Francisco Bay Area's 511.org agencies (BART, Muni, AC Transit, Caltrain, VTA, and dozens more), and all 9 **Puget Sound** agencies (King County Metro, Sound Transit, and more). The rest have schedules only for now: about 40 Colorado agencies, SEPTA Regional Rail, Southern New England's regional transit authorities and ferries, Metra, Pace, and LA Metro.
 
 Use it on its own or alongside the Light Phone's Directions tool. It's built on the [Light SDK](https://github.com/lightphone/light-sdk), so it stays as calm and un-distracting as the rest of your Light experience.
 
@@ -13,6 +13,7 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 **v0.5.1**
 - 🚋 **Cleveland, live**: GCRTA's buses, Red Line, and light rail, with live arrivals, vehicles, and service alerts.
 - 🔔 **SEPTA, live**: SEPTA's buses, Metro, and trolleys now show live arrivals, vehicles, and service alerts. Regional Rail stays schedules-only for now.
+- 🚌 **Northeastern Pennsylvania, live**: COLT (County of Lackawanna Transit System) in Scranton, with live arrivals, vehicles, and service alerts.
 - ⚠️ **More service alerts**: Nashville's WeGo now has service alerts too.
 
 **v0.5.0**
@@ -203,6 +204,12 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 |---|:-:|:-:|:-:|:-:|
 | SEPTA Bus & Metro | ✓ | ✓ | ✓ | ✓ |
 | SEPTA Regional Rail | ✓ | — | — | — |
+
+**Northeastern Pennsylvania**
+
+| Agency                                     | Schedule | Trip updates | Vehicle positions | Service alerts⁶ |
+|--------------------------------------------|:-:|:-:|:-:|:-:|
+| County of Lackawanna Transit System (COLT) | ✓ | ✓ | ✓ | ✓ |
 
 **Nashville**
 
