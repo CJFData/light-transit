@@ -13,7 +13,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 private const val NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
-private const val NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 private const val RESULT_LIMIT = 5
 
 /**
@@ -29,12 +28,6 @@ private data class NominatimResult(
     val lon: String,
     @kotlinx.serialization.SerialName("display_name") val displayName: String,
 )
-
-@Serializable
-private data class NominatimAddress(val road: String? = null)
-
-@Serializable
-private data class NominatimReverseResult(val address: NominatimAddress? = null)
 
 data class GeocodeResult(val displayName: String, val lat: Double, val lon: Double)
 
@@ -63,19 +56,6 @@ class NominatimGeocoder {
             val lon = result.lon.toDoubleOrNull() ?: return@mapNotNull null
             GeocodeResult(displayName = result.displayName, lat = lat, lon = lon)
         }
-    }
-
-    /** Nearby street name for a point, e.g. for labeling a stop pin with its street context. */
-    suspend fun reverseGeocode(lat: Double, lon: Double): String? {
-        val response = client.get(NOMINATIM_REVERSE_URL) {
-            header("User-Agent", NOMINATIM_USER_AGENT)
-            parameter("lat", lat)
-            parameter("lon", lon)
-            parameter("format", "jsonv2")
-        }
-        if (!response.status.isSuccess()) return null
-        val result: NominatimReverseResult = response.body()
-        return result.address?.road
     }
 
     fun close() {

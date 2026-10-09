@@ -6,9 +6,17 @@ It covers **134 feeds**. Live tracking works for **MBTA**, **RIPTA**, **RTD Denv
 
 Use it on its own or alongside the Light Phone's Directions tool. It's built on the [Light SDK](https://github.com/lightphone/light-sdk), so it stays as calm and un-distracting as the rest of your Light experience.
 
-📦 **Download it** from the [Releases page](https://github.com/CJFData/light-transit/releases) (the APK is under each release's Assets), then see [Getting it onto a real Light Phone III](#-getting-it-onto-a-real-light-phone-iii) below.
+📦 Pico Transit has begun the submission process to become a released community tool on the Light Phone III dashboard. Testers can install it now; see [Getting it onto a real Light Phone III](#-getting-it-onto-a-real-light-phone-iii) below.
 
 ## 🔄 Recent updates
+
+**v1.0.0**
+- 📍 **Default location**: set a place in Settings → Explore (or from Explore's header) and Explore opens there. It's looked up once and saved on your phone. Current location can be the default too.
+- 🔒 **Location is opt-in**: it's off until you turn it on in Explore or Settings, and a "Your data" notice on first launch explains what leaves your phone.
+- 🚌 **CTA buses on the map**: buses show where they really are, including routes at stops you tap with Track tapped stops on. See everything isn't available for CTA yet.
+- 🗺️ **Maps show vehicles where they are**: no more vehicles pinned to the map's edge. "Track tapped stops" also filters See everything to the stops you tap.
+- ⬇️ **Additional Schedules keep downloading** after you leave the page, with progress shown when you come back.
+- 🐛 **Fixes**: the search keyboard in Explore and Stations, a Settings crash, and clearer wording throughout.
 
 **v0.5.2**
 - 🚌 **COLTS**: Scranton's County of Lackawanna Transit System now goes by its full name, and searching "COLTS" finds it.
@@ -37,7 +45,7 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 - 🗺️ **Easier-to-read maps**: street names are drawn larger, and each map loads with about a quarter as many tile requests.
 - 🚌 **CTA bus trips load much faster**: matching live buses to their scheduled trips no longer scans the whole schedule for every bus.
 - 🔍 **Explore search stays put**: typing an address is no longer interrupted when the background location lookup finishes.
-- 🔒 **A new home for live data**: the proxy moved to `gtfs.picotransit.com` and now only accepts the kinds of requests the app actually makes.
+- 🔒 **A new home for live data**: the proxy moved to its own domain and now only accepts the kinds of requests the app actually makes.
 - 🐛 **Steadier live tracking** on feeds with infrequent GPS updates. RIPTA also follows each vehicle along its real route path, so it catches up even when several stops pass between updates.
 - 🎶 **Nashville's WeGo, live**: added in honor of Dolly Parton, with full live tracking from day one.
 
@@ -45,7 +53,7 @@ The full history is in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## 🔭 Coming up
 
-- 📍 **Real GPS for Explore**: built, but it needs a LightOS update before it can work, so it's marked **(Testing)** for now. Address search works in the meantime.
+- 📍 **Real GPS for Explore**: awaiting trust from a LightOS update.
 - 📡 **Expanding current agency feeds**: bringing live arrivals, vehicles, and service alerts to more of the agencies Pico Transit has schedules for today.
 - 🚏 **Adding more agencies**, with help from the community.
 
@@ -276,17 +284,17 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
   <img src="docs/screenshots/Screenshot_20260801_211241.png" alt="Pico Transit screenshot" width="220">
 
-- 📍 **Explore**: the closest stops to an address or landmark, nearest first. Finding stops near you with GPS is marked **Testing**, since it needs a LightOS update to work; once it does, Recenter brings you back to your own location.
+- 📍 **Explore**: the closest stops to an address or landmark, nearest first. Set a default location in Settings → Explore and Explore opens there, looked up once and saved on your phone. Finding stops near you with GPS is opt-in and marked **Testing**, awaiting trust from a LightOS update.
 
-  <img src="docs/screenshots/explore_nearby_stops.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_214943.png" alt="Pico Transit screenshot" width="220">
+  <img src="docs/screenshots/explore_chicago.png" alt="Nearby CTA stops around Willis Tower in Explore" width="220"> <img src="docs/screenshots/Screenshot_20260801_214943.png" alt="Pico Transit screenshot" width="220">
 
 - ⏱️ **Live ETAs** with On Time / Late / Early badges, whenever the agency's live feed is playing along nicely.
 
-  <img src="docs/screenshots/Screenshot_20260810_172200.png" alt="Pico Transit screenshot" width="220">
+  <img src="docs/screenshots/Screenshot_20260810_172200.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/arrivals_chicago.png" alt="Live CTA arrivals at Adams &amp; S. Wacker" width="220">
 
-- 🗺️ **Map**: your stop and the stops around it, with live vehicles shown by mode (subway/light rail, commuter rail, bus, ferry). "See everything" shows every live vehicle in view; filter it by stop or by mode.
+- 🗺️ **Map**: your stop and the stops around it, with live vehicles shown by mode (subway/light rail, commuter rail, bus, ferry). "See everything" shows every live vehicle in view, and you can choose which modes it shows. With "Track tapped stops" also on, tapping stops shows only the vehicles heading to, at, or leaving them.
 
-  <img src="docs/screenshots/Screenshot_20260801_200838.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_204556.png" alt="Pico Transit screenshot" width="220">
+  <img src="docs/screenshots/map_chicago.png" alt="Map of Michigan &amp; Washington with live CTA buses" width="220"> <img src="docs/screenshots/Screenshot_20260801_204556.png" alt="Pico Transit screenshot" width="220">
 
 - 👆 **Gestures**: tap and hold a stop or station name to jump to its live arrivals. On the map, double-tap a station to zoom into its platforms, and double-tap its name to zoom back out. On Trip Detail, a tap opens a stop's connections and tap-and-hold opens its arrivals; once you've boarded, a tap sets where you're getting off.
 
@@ -318,11 +326,11 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 
   <img src="docs/screenshots/Screenshot_20260801_212013.png" alt="Pico Transit screenshot" width="220">
 
-- ⚙️ **Settings**: switch agencies, turn on service alerts (off by default) and choose where they show, pick a light or dark map, choose gestures, turn Select Run options on or off, manage location, download only over Wi-Fi (on by default), or clear the schedule cache.
+- ⚙️ **Settings**: switch agencies, turn on service alerts (off by default) and choose where they show, set Explore's location options and default location, pick a light or dark map, choose gestures, turn Select Run options on or off, download only over Wi-Fi (on by default), or clear the schedule cache.
 
-  <img src="docs/screenshots/Screenshot_20260810_172700.png" alt="Pico Transit screenshot" width="220"> <img src="docs/screenshots/Screenshot_20260801_215602.png" alt="Pico Transit screenshot" width="220">
+  <img src="docs/screenshots/settings_map_chicago.png" alt="Map settings, with See everything unavailable for CTA" width="220"> <img src="docs/screenshots/Screenshot_20260801_215602.png" alt="Pico Transit screenshot" width="220">
 
-- ℹ️ **About**: a legend of every icon Pico Transit uses.
+- ℹ️ **About**: what data leaves your phone, and a legend of every icon Pico Transit uses.
 
   <img src="docs/screenshots/Screenshot_20260810_171900.png" alt="Pico Transit screenshot" width="220">
 
@@ -331,27 +339,31 @@ Everything Pico Transit covers, and which live data it uses for each. A dash mea
 Pico Transit lives in `tool/` inside this fork of the [light-sdk](https://github.com/lightphone/light-sdk) monorepo. Follow the SDK's own setup first (GitHub token, Android Studio, and so on), then:
 
 1. Open the project in Android Studio.
-2. Run the `:tool` module on an emulator, or on [the LightOS emulator](docs/system_app). [`tool/lighttool.toml`](tool/lighttool.toml) targets a real phone (`com.lightos`) by default; switch `serverPackage` to the commented-out emulator line when running there.
+2. Run the `:tool` module on an emulator, or on [the LightOS emulator](docs/system_app). [`tool/lighttool.toml`](tool/lighttool.toml) targets a real phone (`com.lightos`) by default; for the LightOS emulator, switch `serverPackage` to the commented-out emulator line and build with `-DlightSdk.allowAltServerPackage=true`.
 3. Pick an agency, grab a coffee ☕ while the schedule downloads, and you're off.
 
 ## 📱 Getting it onto a *real* Light Phone III
 
-Until Pico Transit is available through Light's Tool Library, install it with ADB, since LightOS can't install third-party APKs on the phone itself yet:
+Pico Transit has begun the submission process to become a released community tool on the Light Phone III dashboard.
+
+**For testers**, it can be installed with ADB:
 
 1. Download the latest APK from the [Releases page](https://github.com/CJFData/light-transit/releases): open the newest release and grab `pico-transit-v<version>.apk` under **Assets**. Or build one yourself with `./gradlew :tool:assembleRelease`.
 2. Turn on Developer Options and USB debugging on your Light Phone III, plug it in, and run:
    ```bash
    adb install -r pico-transit-v<version>.apk
    ```
-3. On the phone, allow "Any tools" in LightOS's tool settings.
+3. On the phone, allow "Any tools" in LightOS's tool settings. Light notes this setting carries privacy and performance risks.
 
-That's it, happy transit-ing! 🚏🚌🚆
+A tester build and a Light-signed build are signed differently, so uninstall the tester build before installing a Light-signed one.
+
+Happy transit-ing! 🚏🚌🚆
 
 ## 🧪 A few nerdy notes
 
-- **Live data goes through `pico-transit-proxy`**, a small Cloudflare Worker at `gtfs.picotransit.com` (in its own repo). It only fetches a fixed list of upstream URLs, keeps every API key server-side, caches responses so riders share upstream requests, and accepts only the kinds of requests the app makes.
+- **Live data goes through `pico-transit-proxy`**, a small Cloudflare Worker (in its own repo). It only fetches a fixed list of upstream URLs, keeps every API key server-side, caches responses so riders share upstream requests, and accepts only the kinds of requests the app makes. It counts how often each feed is used, since agencies limit requests and some ask for usage numbers, and has no accounts.
 - **Feeds fetched over plain HTTP** reach the app over HTTPS through the proxy, so the app never uses cleartext.
-- **Explore's GPS** uses the Light SDK's location APIs and needs a LightOS update to work. Address search uses Nominatim (OpenStreetMap), so please be kind to their free API! 🙏
+- **Explore's GPS** uses the Light SDK's location APIs. Address search uses Nominatim (OpenStreetMap), so please be kind to their free API! 🙏
 - **Stations are grouped by GTFS `parent_station`**, so a big hub shows up once. Entrances, elevators, and escalators are left out of its platform map.
 - **Boarding is a saved reference, not a background tracker.** Live feeds are only polled while Trip Detail or the home screen is on screen.
 - **Agency APIs alongside GTFS-RT**: Pico Transit uses MBTA's V3 API for commuter rail tracks and positions, and matches CTA Bus Tracker data to scheduled trips by route and scheduled start time.

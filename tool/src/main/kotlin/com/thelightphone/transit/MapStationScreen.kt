@@ -16,6 +16,7 @@ import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.MapTileClient
 import com.thelightphone.transit.gtfs.MapTiles
+import com.thelightphone.transit.gtfs.SeeEverythingUnsupported
 import com.thelightphone.transit.gtfs.fetchMergedTripUpdates
 import com.thelightphone.transit.gtfs.fetchMergedVehiclePositions
 import com.thelightphone.transit.gtfs.fitBoundsZoom
@@ -138,7 +139,8 @@ class MapStationViewModel(
                 val centerLon = platforms.map { it.lon }.average()
                 val darkMode = mapPreferences.darkMapEnabledFlow.first()
                 val tapHoldArrivalsEnabled = mapPreferences.tapHoldArrivalsEnabledFlow.first()
-                val seeEverythingEnabled = mapPreferences.seeEverythingEnabledFlow.first()
+                val seeEverythingEnabled = mapPreferences.seeEverythingEnabledFlow.first() &&
+                    agency.component<SeeEverythingUnsupported>() == null
                 // With "See everything", tracking tapped stops filters to their vehicles.
                 val filterByStopEnabled = mapPreferences.trackTappedStopsEnabledFlow.first()
                 val seeEverythingShowBus = mapPreferences.seeEverythingShowBusFlow.first()
@@ -330,7 +332,6 @@ class MapStationScreen(
                         // Placeholders; there's no center pin here, so they're never used.
                         stopId = memberStopIds.firstOrNull() ?: "",
                         stopLabel = stationLabel,
-                        streetContext = null,
                         centerLat = s.centerLat,
                         centerLon = s.centerLon,
                         zoom = s.zoom,

@@ -14,7 +14,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -110,7 +111,7 @@ sealed class NearbyStopsMode {
     object NeedsPermission : NearbyStopsMode()
     /** Location is turned off in Settings, so there's nothing to grant. */
     object LocationOff : NearbyStopsMode()
-    data class Input(val prefillText: String = "") : NearbyStopsMode()
+    object Input : NearbyStopsMode()
     object Searching : NearbyStopsMode()
     data class GeocodeResults(val results: List<GeocodeResult>) : NearbyStopsMode()
     /** Ranking stops around a new GPS fix or search result. */
@@ -144,6 +145,13 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
 
     /** Where the current list is ranked from, for "Set as default"; null for GPS. */
     private var lastAnchor: SavedLocation? = null
+
+    /**
+     * The address being typed. Kept here rather than in Content() because the search keyboard keeps
+     * its first callback for the screen's lifetime, and Content() state is reset after visiting
+     * another screen.
+     */
+    val searchText = TextFieldState()
 
     /** The mode before [openSearch], restored when search is cancelled. */
     private var modeBeforeSearch: NearbyStopsMode? = null
@@ -272,8 +280,9 @@ class NearbyStopsViewModel(dbFile: File, private val locationPreferences: Locati
 
     fun openSearch() {
         locateJob?.cancel()
+        searchText.clearText()
         modeBeforeSearch = _mode.value
-        _mode.value = NearbyStopsMode.Input()
+        _mode.value = NearbyStopsMode.Input
     }
 
     fun cancelSearch() {
@@ -339,16 +348,15 @@ class NearbyStopsScreen(
         val themeColors by LightThemeController.colors.collectAsState()
         val keyboardOptionsFlow = rememberKeyboardOptions()
         val locationPermissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.ACCESS_FINE_LOCATION)
+        val textFieldState = viewModel.searchText
+        // Searches on submit rather than on every keystroke, to go easy on the free geocoding API.
+        val keyboardCallback = remember(textFieldState) {
+            InlineTextFieldKeyboardCallback(state = textFieldState, onReturn = { viewModel.search(textFieldState.text) })
+        }
 
         when (val m = mode) {
             is NearbyStopsMode.Input -> {
                 val locationEnabled by viewModel.locationEnabled.collectAsState()
-                val textFieldState = rememberTextFieldState(m.prefillText)
-                // Searches on submit rather than on every keystroke, to go easy on the free
-                // geocoding API.
-                val keyboardCallback = remember(textFieldState) {
-                    InlineTextFieldKeyboardCallback(state = textFieldState, onReturn = { viewModel.search(textFieldState.text) })
-                }
                 val keyboardViewModel: Lp3KeyboardViewModel<*> = rememberInlineLp3KeyboardViewModel(
                     key = "NearbyStopsSearchKeyboard",
                     callback = keyboardCallback,
@@ -425,7 +433,15 @@ class NearbyStopsScreen(
                 ) {
                     LightTopBar(
                         leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                        center = LightTopBarCenter.Text("Nearby Stops"),
+                        // Like the Departures day toggle: the title stays, and the second line sets
+                        // the shown place as the default location.
+                        center = (m as? NearbyStopsMode.NearbyStops)?.let { list ->
+                            LightTopBarCenter.TwoLineDetail(
+                                line1 = "Nearby Stops",
+                                line2 = if (list.isDefault) "Default location" else "Tap to set as default",
+                                onClick = { if (!list.isDefault) viewModel.setAsDefault() },
+                            )
+                        } ?: LightTopBarCenter.Text("Nearby Stops"),
                         rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
                             navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
                         },
@@ -469,15 +485,6 @@ class NearbyStopsScreen(
                                 modifier = Modifier.padding(start = 8.dp),
                             )
                         }
-                    }
-                    if (m is NearbyStopsMode.NearbyStops && !m.isDefault) {
-                        LightText(
-                            text = "Set as default location",
-                            variant = LightTextVariant.Detail,
-                            modifier = Modifier
-                                .lightClickable { viewModel.setAsDefault() }
-                                .padding(bottom = 12.dp),
-                        )
                     }
                     when (m) {
                         is NearbyStopsMode.Locating -> LightText(

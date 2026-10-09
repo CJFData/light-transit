@@ -36,16 +36,52 @@ import com.thelightphone.transit.gtfs.GtfsIngestStatus
 import com.thelightphone.transit.gtfs.GtfsIngestor
 import com.thelightphone.transit.gtfs.NetworkPreferences
 import com.thelightphone.transit.gtfs.RegionalGroup
+import com.thelightphone.transit.gtfs.gtfsDbFile
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/**
+ * Schedule download progress, for the primary and additional schedules. Additional-schedule
+ * downloads run in the app's scope so leaving the screen doesn't cancel them.
+ */
+object AdditionalScheduleDownloads {
+    private val _statuses = MutableStateFlow<Map<GtfsAgency, GtfsIngestStatus>>(emptyMap())
+    val statuses: StateFlow<Map<GtfsAgency, GtfsIngestStatus>> = _statuses
+    private val running = mutableSetOf<GtfsAgency>()
+
+    /** Records progress for a download started elsewhere, such as the primary on Home. */
+    fun report(agency: GtfsAgency, status: GtfsIngestStatus) {
+        _statuses.update { it + (agency to status) }
+    }
+
+    /** Starts downloading [agency] unless it's already running. */
+    @Synchronized
+    fun start(agency: GtfsAgency, ingestor: GtfsIngestor) {
+        if (!running.add(agency)) return
+        HomeVisibility.scope.launch(Dispatchers.IO) {
+            try {
+                ingestor.ingest(agency) { status -> report(agency, status) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A failure leaves the last status showing; turning the agency off and on again
+                // retries.
+            } finally {
+                synchronized(this@AdditionalScheduleDownloads) { running.remove(agency) }
+            }
+        }
+    }
+}
 
 class ScheduleSelectionViewModel(
     private val agencyPreferences: AgencyPreferences,
-    filesDir: File,
+    private val filesDir: File,
     connectivity: LightConnectivity,
     networkPreferences: NetworkPreferences,
 ) : LightViewModel<Unit>() {
@@ -61,10 +97,8 @@ class ScheduleSelectionViewModel(
         get() = _additionalDownloads
     private val _additionalDownloads = MutableStateFlow<Set<GtfsAgency>>(emptySet())
 
-    /** Download progress for agencies turned on here this session. Cleared when turned off. */
-    val ingestStatuses: StateFlow<Map<GtfsAgency, GtfsIngestStatus>>
-        get() = _ingestStatuses
-    private val _ingestStatuses = MutableStateFlow<Map<GtfsAgency, GtfsIngestStatus>>(emptyMap())
+    /** Download progress for agencies turned on here, including after leaving and returning. */
+    val ingestStatuses: StateFlow<Map<GtfsAgency, GtfsIngestStatus>> = AdditionalScheduleDownloads.statuses
 
     init {
         viewModelScope.launch {
@@ -72,6 +106,12 @@ class ScheduleSelectionViewModel(
         }
         viewModelScope.launch {
             agencyPreferences.additionalDownloadsFlow.collect { _additionalDownloads.value = it }
+        }
+        // Finishes any turned-on schedule that never completed, e.g. if the app closed mid-download.
+        viewModelScope.launch(Dispatchers.IO) {
+            for (agency in agencyPreferences.additionalDownloadsFlow.first()) {
+                if (!gtfsDbFile(filesDir, agency).exists()) startIngest(agency)
+            }
         }
     }
 
@@ -100,21 +140,7 @@ class ScheduleSelectionViewModel(
         if (agency !in additionalDownloads.value) startIngest(agency)
     }
 
-    // Runs off the main thread so a long download doesn't freeze the UI.
-    private fun startIngest(agency: GtfsAgency) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                ingestor.ingest(agency) { status ->
-                    _ingestStatuses.value = _ingestStatuses.value + (agency to status)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // A failure leaves the last status showing; turning the agency off and on again
-                // retries.
-            }
-        }
-    }
+    private fun startIngest(agency: GtfsAgency) = AdditionalScheduleDownloads.start(agency, ingestor)
 }
 
 /**

@@ -112,6 +112,12 @@ class AttributionLegend(val text: String) : AgencyComponent
 class AttributionPartner(val name: String) : AgencyComponent
 
 /**
+ * "See everything" doesn't work for this agency, so maps use the stop-based view instead and
+ * Settings shows the option as unavailable while it's the primary agency.
+ */
+object SeeEverythingUnsupported : AgencyComponent
+
+/**
  * Closest-match tracking for live runs with no matching scheduled trip, such as GTFS-RT ADDED trips
  * or trains identified only by run number. Each run is paired with the closest real scheduled trip
  * on the same route and direction, in order. It's an approximation, so callers label it "closest

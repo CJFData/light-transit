@@ -423,6 +423,27 @@ class HomeScreenViewModel(
      * collector selects it.
      */
     private fun showAgencyPicker() {
+        viewModelScope.launch {
+            if (homeScreenPreferences.dataNoticeSeenFlow.first()) {
+                showAgencyPickerModal()
+            } else {
+                // The "Your data" notice comes first, once; continuing opens the picker.
+                LightModalManager.show(
+                    modal = YourDataModal(
+                        onContinue = {
+                            viewModelScope.launch {
+                                homeScreenPreferences.setDataNoticeSeen()
+                                showAgencyPickerModal()
+                            }
+                        },
+                    ),
+                    duration = Duration.INFINITE,
+                )
+            }
+        }
+    }
+
+    private fun showAgencyPickerModal() {
         LightModalManager.show(
             modal = AgencyPickerModal(
                 filesDir = filesDir,
@@ -710,6 +731,7 @@ class HomeScreenViewModel(
         agencyIngestJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 ingestor.ingest(agency) { ingestStatus ->
+                    AdditionalScheduleDownloads.report(agency, ingestStatus)
                     if (selectedAgency.value != agency) return@ingest
                     waitingForWifi.value = ingestStatus == GtfsIngestStatus.WaitingForWifi
                     status.value = if (waitingForWifi.value) {
@@ -1030,7 +1052,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeSc
                                 }
                             if (creditParts.isNotEmpty()) {
                                 LightText(
-                                    text = "Transit data © " + creditParts.joinToString(", "),
+                                    text = "Public transit data © " + creditParts.joinToString(", "),
                                     variant = LightTextVariant.Detail,
                                     lighten = true,
                                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),

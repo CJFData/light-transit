@@ -42,13 +42,13 @@ import com.thelightphone.transit.gtfs.GtfsRepository
 import com.thelightphone.transit.gtfs.GtfsRtTripUpdate
 import com.thelightphone.transit.gtfs.GtfsRtVehiclePosition
 import com.thelightphone.transit.gtfs.GtfsRtVehicleStatus
+import com.thelightphone.transit.gtfs.SeeEverythingUnsupported
 import com.thelightphone.transit.gtfs.fetchMergedTripUpdates
 import com.thelightphone.transit.gtfs.fetchMergedVehiclePositions
 import com.thelightphone.transit.gtfs.LineType
 import com.thelightphone.transit.gtfs.MapPreferences
 import com.thelightphone.transit.gtfs.TapHoldPreferences
 import com.thelightphone.transit.gtfs.MapTiles
-import com.thelightphone.transit.gtfs.NominatimGeocoder
 import com.thelightphone.transit.gtfs.MapTileClient
 import com.thelightphone.transit.gtfs.LiveVehicleSource
 import com.thelightphone.transit.gtfs.ScheduledArrival
@@ -236,7 +236,6 @@ enum class LiveFeedStatus {
 sealed class MapState {
     object Loading : MapState()
     data class Loaded(
-        val streetContext: String?,
         val centerLat: Double,
         val centerLon: Double,
         val zoom: Int,
@@ -259,7 +258,6 @@ sealed class MapState {
 /** Values worked out when the screen opens, reused for out-of-cycle refreshes. */
 private data class LoadedMapContext(
     val stop: StopLocation,
-    val streetContext: String?,
     val zoom: Int,
     val mapTiles: MapTiles?,
     val nearbyStops: List<NearbyStopMarker>,
@@ -285,7 +283,6 @@ class MapViewModel(
 ) : LightViewModel<Unit>() {
 
     private val repository = GtfsRepository(dbFile)
-    private val geocoder = NominatimGeocoder()
     private val tileClient = MapTileClient()
 
     private val _state = MutableStateFlow<MapState>(MapState.Loading)
@@ -330,7 +327,8 @@ class MapViewModel(
                 val tapHoldArrivalsEnabled = mapPreferences.tapHoldArrivalsEnabledFlow.first()
                 val doubleTapStationEnabled = mapPreferences.doubleTapStationEnabledFlow.first()
                 nearbyVehiclesEnabled.value = mapPreferences.trackTappedStopsEnabledFlow.first()
-                val seeEverythingEnabled = mapPreferences.seeEverythingEnabledFlow.first()
+                val seeEverythingEnabled = mapPreferences.seeEverythingEnabledFlow.first() &&
+                    agency.component<SeeEverythingUnsupported>() == null
                 // With "See everything", tracking tapped stops filters to their vehicles.
                 val filterByStopEnabled = nearbyVehiclesEnabled.value
                 val seeEverythingShowBus = mapPreferences.seeEverythingShowBusFlow.first()
@@ -349,15 +347,6 @@ class MapViewModel(
                         id, currentGtfsTimeOfDay(agency.zoneId), todayForGtfs(agency.zoneId), SCHEDULED_ARRIVALS_GRACE_PERIOD_SECONDS,
                     )
                 }
-                val streetContext = try {
-                    geocoder.reverseGeocode(stop.lat, stop.lon)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.e("MapScreen", "Reverse geocoding failed for stop $stopId", e)
-                    null
-                }
-
                 // Fit the zoom to the nearest stops around the selected stop.
                 val nearestForZoom = repository.rankStopsByDistance(stop.lat, stop.lon, ZOOM_FIT_NEAREST_STOP_COUNT, excludeStopId = stopId)
                 val zoom = fitBoundsZoom(
@@ -390,7 +379,7 @@ class MapViewModel(
                 }
 
                 loadedContext = LoadedMapContext(
-                    stop, streetContext, zoom, mapTiles, nearbyStops,
+                    stop, zoom, mapTiles, nearbyStops,
                     tapHoldArrivalsEnabled, darkMode, doubleTapStationEnabled, centerStation,
                     seeEverythingEnabled, filterByStopEnabled,
                     seeEverythingShowBus, seeEverythingShowSubway, seeEverythingShowCommuterRail,
@@ -458,7 +447,7 @@ class MapViewModel(
 
         if (agency.realtimeVehiclePositionsUrl == null && liveVehicleSource == null) {
             _state.value = MapState.Loaded(
-                context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
+                context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.NOT_SUPPORTED,
                 context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
                 context.seeEverythingEnabled, context.tapHoldVehicleEnabled,
@@ -470,7 +459,7 @@ class MapViewModel(
         val vehiclePositions = agency.fetchMergedVehiclePositions(repository, "MapScreen")
         if (vehiclePositions.primary == null && liveVehicleSource == null) {
             _state.value = MapState.Loaded(
-                context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
+                context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
                 emptyList(), context.nearbyStops, LiveFeedStatus.UNAVAILABLE,
                 context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
                 context.seeEverythingEnabled, context.tapHoldVehicleEnabled,
@@ -499,8 +488,9 @@ class MapViewModel(
         // Vehicles from the agency's own API, if it has one, for the modes it covers. Trips missing
         // from it fall back to GTFS-RT.
         val primaryStopIds = context.centerStation?.memberStopIds ?: listOf(stopId)
+        // Routes at every stop shown, including tapped stops while they're tracked.
         val liveSourceRouteIds = liveVehicleSource?.let { source ->
-            primaryStopIds.flatMapTo(mutableSetOf()) { id ->
+            activeStopIds.flatMapTo(mutableSetOf()) { id ->
                 scheduledArrivalsByStopId[id].orEmpty()
                     .filter { LineType.forGtfsRouteType(it.route.routeType) in source.coveredLineTypes }
                     .map { it.route.routeId }
@@ -646,11 +636,15 @@ class MapViewModel(
                 context.seeEverythingShowBus, context.seeEverythingShowSubway, context.seeEverythingShowCommuterRail,
             )
         } else {
-            dedupedBuses
+            // Only vehicles within the map's area, at their real positions, like "See everything".
+            val radiusMeters = MAP_TARGET_RADIUS_PIXELS * metersPerPixel(context.stop.lat, context.zoom)
+            dedupedBuses.filter { bus ->
+                bus.isArrived || haversineMeters(context.stop.lat, context.stop.lon, bus.lat, bus.lon) <= radiusMeters
+            }
         }
 
         _state.value = MapState.Loaded(
-            context.streetContext, context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
+            context.stop.lat, context.stop.lon, context.zoom, context.mapTiles,
             displayedBuses, context.nearbyStops, LiveFeedStatus.OK,
             context.tapHoldArrivalsEnabled, context.darkMapEnabled, context.doubleTapStationEnabled, context.centerStation,
             context.seeEverythingEnabled, context.tapHoldVehicleEnabled,
@@ -660,7 +654,6 @@ class MapViewModel(
     override fun onCleared() {
         super.onCleared()
         repository.close()
-        geocoder.close()
         tileClient.close()
     }
 }
@@ -868,7 +861,6 @@ class MapScreen(
                         MapCanvas(
                             stopId = stopId,
                             stopLabel = stopLabel,
-                            streetContext = s.streetContext,
                             centerLat = s.centerLat,
                             centerLon = s.centerLon,
                             zoom = s.zoom,
@@ -943,7 +935,6 @@ private fun rememberIconBitmap(icon: LightIconConfiguration, sizePx: Int, tint: 
 internal fun MapCanvas(
     stopId: String,
     stopLabel: String,
-    streetContext: String?,
     centerLat: Double,
     centerLon: Double,
     zoom: Int,
@@ -1044,7 +1035,7 @@ internal fun MapCanvas(
                                 bus.lat to bus.lon
                             }
                             val rel = projectRelativeToCenter(centerLat, centerLon, lat, lon, zoom)
-                            val point = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
+                            val point = Offset(center.x + rel.x, center.y + rel.y)
                             val dx = down.position.x - point.x
                             val dy = down.position.y - point.y
                             sqrt(dx * dx + dy * dy) < STOP_HIT_RADIUS_PX
@@ -1279,8 +1270,7 @@ internal fun MapCanvas(
         }
 
         
-        // Vehicles at their projected positions. An arrived vehicle snaps to its stop's marker. Far
-        // outliers are clipped to the edge.
+        // Vehicles at their projected positions. An arrived vehicle snaps to its stop's marker.
         buses.forEach { bus ->
             val (lat, lon) = if (bus.isArrived) {
                 stopCoordsById[bus.targetStopId] ?: (bus.lat to bus.lon)
@@ -1288,11 +1278,11 @@ internal fun MapCanvas(
                 bus.lat to bus.lon
             }
             val rel = projectRelativeToCenter(centerLat, centerLon, lat, lon, zoom)
-            val clipped = clipToRadius(Offset(center.x + rel.x, center.y + rel.y), center, maxRadius)
+            val point = Offset(center.x + rel.x, center.y + rel.y)
             val showShortLabel = seeEverythingEnabled && bus.tripId !in expandedVehicleTripIds
             drawBusMarker(
                 nativeCanvas, vehicleIconBitmapFor(bus), vehicleLabelPaint, vehicleLabelOutlinePaint,
-                vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, clipped.x, clipped.y, size.width, showShortLabel,
+                vehicleSmallLabelPaint, vehicleSmallLabelOutlinePaint, bus, point.x, point.y, size.width, showShortLabel,
             )
         }
 
@@ -1330,10 +1320,6 @@ internal fun MapCanvas(
                 if (centerIsStation) CENTER_MARKER_ICON_PX / 2f else CENTER_MARKER_ICON_PX * (1f - PIN_TIP_FRACTION_Y)
             nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelOutlinePaint)
             nativeCanvas.drawText(stopLabel, center.x, centerMarkerBottomEdge + 32f, labelPaint)
-            streetContext?.let {
-                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelOutlinePaint)
-                nativeCanvas.drawText(it, center.x, centerMarkerBottomEdge + 60f, smallLabelPaint)
-            }
         }
     }
 }

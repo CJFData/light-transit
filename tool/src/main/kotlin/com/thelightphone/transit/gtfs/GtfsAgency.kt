@@ -911,11 +911,13 @@ enum class GtfsAgency(
         null,
         timeZoneId = "America/Chicago",
         // trips.txt has no trip_headsign, so its direction column is used instead. Train Tracker
-        // covers the 'L' routes only.
+        // covers the 'L' routes only. "See everything" needs a GTFS-RT vehicle feed, which CTA's
+        // live data doesn't come from.
         components = listOf(
             RunAssociatedTripSource,
             TripDirectionColumn("direction"),
             CtaTrainTrackerSource,
+            SeeEverythingUnsupported,
         ),
     ),
     /** Schedules only. */

@@ -22,6 +22,7 @@ import com.thelightphone.transit.gtfs.BoardedTripPreferences
 import com.thelightphone.transit.gtfs.DeparturePreferences
 import com.thelightphone.transit.gtfs.GtfsAgency
 import com.thelightphone.transit.gtfs.HomeScreenPreferences
+import com.thelightphone.transit.gtfs.SeeEverythingUnsupported
 import com.thelightphone.transit.gtfs.clearAllCachedSchedules
 import com.thelightphone.transit.gtfs.LocationPreferences
 import com.thelightphone.transit.gtfs.DefaultLocation
@@ -195,6 +196,11 @@ class SettingsViewModel(
         get() = _locationEnabled
     private val _locationEnabled = MutableStateFlow(true)
 
+    /** Where Explore opens, if set. */
+    val defaultLocation: StateFlow<DefaultLocation?>
+        get() = _defaultLocation
+    private val _defaultLocation = MutableStateFlow<DefaultLocation?>(null)
+
     /**
      * The live location permission status, checked on every [onScreenShow]; null until the first
      * check.
@@ -298,10 +304,6 @@ class SettingsViewModel(
         viewModelScope.launch { locationPreferences.setLocationEnabled(enabled) }
     }
 
-    /** Where Explore opens, if set. */
-    val defaultLocation: StateFlow<DefaultLocation?>
-        get() = _defaultLocation
-    private val _defaultLocation = MutableStateFlow<DefaultLocation?>(null)
 
     fun clearDefaultLocation() {
         viewModelScope.launch { locationPreferences.clearDefaultLocation() }
@@ -676,7 +678,6 @@ class SettingsScreen(
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
-                // Indented under the Explore heading.
                 Column(modifier = Modifier.padding(start = 24.dp)) {
                     ToggleRow("Use my location", locationEnabled, viewModel::setLocationEnabled)
                     if (locationEnabled) {
@@ -849,8 +850,8 @@ class SettingsScreen(
                     modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
                 )
                 LightText(
-                    text = "On CTA 'L' and MBTA subway trips, the app sometimes guesses which live train " +
-                        "you're on. Select Run lets you pick the right one.",
+                    text = "On CTA 'L' and MBTA subway trips without an exact live match, the app pairs " +
+                        "your trip with the closest live train. Select Run lets you choose a different one.",
                     variant = LightTextVariant.Detail,
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -927,9 +928,24 @@ class SettingsScreen(
                     lighten = true,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
-                ToggleRow("See everything", seeEverythingEnabled, viewModel::setSeeEverythingEnabled)
+                // Unavailable for an agency it doesn't work with; the saved setting is kept.
+                val seeEverythingSupported = defaultAgency?.component<SeeEverythingUnsupported>() == null
+                ToggleRow(
+                    "See everything",
+                    seeEverythingEnabled && seeEverythingSupported,
+                    viewModel::setSeeEverythingEnabled,
+                    available = seeEverythingSupported,
+                )
+                if (!seeEverythingSupported) {
+                    LightText(
+                        text = "Not compatible with ${defaultAgency?.displayName?.substringBefore(" (")} currently.",
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
 
-                if (seeEverythingEnabled) {
+                if (seeEverythingEnabled && seeEverythingSupported) {
                     LightText(
                         text = "Modes shown",
                         variant = LightTextVariant.Copy,

@@ -14,7 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.clearText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -87,6 +87,13 @@ class StationListViewModel(
      * Whether a tap opens arrivals and tap and hold opens the platform map, instead of the reverse.
      */
     val stationTapArrivalsEnabled = MutableStateFlow(true)
+
+    /**
+     * The search text. Kept here rather than in Content() because the search keyboard keeps its
+     * first callback for the screen's lifetime, and Content() state is reset after visiting another
+     * screen.
+     */
+    val searchText = TextFieldState()
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
@@ -184,9 +191,7 @@ class StationListScreen(
      * Inline search, shown once the list is long enough (see STATION_SEARCH_MIN_COUNT): the
      * light-keyboard library docked under a live-filtered list.
      *
-     * [textFieldState] is hoisted to [Content]. The keyboard's `viewModel(key = ...)` keeps its
-     * first callback for the screen's lifetime, so a fresh state on each reopen would stop
-     * receiving input.
+     * [textFieldState] comes from the view model (see [StationListViewModel.searchText]).
      */
     @Composable
     private fun SearchContent(
@@ -253,8 +258,7 @@ class StationListScreen(
         val stationTapArrivalsEnabled by viewModel.stationTapArrivalsEnabled.collectAsState()
         val themeColors by LightThemeController.colors.collectAsState()
         var searchActive by remember { mutableStateOf(false) }
-        // Hoisted so it stays the same instance across reopening search; see SearchContent.
-        val searchTextFieldState = rememberTextFieldState("")
+        val searchTextFieldState = viewModel.searchText
 
         LightTheme(colors = themeColors) {
             val loadedStations = (state as? StationListState.Loaded)?.stations.orEmpty()
@@ -306,7 +310,10 @@ class StationListScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .lightClickable { searchActive = true }
+                                    .lightClickable {
+                                        searchTextFieldState.clearText()
+                                        searchActive = true
+                                    }
                                     .padding(bottom = 12.dp),
                             ) {
                                 LightIcon(

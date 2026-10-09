@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.map
 
 private val dailyMessageVisibleKey = booleanPreferencesKey("HOME_DAILY_MESSAGE_VISIBLE")
 private val dailyMessageRandomKey = booleanPreferencesKey("HOME_DAILY_MESSAGE_RANDOM")
+private val dataNoticeSeenKey = booleanPreferencesKey("HOME_DATA_NOTICE_SEEN")
 
 /** Home screen display settings. */
 class HomeScreenPreferences(private val dataStore: DataStore<Preferences>) {
@@ -25,5 +26,12 @@ class HomeScreenPreferences(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setDailyMessageRandom(random: Boolean) {
         dataStore.edit { prefs -> prefs[dailyMessageRandomKey] = random }
+    }
+
+    /** Whether the first-launch "Your data" notice has been shown. */
+    val dataNoticeSeenFlow: Flow<Boolean> = dataStore.data.map { prefs -> prefs[dataNoticeSeenKey] ?: false }
+
+    suspend fun setDataNoticeSeen() {
+        dataStore.edit { prefs -> prefs[dataNoticeSeenKey] = true }
     }
 }
