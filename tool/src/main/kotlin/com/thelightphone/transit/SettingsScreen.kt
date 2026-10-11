@@ -434,6 +434,286 @@ class SettingsViewModel(
     }
 }
 
+enum class SettingsSection(val title: String) {
+    AGENCY("Agency and downloads"),
+    ALERTS("Service alerts"),
+    EXPLORE("Explore and location"),
+    MAP("Map and gestures"),
+    TRIPS("Trips and schedules"),
+    HOME("Home screen"),
+}
+
+@Composable
+private fun NestedSettingsHome(
+    defaultAgency: GtfsAgency?,
+    darkMapEnabled: Boolean,
+    onBack: () -> Unit,
+    onOpenSection: (SettingsSection) -> Unit,
+) {
+    val themeColors by LightThemeController.colors.collectAsState()
+    LightTheme(colors = themeColors) {
+        NestedSettingsContainer(title = "Settings", onBack = onBack) {
+            SettingsEntry("Agency and downloads", defaultAgency?.displayName ?: "Choose an agency") {
+                onOpenSection(SettingsSection.AGENCY)
+            }
+            SettingsEntry("Service alerts", "Choose where transit alerts appear") {
+                onOpenSection(SettingsSection.ALERTS)
+            }
+            SettingsEntry("Explore and location", "Location access and default search location") {
+                onOpenSection(SettingsSection.EXPLORE)
+            }
+            SettingsEntry("Map and gestures", if (darkMapEnabled) "Dark map tiles and map behavior" else "Light map tiles and map behavior") {
+                onOpenSection(SettingsSection.MAP)
+            }
+            SettingsEntry("Trips and schedules", "Schedule, run selection, and trip detail") {
+                onOpenSection(SettingsSection.TRIPS)
+            }
+            SettingsEntry("Home screen", "Trip progress and daily message") {
+                onOpenSection(SettingsSection.HOME)
+            }
+        }
+    }
+}
+
+class SettingsSectionScreen(
+    sealedActivity: SealedLightActivity,
+    private val section: SettingsSection,
+) : LightScreen<Unit, SettingsViewModel>(sealedActivity) {
+    override val viewModelClass: Class<SettingsViewModel>
+        get() = SettingsViewModel::class.java
+
+    override fun createViewModel(): SettingsViewModel = SettingsViewModel(
+        AgencyPreferences(lightContext.dataStore),
+        MapPreferences(lightContext.dataStore),
+        BoardedTripPreferences(lightContext.dataStore),
+        HomeScreenPreferences(lightContext.dataStore),
+        TapHoldPreferences(lightContext.dataStore),
+        DeparturePreferences(lightContext.dataStore),
+        NetworkPreferences(lightContext.dataStore),
+        RunSelectionPreferences(lightContext.dataStore),
+        TripDetailPreferences(lightContext.dataStore),
+        LocationPreferences(lightContext.dataStore),
+        AlertPreferences(lightContext.dataStore),
+        lightContext.filesDir,
+    )
+
+    @Composable
+    override fun Content() {
+        val themeColors by LightThemeController.colors.collectAsState()
+        LightTheme(colors = themeColors) {
+            NestedSettingsContainer(
+                title = section.title,
+                onBack = { goBack() },
+                rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                    navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+                },
+            ) {
+                NestedSettingsContent(
+                    section = section,
+                    viewModel = viewModel,
+                    filesDir = lightContext.filesDir,
+                    openScheduleSelection = { region ->
+                        navigateTo(screenFactory = { activity -> ScheduleSelectionScreen(activity, region) })
+                    },
+                    openDefaultLocation = {
+                        navigateTo(screenFactory = { activity -> DefaultLocationScreen(activity) })
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NestedSettingsContainer(
+    title: String,
+    onBack: (() -> Unit)?,
+    rightButton: LightBarButton? = null,
+    content: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxSize().background(LightThemeTokens.colors.background)) {
+        LightTopBar(
+            leftButton = LightBarButton.LightIcon(
+                icon = if (onBack == null) LightIcons.BACK else LightIcons.BACK,
+                onClick = { onBack?.invoke() },
+            ),
+            center = LightTopBarCenter.Text(title),
+            rightButton = rightButton,
+        )
+        LightScrollView(Modifier.weight(1f).padding(32.dp)) { content() }
+        BackToHomeFooter(onGoBackOnce = { onBack?.invoke() })
+    }
+}
+
+@Composable
+private fun SettingsEntry(title: String, summary: String, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().lightClickable { onClick() }.padding(vertical = 18.dp)) {
+        LightText(title, LightTextVariant.Copy)
+        LightText(summary, LightTextVariant.Detail, lighten = true, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+private fun NestedToggleRow(label: String, enabled: Boolean, onToggle: (Boolean) -> Unit, available: Boolean = true) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (available) 1f else 0.4f)
+            .lightClickable { if (available) onToggle(!enabled) }
+            .padding(vertical = 12.dp),
+    ) {
+        LightIcon(
+            icon = if (enabled) LightIcons.TOGGLE_STATE_ON else LightIcons.TOGGLE_STATE_OFF,
+            size = 1.2f,
+            contentDescription = if (enabled) "On" else "Off",
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        LightText(label, LightTextVariant.Copy)
+    }
+}
+
+@Composable
+private fun NestedDescription(text: String) {
+    LightText(text, LightTextVariant.Detail, lighten = true, modifier = Modifier.padding(bottom = 12.dp))
+}
+
+@Composable
+private fun NestedSettingsContent(
+    section: SettingsSection,
+    viewModel: SettingsViewModel,
+    filesDir: File,
+    openScheduleSelection: (RegionalGroup) -> Unit,
+    openDefaultLocation: () -> Unit,
+) {
+    val defaultAgency by viewModel.defaultAgency.collectAsState()
+    val darkMap by viewModel.darkMapEnabled.collectAsState()
+    val tapHoldMap by viewModel.tapHoldArrivalsEnabled.collectAsState()
+    val tapHoldSchedules by viewModel.tapHoldScheduleArrivalsEnabled.collectAsState()
+    val tapHoldStations by viewModel.tapHoldStationArrivalsEnabled.collectAsState()
+    val tapHoldVehicles by viewModel.tapHoldVehicleEnabled.collectAsState()
+    val stationTapArrivals by viewModel.stationTapArrivalsEnabled.collectAsState()
+    val doubleTap by viewModel.doubleTapStationEnabled.collectAsState()
+    val trackStops by viewModel.trackTappedStopsEnabled.collectAsState()
+    val seeEverything by viewModel.seeEverythingEnabled.collectAsState()
+    val showBus by viewModel.seeEverythingShowBus.collectAsState()
+    val showSubway by viewModel.seeEverythingShowSubway.collectAsState()
+    val showRail by viewModel.seeEverythingShowCommuterRail.collectAsState()
+    val longerTrips by viewModel.includeLongerTripsEnabled.collectAsState()
+    val runSelection by viewModel.runSelectionEnabled.collectAsState()
+    val runStepper by viewModel.runStepperEnabled.collectAsState()
+    val showEarlierStops by viewModel.showStopsBeforeBoardingEnabled.collectAsState()
+    val progressBar by viewModel.progressBarVisible.collectAsState()
+    val dailyMessage by viewModel.dailyMessageVisible.collectAsState()
+    val randomMessage by viewModel.dailyMessageRandom.collectAsState()
+    val mergeStations by viewModel.mergeFeedStationsEnabled.collectAsState()
+    val wifiOnly by viewModel.wifiOnlyDownloadsEnabled.collectAsState()
+    val alerts by viewModel.alertsEnabled.collectAsState()
+    val alertsHome by viewModel.alertsOnHomeScreen.collectAsState()
+    val alertsMenus by viewModel.alertsInMenus.collectAsState()
+    val alertsBoarded by viewModel.alertsBoardedOnly.collectAsState()
+    val alertsPopup by viewModel.alertsPopUp.collectAsState()
+    val alertsSwipe by viewModel.alertsSwipe.collectAsState()
+    val locationEnabled by viewModel.locationEnabled.collectAsState()
+    val defaultLocation by viewModel.defaultLocation.collectAsState()
+    val permissionStatus by viewModel.locationPermissionStatus.collectAsState()
+    val permissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.ACCESS_FINE_LOCATION)
+
+    when (section) {
+        SettingsSection.AGENCY -> {
+            NestedDescription("Manage your primary agency, additional schedules, and schedule downloads.")
+            SettingsEntry("Transit agency", defaultAgency?.displayName ?: "Choose agency") {
+                LightModalManager.show(
+                    modal = AgencyPickerModal(filesDir = filesDir, allowCancel = true, onAgencySelected = viewModel::selectAgency),
+                    duration = Duration.INFINITE,
+                )
+            }
+            defaultAgency?.let { agency ->
+                    RegionalGroup.forAgency(agency)?.let { region ->
+                        SettingsEntry("Additional schedules", "Add or remove agencies in this region") {
+                        openScheduleSelection(region)
+                    }
+                }
+            }
+            NestedToggleRow("Only download over Wi-Fi", wifiOnly, viewModel::setWifiOnlyDownloadsEnabled)
+            NestedToggleRow("Merge feed stations", mergeStations, viewModel::setMergeFeedStationsEnabled)
+            SettingsEntry("Clear schedule cache", "Delete downloaded schedules and download the current one again") {
+                LightModalManager.show(modal = ClearCacheConfirmModal(onConfirm = viewModel::clearScheduleCache), duration = Duration.INFINITE)
+            }
+        }
+        SettingsSection.ALERTS -> {
+            NestedDescription("Choose whether detours, closures, and other agency service changes appear in Pico Transit.")
+            NestedToggleRow("Service alerts", alerts, viewModel::setAlertsEnabled)
+            NestedToggleRow("Show on home screen", alertsHome, viewModel::setAlertsOnHomeScreen, alerts)
+            NestedToggleRow("Show only for boarded trips", alertsBoarded, viewModel::setAlertsBoardedOnly, alerts)
+            NestedToggleRow("Show in menus", alertsMenus, viewModel::setAlertsInMenus, alerts)
+            NestedToggleRow("Pop up new alerts", alertsPopup, viewModel::setAlertsPopUp, alerts)
+            NestedToggleRow("Swipe between alerts", alertsSwipe, viewModel::setAlertsSwipe, alerts)
+        }
+        SettingsSection.EXPLORE -> {
+            NestedDescription("Find stops near your location or a default place you choose. Location data stays on your phone.")
+            NestedToggleRow("Use my location", locationEnabled, viewModel::setLocationEnabled)
+            if (locationEnabled) {
+                LightText(
+                    when (permissionStatus) {
+                        LightServiceMethod.GetPermission.Result.Granted -> "Location access is enabled."
+                        LightServiceMethod.GetPermission.Result.Denied,
+                        LightServiceMethod.GetPermission.Result.BlockedByServer -> "Location access was denied."
+                        else -> "Location access has not been granted yet."
+                    },
+                    LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+                if (permissionStatus != LightServiceMethod.GetPermission.Result.Granted) {
+                    SettingsEntry("Enable location access", "Allow Explore to use the phone's location") { permissionLauncher?.launch() }
+                }
+            }
+            SettingsEntry(
+                "Default location",
+                when (val location = defaultLocation) {
+                    is DefaultLocation.Place -> location.location.label
+                    DefaultLocation.Current -> "Current location"
+                    null -> "Set a default location"
+                },
+            ) { openDefaultLocation() }
+            if (defaultLocation != null) SettingsEntry("Clear default location", "Remove the saved Explore location") { viewModel.clearDefaultLocation() }
+        }
+        SettingsSection.MAP -> {
+            NestedDescription("Control map appearance, vehicle visibility, and map gestures.")
+            NestedToggleRow("Dark map tiles", darkMap, viewModel::setDarkMapEnabled)
+            NestedToggleRow("Tap and hold a stop", tapHoldMap, viewModel::setTapHoldArrivalsEnabled)
+            NestedToggleRow("Tap and hold in Schedules", tapHoldSchedules, viewModel::setTapHoldScheduleArrivalsEnabled)
+            NestedToggleRow("Tap and hold a station", tapHoldStations, viewModel::setTapHoldStationArrivalsEnabled)
+            NestedToggleRow("Stations list opens arrivals on tap", stationTapArrivals, viewModel::setStationTapArrivalsEnabled)
+            NestedToggleRow("Tap and hold a vehicle", tapHoldVehicles, viewModel::setTapHoldVehicleEnabled)
+            NestedToggleRow("Double-tap to open a station", doubleTap, viewModel::setDoubleTapStationEnabled)
+            NestedToggleRow("Track tapped stops", trackStops, viewModel::setTrackTappedStopsEnabled)
+            val seeEverythingSupported = defaultAgency?.component<SeeEverythingUnsupported>() == null
+            NestedToggleRow("See everything", seeEverything && seeEverythingSupported, viewModel::setSeeEverythingEnabled, seeEverythingSupported)
+            if (seeEverything && seeEverythingSupported) {
+                LightText("Vehicle types shown", LightTextVariant.Copy, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                NestedToggleRow("Bus", showBus, viewModel::setSeeEverythingShowBus)
+                NestedToggleRow("Subway", showSubway, viewModel::setSeeEverythingShowSubway)
+                NestedToggleRow("Commuter Rail", showRail, viewModel::setSeeEverythingShowCommuterRail)
+            }
+        }
+        SettingsSection.TRIPS -> {
+            NestedDescription("Choose which trips appear in schedules and how live trips are selected and displayed.")
+            NestedToggleRow("Include longer trips in departures", longerTrips, viewModel::setIncludeLongerTripsEnabled)
+            NestedToggleRow("Run selection", runSelection, viewModel::setRunSelectionEnabled)
+            if (runSelection) NestedToggleRow("Next and previous run buttons", runStepper, viewModel::setRunStepperEnabled)
+            NestedToggleRow("Show earlier stops", showEarlierStops, viewModel::setShowStopsBeforeBoardingEnabled)
+        }
+        SettingsSection.HOME -> {
+            NestedDescription("Choose which optional information appears on the Home screen.")
+            NestedToggleRow("Trip progress bar", progressBar, viewModel::setProgressBarVisible)
+            NestedToggleRow("Daily message", dailyMessage, viewModel::setDailyMessageVisible)
+            if (dailyMessage) NestedToggleRow("Randomize daily message", randomMessage, viewModel::setDailyMessageRandom)
+        }
+    }
+}
+
 class SettingsScreen(
     sealedActivity: SealedLightActivity,
 ) : LightScreen<Unit, SettingsViewModel>(sealedActivity) {
@@ -479,6 +759,16 @@ class SettingsScreen(
 
     @Composable
     override fun Content() {
+        NestedSettingsHome(
+            defaultAgency = viewModel.defaultAgency.collectAsState().value,
+            darkMapEnabled = viewModel.darkMapEnabled.collectAsState().value,
+            onBack = { goBack() },
+            onOpenSection = { section ->
+                navigateTo(screenFactory = { activity -> SettingsSectionScreen(activity, section) })
+            },
+        )
+        return
+
         val defaultAgency by viewModel.defaultAgency.collectAsState()
         val darkMapEnabled by viewModel.darkMapEnabled.collectAsState()
         val tapHoldArrivalsEnabled by viewModel.tapHoldArrivalsEnabled.collectAsState()
