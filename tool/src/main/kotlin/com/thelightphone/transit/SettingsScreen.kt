@@ -448,11 +448,12 @@ private fun NestedSettingsHome(
     defaultAgency: GtfsAgency?,
     darkMapEnabled: Boolean,
     onBack: () -> Unit,
+    rightButton: LightBarButton? = null,
     onOpenSection: (SettingsSection) -> Unit,
 ) {
     val themeColors by LightThemeController.colors.collectAsState()
     LightTheme(colors = themeColors) {
-        NestedSettingsContainer(title = "Settings", onBack = onBack) {
+        NestedSettingsContainer(title = "Settings", onBack = onBack, rightButton = rightButton) {
             SettingsEntry("Agency and downloads", defaultAgency?.displayName ?: "Choose an agency") {
                 onOpenSection(SettingsSection.AGENCY)
             }
@@ -763,6 +764,9 @@ class SettingsScreen(
             defaultAgency = viewModel.defaultAgency.collectAsState().value,
             darkMapEnabled = viewModel.darkMapEnabled.collectAsState().value,
             onBack = { goBack() },
+            rightButton = currentTripTopBarButton(lightContext.dataStore, lightContext.filesDir) { dbFile, tripId, fromStopSequence, routeLabel, directionLabel ->
+                navigateTo(screenFactory = { activity -> TripDetailScreen(activity, dbFile, tripId, fromStopSequence, routeLabel, directionLabel) })
+            },
             onOpenSection = { section ->
                 navigateTo(screenFactory = { activity -> SettingsSectionScreen(activity, section) })
             },
