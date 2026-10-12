@@ -210,8 +210,13 @@ private fun CreditsContent() {
     AboutBody("Map tiles © OpenStreetMap contributors © CARTO")
     AboutSubheading("Made by")
     AboutBody("Christian Ferreira · github.com/CJFData")
+    AboutSubheading("Thanks")
+    AboutBody(
+        "To Light's SDK development team for their support implementing updates that allowed the toggle for downloads to occur only over wi-fi, and GPS support for explore mode, especially to Guy Dupont for both your code contributions and communication and support to the development community. Big thank you to Jose Briones for the Settings and About " +
+            "cleanup and for his help adding and testing Denver-area support and for being an avid public transit rider!"
+    )
     AboutSubheading("Support Pico Transit")
-    AboutBody("If Pico Transit helps you catch your bus, train, or ferry, consider buying me a coffee ☕ — buymeacoffee.com/cjfdata")
+    AboutBody("If Pico Transit helps you catch your bus, train, or ferry, consider buying me a coffee ☕ buymeacoffee.com/cjfdata")
 }
 
 @Composable

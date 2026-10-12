@@ -10,6 +10,10 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 
 ## 🔄 Recent updates
 
+**v1.0.1**
+- 🗂️ **Simpler Settings and About**: both are now short menus that open focused pages (Agency and downloads, Service alerts, Explore and location, Map and gestures, and more). Redesigned by Jose Briones.
+- 🙏 **Thanks in About**: About → Credits now thanks Light's development team and Jose Briones.
+
 **v1.0.0**
 - 📍 **Default location**: set a place in Settings → Explore (or from Explore's header) and Explore opens there. It's looked up once and saved on your phone. Current location can be the default too.
 - 🔒 **Location is opt-in**: it's off until you turn it on in Explore or Settings, and a "Your data" notice on first launch explains what leaves your phone.
@@ -348,10 +352,10 @@ Pico Transit has begun the submission process to become a released community too
 
 **For testers**, it can be installed with ADB:
 
-1. Download the latest APK from the [Releases page](https://github.com/CJFData/light-transit/releases): open the newest release and grab `pico-transit-v<version>.apk` under **Assets**. Or build one yourself with `./gradlew :tool:assembleRelease`.
+1. Build the APK with `./gradlew :tool:assembleRelease` (see [Building & running it](#%EF%B8%8F-building--running-it)).
 2. Turn on Developer Options and USB debugging on your Light Phone III, plug it in, and run:
    ```bash
-   adb install -r pico-transit-v<version>.apk
+   adb install -r tool/build/outputs/apk/release/tool-release.apk
    ```
 3. On the phone, allow "Any tools" in LightOS's tool settings. Light notes this setting carries privacy and performance risks.
 
@@ -374,7 +378,7 @@ Happy transit-ing! 🚏🚌🚆
 
 ## 🙌 Credits
 
-Thanks to [Jose Briones](https://github.com/jbriones95) for his continued support integrating RTD Denver and Colorado transit into Pico Transit.
+Thanks to [Jose Briones](https://github.com/jbriones95) for redesigning Settings and About into clearer nested screens, and for his continued help adding and testing Denver-area and Colorado support in Pico Transit.
 
 Thanks to [Guy Dupont](https://github.com/dupontgu) on the Light team for adding `LightConnectivity` to `light-sdk`, the network-state API that made the "Only download over Wi-Fi" setting possible, and to the whole Light Phone team for making this SDK a genuine pleasure to build on and the LightOS developer community such a positive, supportive place to be.
 
