@@ -24,7 +24,9 @@ import com.thelightphone.sdk.shared.LightServiceMethod
 import com.thelightphone.sdk.shared.asKotlinResult
 import com.thelightphone.sdk.ui.LightNfcTapReader
 import com.thelightphone.sdk.ui.LightNfcTapState
+import com.thelightphone.sdk.ui.LightBarcodeFormats
 import com.thelightphone.sdk.ui.LightQrCodeScanner
+import com.thelightphone.sdk.ui.LightScannedBarcode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.retryWhen
@@ -32,7 +34,11 @@ import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Wrapper for the UI library's LightQrCodeScanner that include the client library's functions for
- * checking and requesting the camera permission for the SDK server
+ * checking and requesting the camera permission for the SDK server.
+ *
+ * Defaults to QR-only. Pass [LightBarcodeFormats] constants in [formats] to
+ * decode other symbologies, and [onScannedBarcode] to receive the full result
+ * (format name + raw payload bytes) instead of the plain string.
  */
 @Composable
 fun LightQrCodeScanner(
@@ -40,6 +46,8 @@ fun LightQrCodeScanner(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     title: String = "Scan QR Code",
+    formats: List<Int> = LightBarcodeFormats.QR_ONLY,
+    onScannedBarcode: ((LightScannedBarcode) -> Unit)? = null,
 ) {
     val permissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.CAMERA)
     LightQrCodeScanner(
@@ -47,6 +55,8 @@ fun LightQrCodeScanner(
         onScanned = onScanned,
         onBack = onBack,
         modifier = modifier,
+        formats = formats,
+        onScannedBarcode = onScannedBarcode,
         checkCameraPermission = {
             checkPermission(Manifest.permission.CAMERA).asKotlinResult
                 .map { it.permissionResult == LightServiceMethod.GetPermission.Result.Granted }
