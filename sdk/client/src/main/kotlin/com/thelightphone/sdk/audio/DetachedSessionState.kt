@@ -10,16 +10,18 @@ package com.thelightphone.sdk.audio
  *   exists before its `MediaController` connects and after it disconnects, so
  *   counting controllers instead would let the service stop underneath an
  *   arriving reconnect.
- * - **The session usage** spans the service adopting it to the service stopping.
- *   It outlives the handle on purpose: releasing a handle does not stop detached
- *   playback, and a later handle must not silently change the usage of audio
- *   that is still playing.
+ * - **The staged spec** is what the latest `newPlayer` asked for. The service
+ *   builds its player from it in `onCreate`, before any controller connects.
+ * - **The session spec** spans the service adopting the staged spec to the
+ *   service stopping. It outlives the handle on purpose: releasing a handle
+ *   does not stop detached playback, and a later handle must not silently
+ *   change the usage or cache of audio that is still playing.
  *
  * **This type is process-local and the service depends on that.**
  * [LightAudioService] is declared without `android:process` so it shares the
  * tool's process and therefore this instance. Splitting the process gives each
  * side its own copy, and the service's copy would report no open handle — it
- * would stop itself 60s into any pause with a tool still attached. The service
+ * would stop itself [IDLE_STOP_MS] into any pause with a tool still attached. The service
  * asserts its process on startup rather than letting that happen quietly.
  */
 internal class DetachedSessionState {

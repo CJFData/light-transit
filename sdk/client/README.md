@@ -165,7 +165,7 @@ val player = audio.newPlayer(LightPlayerSpec(
 
 The cache is consulted before the network, and newly streamed bytes are written to it. When it is full, the bytes read longest ago are discarded.
 
-Cached bytes are filed under `LightAudioItem.id`, so an item whose URL is re-resolved still finds what it already cached. Files and bundled assets bypass caching, since they are already on the device.
+Cached bytes are filed under `LightAudioItem.id`, so an item whose URL is re-resolved still finds what it already cached. Files and bundled assets bypass caching, since they are already on the device. DASH segments are filed under their own URLs, so re-resolved DASH URLs do not reuse what the old ones cached.
 
 A detached session's cache is fixed when its player is built. Reconnecting with a different cache throws `LightAudioPlayerException`, the same way a conflicting `LightAudioUsage` does.
 

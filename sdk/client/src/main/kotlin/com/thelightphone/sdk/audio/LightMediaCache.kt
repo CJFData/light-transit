@@ -10,6 +10,9 @@ package com.thelightphone.sdk.audio
  * longest ago are discarded to stay under [sizeBytes]. A name opened again in
  * the same process must use the same [sizeBytes].
  *
+ * DASH segments are filed under their own URLs, so re-resolved DASH URLs do not
+ * reuse what the old ones cached.
+ *
  * @property name directory name: letters, digits, `-`, and `_` only
  * @property sizeBytes the most the store may hold
  */
