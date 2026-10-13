@@ -18,7 +18,7 @@ class LightSdkPlugin : Plugin<Project> {
         val ALLOWED_DEPENDENCIES: Set<String> = readResourceLines("allowed-dependencies.txt").toSet()
         val SDK_VERSION: String = readResourceLines("sdk-version.txt").single()
 
-        private fun readResourceLines(name: String): List<String> {
+        internal fun readResourceLines(name: String): List<String> {
             val stream = LightSdkPlugin::class.java.getResourceAsStream(name)
                 ?: error("Light SDK plugin resource missing: $name")
             return stream.bufferedReader().useLines { lines ->

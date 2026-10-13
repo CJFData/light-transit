@@ -200,8 +200,8 @@ object LightToolPolicy {
     val ALLOWED_CAPABILITIES: Set<String> =
         setOf(DETACHED_AUDIO, AUDIO_DASH, TOOL_MANAGER_PROVIDER, CLEARTEXT_HTTP)
 
-    /** media3 version the SDK is built against. Keep in sync with the catalog. */
-    const val MEDIA3_VERSION: String = "1.10.1"
+    /** media3 version the SDK is built against, generated from its catalog. */
+    val MEDIA3_VERSION: String = LightSdkPlugin.readResourceLines("media3-version.txt").single()
 
     /** Dependencies a capability puts on the tool's classpath. */
     val CAPABILITY_IMPLIED_DEPENDENCIES: Map<String, List<String>> = mapOf(
