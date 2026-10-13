@@ -1,6 +1,7 @@
 package com.thelightphone.sdk.audio
 
 import android.app.Application
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
@@ -57,6 +58,16 @@ internal class LightAudioService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
+
+    /**
+     * Not sticky: a service the system recreates after killing the process has
+     * no handle, no queue, and only the default spec, which would then refuse
+     * the tool's own reconnect.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        return START_NOT_STICKY
+    }
 
     override fun onDestroy() {
         idleHandler.removeCallbacks(idleStop)
