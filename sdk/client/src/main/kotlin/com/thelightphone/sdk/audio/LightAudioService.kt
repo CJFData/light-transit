@@ -92,11 +92,6 @@ internal class LightAudioService : MediaSessionService() {
                 if (!isDetachedSpecCompatible(detachedSessionState.activeSpec(), requestedSpec)) {
                     return MediaSession.ConnectionResult.reject()
                 }
-                // An empty player has no live playback to preserve, so this fresh
-                // session may take the connecting tool's requested usage.
-                if (player.mediaItemCount == 0) {
-                    adoptUsage(requestedUsage)
-                }
             }
             return super.onConnect(session, controller)
         }
@@ -110,12 +105,6 @@ internal class LightAudioService : MediaSessionService() {
         override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
             refreshIdleStop()
         }
-    }
-
-    /** A fresh session takes the connecting handle's usage; a live one keeps its own. */
-    private fun adoptUsage(usage: LightAudioUsage) {
-        player.setAudioAttributes(usage.toMedia3AudioAttributes(), true)
-        detachedSessionState.activeSpec()?.let { detachedSessionState.adoptSpec(it.copy(usage = usage)) }
     }
 
     private fun refreshIdleStop() {
