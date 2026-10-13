@@ -106,6 +106,7 @@ class LightAudioPlayer internal constructor(
             // it, and in detached mode another controller may edit it at any time.
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 refreshQueueState(connectedPlayer)
+                _error.value = _error.value?.relocatedIn(connectedPlayer)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -127,7 +128,7 @@ class LightAudioPlayer internal constructor(
             }
 
             override fun onPlayerErrorChanged(error: PlaybackException?) {
-                _error.value = error?.toLightAudioError(connectedPlayer.currentMediaItemIndex)
+                _error.value = error?.toLightAudioError(connectedPlayer)
             }
         })
         val state = connectedPlayer.snapshotState()
@@ -136,8 +137,7 @@ class LightAudioPlayer internal constructor(
         _positionMs.value = state.positionMs
         _durationMs.value = state.durationMs
         _isPlaying.value = state.isPlaying
-        _error.value = connectedPlayer.playerError
-            ?.toLightAudioError(connectedPlayer.currentMediaItemIndex)
+        _error.value = connectedPlayer.playerError?.toLightAudioError(connectedPlayer)
         if (state.isPlaying) {
             startPositionUpdates()
         } else {

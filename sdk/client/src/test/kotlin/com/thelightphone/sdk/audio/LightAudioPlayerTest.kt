@@ -169,6 +169,27 @@ class LightAudioPlayerTest {
     }
 
     @Test
+    fun errorFollowsItsItemThroughQueueEdits() {
+        fun queuePlayer(ids: List<String>, current: Int) = Proxy.newProxyInstance(
+            Player::class.java.classLoader,
+            arrayOf(Player::class.java),
+        ) { _, method, args ->
+            when (method.name) {
+                "getMediaItemCount" -> ids.size
+                "getCurrentMediaItemIndex" -> current
+                "getCurrentMediaItem" -> MediaItem.Builder().setMediaId(ids[current]).build()
+                "getMediaItemAt" -> MediaItem.Builder().setMediaId(ids[args!![0] as Int]).build()
+                else -> null
+            }
+        } as Player
+        val error = LightAudioError(LightAudioErrorKind.Source, "ERROR_CODE_IO_UNSPECIFIED", 1, "b")
+
+        assertEquals(0, error.relocatedIn(queuePlayer(listOf("b", "a"), current = 0)).itemIndex)
+        assertEquals(2, error.relocatedIn(queuePlayer(listOf("a", "c", "b"), current = 0)).itemIndex)
+        assertEquals(NO_MEDIA_ITEM, error.relocatedIn(queuePlayer(listOf("a"), current = 0)).itemIndex)
+    }
+
+    @Test
     fun commandsRunImmediatelyAfterReady() {
         val commands = PendingPlayerCommands()
         val calls = mutableListOf<Int>()

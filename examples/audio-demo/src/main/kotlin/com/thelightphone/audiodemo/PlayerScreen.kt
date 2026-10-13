@@ -199,7 +199,7 @@ class PlayerViewModel(
 
     fun repairFailedSource() {
         if (!canCommand()) return
-        val index = repairIndex(error.value, queue.value) ?: return
+        val index = repairIndex(error.value) ?: return
         val expired = clips.first { it.id == SampleAudioCatalog.EXPIRED_DAWN_ID }
         currentPlayer.replaceMediaItem(index, expired.repairedDawnItem())
         currentPlayer.play()
@@ -259,10 +259,10 @@ internal fun queueItemAt(queue: List<LightQueueItem>, index: Int): LightQueueIte
 internal fun skipPosition(positionMs: Long, durationMs: Long, deltaMs: Long): Long =
     (positionMs + deltaMs).coerceIn(0L, durationMs.coerceAtLeast(0L))
 
-internal fun repairIndex(error: LightAudioError?, queue: List<LightQueueItem>): Int? =
-    error?.takeIf { it.kind == LightAudioErrorKind.Source }
+internal fun repairIndex(error: LightAudioError?): Int? =
+    error?.takeIf { it.kind == LightAudioErrorKind.Source && it.itemId == SampleAudioCatalog.EXPIRED_DAWN_ID }
         ?.itemIndex
-        ?.takeIf { queue.getOrNull(it)?.id == SampleAudioCatalog.EXPIRED_DAWN_ID }
+        ?.takeIf { it >= 0 }
 
 internal fun AudioClip.repairedDawnItem(): LightAudioItem = copy(
     source = AudioClipSource.UrlSource(SampleAudioCatalog.DAWN_URL),
@@ -358,7 +358,7 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) :
                             .fillMaxWidth()
                             .padding(bottom = 0.5f.gridUnitsAsDp()),
                     )
-                    if (repairIndex(it, queue) != null) {
+                    if (repairIndex(it) != null) {
                         LightText(
                             text = "REPLACE EXPIRED URL + PLAY",
                             variant = LightTextVariant.Fine,
