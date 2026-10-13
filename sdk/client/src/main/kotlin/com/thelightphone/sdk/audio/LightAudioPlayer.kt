@@ -343,6 +343,17 @@ class LightAudioPlayer internal constructor(
         commands.dispatch(Player::seekToPreviousMediaItem)
     }
 
+    /**
+     * Selects the queue item at [index], starting it at the beginning. An index past the end
+     * changes nothing.
+     */
+    fun seekToDefaultPosition(index: Int) {
+        require(index >= 0) { "Queue index must not be negative" }
+        commands.dispatch { player ->
+            if (index < player.mediaItemCount) player.seekToDefaultPosition(index)
+        }
+    }
+
     /** Waits for connection, returning `false` if this player is released first. */
     suspend fun awaitReady(): Boolean = awaitPlayerReady(availability)
 
