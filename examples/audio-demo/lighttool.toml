@@ -1,6 +1,6 @@
 [tool]
 id = "com.thelightphone.audiodemo"
-label = "Light Audio Demo"
+label = "Audio Demo"
 versionCode = 1
 versionName = "0.0.1"
 permissions = ["android.permission.INTERNET", "android.permission.RECORD_AUDIO"]
