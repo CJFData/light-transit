@@ -38,26 +38,18 @@ value class DefaultLightAudio(
      * Only one [LightAudioPlayback.Detached] player handle may exist in the
      * process at a time. Reconnecting to a live detached session cannot change
      * its configuration, so [spec] must match the live session's specification.
+     *
+     * @throws IllegalArgumentException when [spec]'s cache name is already in
+     *   use in this process with a different size
      */
     override fun newPlayer(spec: LightPlayerSpec): LightAudioPlayer {
         if (spec.playback == LightAudioPlayback.Attached) {
+            spec.cache?.let(mediaCacheStore::claim)
             return LightAudioPlayer(sealedActivity.activity, spec)
         }
 
         sealedActivity.activity.requireDetachedAudioCapability()
-        val activeSpec = detachedSessionState.activeSpec()
-        if (!isDetachedSpecCompatible(activeSpec, spec)) {
-            throw LightAudioPlayerException(
-                "Detached audio is already using $activeSpec; requested $spec. " +
-                    "Reconnect with the active specification or stop the detached session first."
-            )
-        }
-        if (!detachedSessionState.openHandle()) {
-            throw LightAudioPlayerException(
-                "Only one detached LightAudioPlayer may exist at a time; release the existing player first"
-            )
-        }
-        detachedSessionState.stageSpec(spec)
+        admitDetachedPlayer(spec)
         return try {
             LightAudioPlayer(
                 sealedActivity.activity,
@@ -95,4 +87,30 @@ private fun Context.readAudioCapabilities(): AudioCapabilities {
         ?.toIntOrNull()
         ?: DEFAULT_SAMPLE_RATE
     return AudioCapabilities(sampleRate = sampleRate)
+}
+
+/**
+ * Takes the detached handle and stages [spec] for the service, or throws having
+ * changed nothing. The cache is claimed first: the service opens it in
+ * `onCreate`, where a size mismatch would crash the process instead.
+ */
+internal fun admitDetachedPlayer(
+    spec: LightPlayerSpec,
+    state: DetachedSessionState = detachedSessionState,
+    claimCache: (LightMediaCache) -> Unit = mediaCacheStore::claim,
+) {
+    spec.cache?.let(claimCache)
+    val activeSpec = state.activeSpec()
+    if (!isDetachedSpecCompatible(activeSpec, spec)) {
+        throw LightAudioPlayerException(
+            "Detached audio is already using $activeSpec; requested $spec. " +
+                "Reconnect with the active specification or stop the detached session first."
+        )
+    }
+    if (!state.openHandle()) {
+        throw LightAudioPlayerException(
+            "Only one detached LightAudioPlayer may exist at a time; release the existing player first"
+        )
+    }
+    state.stageSpec(spec)
 }

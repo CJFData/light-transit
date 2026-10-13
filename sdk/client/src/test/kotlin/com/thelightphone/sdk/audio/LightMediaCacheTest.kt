@@ -25,10 +25,13 @@ class LightMediaCacheTest {
     }
 
     @Test
-    fun reopeningANameRequiresTheSameSize() {
-        requireSameCacheSize(LightMediaCache("stream", SIZE), openedSizeBytes = SIZE)
+    fun reclaimingANameRequiresTheSameSize() {
+        val claims = CacheSizeClaims()
+        claims.claim(LightMediaCache("stream", SIZE))
+        claims.claim(LightMediaCache("stream", SIZE))
+        claims.claim(LightMediaCache("other", SIZE * 2))
         assertFailsWith<IllegalArgumentException> {
-            requireSameCacheSize(LightMediaCache("stream", SIZE * 2), openedSizeBytes = SIZE)
+            claims.claim(LightMediaCache("stream", SIZE * 2))
         }
     }
 
@@ -60,5 +63,54 @@ class DetachedSessionCacheTest {
         assertEquals(detachedSpec, state.activeSpec())
         state.clearSession()
         assertNull(state.activeSpec())
+    }
+}
+
+class AdmitDetachedPlayerTest {
+    private val detached = LightPlayerSpec(playback = LightAudioPlayback.Detached, cache = streamCache)
+
+    @Test
+    fun admissionStagesTheSpecAndTakesTheHandle() {
+        val state = DetachedSessionState()
+
+        admitDetachedPlayer(detached, state, CacheSizeClaims()::claim)
+
+        assertTrue(state.isHandleOpen())
+        assertEquals(detached, state.stagedSpec())
+    }
+
+    @Test
+    fun cacheSizeConflictFailsBeforeAnythingIsStaged() {
+        val state = DetachedSessionState()
+        val claims = CacheSizeClaims().apply { claim(streamCache.copy(sizeBytes = 1024L)) }
+
+        assertFailsWith<IllegalArgumentException> { admitDetachedPlayer(detached, state, claims::claim) }
+
+        assertFalse(state.isHandleOpen())
+        assertEquals(LightPlayerSpec(playback = LightAudioPlayback.Detached), state.stagedSpec())
+    }
+
+    @Test
+    fun incompatibleLiveSessionFailsWithoutTakingTheHandle() {
+        val state = DetachedSessionState().apply { adoptSpec(detached) }
+
+        assertFailsWith<LightAudioPlayerException> {
+            admitDetachedPlayer(detached.copy(usage = LightAudioUsage.Alarm), state, CacheSizeClaims()::claim)
+        }
+
+        assertFalse(state.isHandleOpen())
+        assertEquals(LightPlayerSpec(playback = LightAudioPlayback.Detached), state.stagedSpec())
+    }
+
+    @Test
+    fun secondHandleFailsWithoutRestaging() {
+        val state = DetachedSessionState()
+        admitDetachedPlayer(detached, state, CacheSizeClaims()::claim)
+
+        assertFailsWith<LightAudioPlayerException> {
+            admitDetachedPlayer(detached.copy(cache = null), state, CacheSizeClaims()::claim)
+        }
+
+        assertEquals(detached, state.stagedSpec())
     }
 }

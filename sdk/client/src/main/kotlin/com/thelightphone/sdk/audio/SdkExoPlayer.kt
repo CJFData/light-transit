@@ -49,33 +49,38 @@ internal fun buildSdkExoPlayer(
  */
 @OptIn(UnstableApi::class)
 internal class MediaCacheStore {
-    private val cachesByPath = ConcurrentHashMap<String, OpenedCache>()
-    private val databaseProviders = ConcurrentHashMap<Context, DatabaseProvider>()
+    private val sizes = CacheSizeClaims()
+    private val cachesByPath = ConcurrentHashMap<String, Cache>()
+    private var databaseProvider: DatabaseProvider? = null
 
-    fun open(context: Context, spec: LightMediaCache): Cache {
-        val appContext = context.applicationContext
-        val directory = spec.directoryIn(appContext)
-        val opened = cachesByPath.computeIfAbsent(directory.canonicalPath) {
-            OpenedCache(
-                SimpleCache(directory, LeastRecentlyUsedCacheEvictor(spec.sizeBytes), databaseProvider(appContext)),
-                spec.sizeBytes,
-            )
-        }
-        requireSameCacheSize(spec, opened.sizeBytes)
-        return opened.cache
+    /** Fixes [spec]'s size for the process without opening it. */
+    fun claim(spec: LightMediaCache) {
+        sizes.claim(spec)
     }
 
+    fun open(context: Context, spec: LightMediaCache): Cache {
+        claim(spec)
+        val appContext = context.applicationContext
+        val directory = spec.directoryIn(appContext)
+        return cachesByPath.computeIfAbsent(directory.canonicalPath) {
+            SimpleCache(directory, LeastRecentlyUsedCacheEvictor(spec.sizeBytes), databaseProvider(appContext))
+        }
+    }
+
+    @Synchronized
     private fun databaseProvider(appContext: Context): DatabaseProvider =
-        databaseProviders.computeIfAbsent(appContext) { StandaloneDatabaseProvider(it) }
+        databaseProvider ?: StandaloneDatabaseProvider(appContext).also { databaseProvider = it }
 }
 
-private class OpenedCache(val cache: Cache, val sizeBytes: Long)
+/** A cache's size is fixed by the first claim on its name in the process. */
+internal class CacheSizeClaims {
+    private val sizesByName = ConcurrentHashMap<String, Long>()
 
-/** A cache's size is fixed by its first opening in the process. */
-internal fun requireSameCacheSize(requested: LightMediaCache, openedSizeBytes: Long) {
-    require(requested.sizeBytes == openedSizeBytes) {
-        "Cache '${requested.name}' is already open with $openedSizeBytes bytes; " +
-            "requested ${requested.sizeBytes}"
+    fun claim(spec: LightMediaCache) {
+        val claimed = sizesByName.putIfAbsent(spec.name, spec.sizeBytes) ?: return
+        require(claimed == spec.sizeBytes) {
+            "Cache '${spec.name}' is already in use with $claimed bytes; requested ${spec.sizeBytes}"
+        }
     }
 }
 
