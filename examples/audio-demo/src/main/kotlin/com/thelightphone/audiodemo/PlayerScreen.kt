@@ -205,7 +205,8 @@ class PlayerViewModel(
         currentPlayer.play()
     }
 
-    private fun canCommand(): Boolean = currentPlayer.availability.value !in TERMINAL_AVAILABILITY
+    private fun canCommand(): Boolean = currentPlayer.availability.value != LightAudioPlayerAvailability.Refused &&
+        currentPlayer.availability.value != LightAudioPlayerAvailability.Released
 
     fun cycleSpeed() {
         val next = SPEEDS[(SPEEDS.indexOf(speed.value) + 1).mod(SPEEDS.size)]
@@ -245,11 +246,6 @@ class PlayerViewModel(
     companion object {
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
         private const val SKIP_INTERVAL_MS = 15_000L
-        private val TERMINAL_AVAILABILITY = setOf(
-            LightAudioPlayerAvailability.Refused,
-            LightAudioPlayerAvailability.Disconnected,
-            LightAudioPlayerAvailability.Released,
-        )
     }
 }
 

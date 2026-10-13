@@ -48,20 +48,18 @@ internal class PendingPlayerCommands {
             released = true
             player = null
             pending.clear()
-            if (_availability.value !in TERMINAL_FAILURES) {
+            if (_availability.value != LightAudioPlayerAvailability.Refused) {
                 _availability.value = LightAudioPlayerAvailability.Released
             }
         }
     }
 
-    /** Ends with a failure state that a later [release] keeps. */
-    fun terminate(availability: LightAudioPlayerAvailability) {
-        require(availability in TERMINAL_FAILURES) { "Not a terminal failure: $availability" }
+    fun refuse() {
         synchronized(this) {
             released = true
             player = null
             pending.clear()
-            _availability.value = availability
+            _availability.value = LightAudioPlayerAvailability.Refused
         }
     }
 
@@ -69,8 +67,3 @@ internal class PendingPlayerCommands {
         check(!released) { "LightAudioPlayer has been released" }
     }
 }
-
-private val TERMINAL_FAILURES = setOf(
-    LightAudioPlayerAvailability.Refused,
-    LightAudioPlayerAvailability.Disconnected,
-)

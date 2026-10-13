@@ -33,10 +33,7 @@ import kotlinx.coroutines.flow.first
 enum class LightAudioPlayerAvailability {
     Initializing,
     Ready,
-    /** The detached session rejected or failed the connection. Terminal. */
     Refused,
-    /** The detached session dropped an established connection. Terminal. */
-    Disconnected,
     Released,
 }
 
@@ -154,13 +151,6 @@ class LightAudioPlayer internal constructor(
         val token = SessionToken(context, ComponentName(context, LightAudioService::class.java))
         val future = MediaController.Builder(context, token)
             .setConnectionHints(detachedConnectionHints(usage))
-            .setListener(object : MediaController.Listener {
-                override fun onDisconnected(controller: MediaController) {
-                    if (isEstablishedDisconnect(player, controller)) {
-                        terminate(LightAudioPlayerAvailability.Disconnected)
-                    }
-                }
-            })
             .buildAsync()
         cancelPendingConnection = { future.cancel(false) }
         future.addListener(
@@ -168,15 +158,15 @@ class LightAudioPlayer internal constructor(
                 cancelPendingConnection = null
                 runCatching(future::get)
                     .onSuccess(::connectPlayer)
-                    .onFailure { terminate(LightAudioPlayerAvailability.Refused) }
+                    .onFailure { refuse() }
             },
             context.mainExecutor,
         )
     }
 
-    private fun terminate(availability: LightAudioPlayerAvailability) {
+    private fun refuse() {
         if (released) return
-        commands.terminate(availability)
+        commands.refuse()
         release()
     }
 
@@ -414,13 +404,6 @@ class LightAudioPlayer internal constructor(
     }
 
 }
-
-/**
- * media3 also reports a disconnect while tearing down a rejected connection,
- * before the connection future fails. Only a controller that connected counts.
- */
-internal fun isEstablishedDisconnect(connected: Player?, controller: Player): Boolean =
-    connected === controller
 
 internal fun startPlayback(player: Player) {
     Util.handlePlayButtonAction(player)
