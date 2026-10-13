@@ -82,7 +82,7 @@ class LightAudioPlayer internal constructor(
     init {
         when (spec.playback) {
             LightAudioPlayback.Attached ->
-                connectPlayer(buildSdkExoPlayer(context, spec.usage, spec.caches))
+                connectPlayer(buildSdkExoPlayer(context, spec.usage, spec.cache))
             LightAudioPlayback.Detached -> connectDetachedPlayer(context, spec.usage)
         }
     }
@@ -275,8 +275,12 @@ class LightAudioPlayer internal constructor(
 
     /**
      * Replaces the item at [index] with [item]. An [index] past the end changes
-     * nothing. Give both items the same [LightAudioItem.id] when swapping a
-     * re-resolved URL for audio that is already playing.
+     * nothing. Replacing the current item restarts it from the beginning; seek
+     * afterwards to resume where it was.
+     *
+     * To swap an expired URL for a fresh one, give [item] the same
+     * [LightAudioItem.id] as the item it replaces. Cached bytes are filed under
+     * the id, so the new URL reuses what the old one already downloaded.
      *
      * @throws IllegalArgumentException when [index] is negative
      */

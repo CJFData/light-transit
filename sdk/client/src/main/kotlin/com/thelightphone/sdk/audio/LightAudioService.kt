@@ -38,7 +38,7 @@ internal class LightAudioService : MediaSessionService() {
 
         // Whatever the starting handle staged. Empty if the system revived the service.
         val spec = detachedSessionState.stagedSpec()
-        player = buildSdkExoPlayer(this, spec.usage, spec.caches).apply {
+        player = buildSdkExoPlayer(this, spec.usage, spec.cache).apply {
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     refreshIdleStop()

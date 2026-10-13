@@ -28,7 +28,6 @@ import com.thelightphone.sdk.audio.LightAudioPlayback
 import com.thelightphone.sdk.audio.LightAudioPlayer
 import com.thelightphone.sdk.audio.LightAudioPlayerAvailability
 import com.thelightphone.sdk.audio.LightAudioSource
-import com.thelightphone.sdk.audio.LightCacheEviction
 import com.thelightphone.sdk.audio.LightMediaCache
 import com.thelightphone.sdk.audio.LightMediaMetadata
 import com.thelightphone.sdk.audio.LightPlayerSpec
@@ -252,7 +251,7 @@ class PlayerViewModel(
 
 private fun playerSpec(playback: LightAudioPlayback) = LightPlayerSpec(
     playback = playback,
-    caches = listOf(LightMediaCache("demo-stream", LightCacheEviction.LeastRecentlyUsed(64L * 1024 * 1024))),
+    cache = LightMediaCache("demo-stream", sizeBytes = 64L * 1024 * 1024),
 )
 
 internal fun queueItemAt(queue: List<LightQueueItem>, index: Int): LightQueueItem? = queue.getOrNull(index)

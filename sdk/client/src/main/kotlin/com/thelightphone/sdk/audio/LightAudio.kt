@@ -7,7 +7,7 @@ import com.thelightphone.sdk.SealedLightActivity
 data class LightPlayerSpec(
     val usage: LightAudioUsage = LightAudioUsage.Music,
     val playback: LightAudioPlayback = LightAudioPlayback.Attached,
-    val caches: List<LightMediaCache> = emptyList(),
+    val cache: LightMediaCache? = null,
 )
 
 interface LightAudio {
@@ -33,14 +33,13 @@ value class DefaultLightAudio(
 
     /**
      * Create a player that requests audio focus appropriate for [spec], reading
-     * through its caches in the order given before reaching the network.
+     * through its cache, if any, before reaching the network.
      *
      * Only one [LightAudioPlayback.Detached] player handle may exist in the
      * process at a time. Reconnecting to a live detached session cannot change
      * its configuration, so [spec] must match the live session's specification.
      */
     override fun newPlayer(spec: LightPlayerSpec): LightAudioPlayer {
-        validateMediaCaches(spec.caches)
         if (spec.playback == LightAudioPlayback.Attached) {
             return LightAudioPlayer(sealedActivity.activity, spec)
         }

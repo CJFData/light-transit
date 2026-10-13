@@ -7,71 +7,47 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private val streamCache = LightMediaCache(
-    name = "stream",
-    eviction = LightCacheEviction.LeastRecentlyUsed(maxBytes = 256L * 1024 * 1024),
-)
-private val savedCache = LightMediaCache(name = "saved", eviction = LightCacheEviction.Never)
+private val streamCache = LightMediaCache(name = "stream", sizeBytes = 256L * 1024 * 1024)
 
 class LightMediaCacheTest {
     @Test
     fun cacheNameHasToBeUsableAsADirectoryName() {
-        assertFailsWith<IllegalArgumentException> {
-            LightMediaCache(" ", LightCacheEviction.Never)
-        }
-        assertFailsWith<IllegalArgumentException> {
-            LightMediaCache("../escape", LightCacheEviction.Never)
-        }
-        assertFailsWith<IllegalArgumentException> {
-            LightMediaCache("nested/name", LightCacheEviction.Never)
-        }
-        assertEquals("tidal_stream-1", LightMediaCache("tidal_stream-1", LightCacheEviction.Never).name)
+        assertFailsWith<IllegalArgumentException> { LightMediaCache(" ", SIZE) }
+        assertFailsWith<IllegalArgumentException> { LightMediaCache("../escape", SIZE) }
+        assertFailsWith<IllegalArgumentException> { LightMediaCache("nested/name", SIZE) }
+        assertEquals("tidal_stream-1", LightMediaCache("tidal_stream-1", SIZE).name)
     }
 
     @Test
-    fun sizeLimitedCacheNeedsRoomToWorkWith() {
-        assertFailsWith<IllegalArgumentException> { LightCacheEviction.LeastRecentlyUsed(0) }
-        assertFailsWith<IllegalArgumentException> { LightCacheEviction.LeastRecentlyUsed(-1) }
+    fun cacheNeedsRoomToWorkWith() {
+        assertFailsWith<IllegalArgumentException> { LightMediaCache("stream", 0) }
+        assertFailsWith<IllegalArgumentException> { LightMediaCache("stream", -1) }
     }
 
     @Test
-    fun readThroughOrderAcceptsOneWritableCacheAheadOfSavedOnes() {
-        validateMediaCaches(emptyList())
-        validateMediaCaches(listOf(streamCache, savedCache))
-        validateMediaCaches(listOf(savedCache))
-    }
-
-    @Test
-    fun cachesCannotShareANameOrBothClaimTheStreamedBytes() {
+    fun reopeningANameRequiresTheSameSize() {
+        requireSameCacheSize(LightMediaCache("stream", SIZE), openedSizeBytes = SIZE)
         assertFailsWith<IllegalArgumentException> {
-            validateMediaCaches(listOf(savedCache, savedCache))
-        }
-        assertFailsWith<IllegalArgumentException> {
-            validateMediaCaches(
-                listOf(streamCache, streamCache.copy(name = "other")),
-            )
+            requireSameCacheSize(LightMediaCache("stream", SIZE * 2), openedSizeBytes = SIZE)
         }
     }
 
-    @Test
-    fun distinctNamesRemainRequired() {
-        assertFailsWith<IllegalArgumentException> {
-            validateMediaCaches(listOf(savedCache, savedCache))
-        }
+    private companion object {
+        const val SIZE = 1024L
     }
 }
 
 class DetachedSessionCacheTest {
     private val detachedSpec = LightPlayerSpec(
         playback = LightAudioPlayback.Detached,
-        caches = listOf(streamCache),
+        cache = streamCache,
     )
 
     @Test
     fun specCompatibilityAcceptsFreshAndMatchingSessionsOnly() {
         assertTrue(isDetachedSpecCompatible(null, detachedSpec))
         assertTrue(isDetachedSpecCompatible(detachedSpec, detachedSpec.copy()))
-        assertFalse(isDetachedSpecCompatible(detachedSpec, detachedSpec.copy(caches = listOf(savedCache))))
+        assertFalse(isDetachedSpecCompatible(detachedSpec, detachedSpec.copy(cache = streamCache.copy(name = "other"))))
         assertFalse(isDetachedSpecCompatible(detachedSpec, detachedSpec.copy(usage = LightAudioUsage.Alarm)))
     }
 

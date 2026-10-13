@@ -155,22 +155,19 @@ An item without an `id` is identified and cached by its location. Rotating signe
 
 ##### Caching what you stream
 
-A player can read through caches the tool describes. The SDK opens each store under your tool's private storage, shares one per directory across your process, and keeps it when the player is released:
+A player can read through a cache the tool describes. The SDK opens the store under your tool's private cache storage, shares one per directory across your process, and keeps it when the player is released:
 
 ```kotlin
 val player = audio.newPlayer(LightPlayerSpec(
-    caches = listOf(
-        LightMediaCache("stream", LightCacheEviction.LeastRecentlyUsed(256L * 1024 * 1024)),
-        LightMediaCache("saved", LightCacheEviction.Never),
-    ),
+    cache = LightMediaCache("stream", sizeBytes = 256L * 1024 * 1024),
 ))
 ```
 
-Caches are consulted in the order given, and only then the network. Newly streamed bytes are written to the size-limited cache, so at most one cache may be size-limited and a player without one caches nothing it streams. The SDK never writes to a cache that never evicts. The current API has no way to fill that store; it is reserved for future offline downloads.
+The cache is consulted before the network, and newly streamed bytes are written to it. When it is full, the bytes read longest ago are discarded.
 
 Cached bytes are filed under `LightAudioItem.id`, so an item whose URL is re-resolved still finds what it already cached. Files and bundled assets bypass caching, since they are already on the device.
 
-A detached session's caches are fixed when its player is built. Reconnecting with a different set throws `LightAudioPlayerException`, the same way a conflicting `LightAudioUsage` does.
+A detached session's cache is fixed when its player is built. Reconnecting with a different cache throws `LightAudioPlayerException`, the same way a conflicting `LightAudioUsage` does.
 
 ##### Streaming DASH
 

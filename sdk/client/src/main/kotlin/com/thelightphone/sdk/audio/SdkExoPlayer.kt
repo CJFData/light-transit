@@ -5,13 +5,11 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.DatabaseProvider
 import androidx.media3.database.StandaloneDatabaseProvider
-import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
-import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -21,19 +19,23 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Builds the player the SDK owns, in the one place both playback modes reach.
  *
- * Requested caches wrap HTTP before the platform data source.
+ * A requested cache wraps HTTP only; [DefaultDataSource] wraps it so local
+ * files are not copied into the cache.
  */
 @OptIn(UnstableApi::class)
 internal fun buildSdkExoPlayer(
     context: Context,
     usage: LightAudioUsage,
-    caches: List<LightMediaCache>,
+    cache: LightMediaCache?,
 ): ExoPlayer {
     val builder = ExoPlayer.Builder(context)
-    val opened = caches.associate { it.name to mediaCacheStore.open(context, it) }
-    if (caches.isNotEmpty()) {
+    if (cache != null) {
+        val network = CacheDataSource.Factory()
+            .setCache(mediaCacheStore.open(context, cache))
+            .setUpstreamDataSourceFactory(DefaultHttpDataSource.Factory())
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         builder.setMediaSourceFactory(
-            DefaultMediaSourceFactory(cachingDataSourceFactory(context, caches, opened))
+            DefaultMediaSourceFactory(DefaultDataSource.Factory(context, network))
         )
     }
     return builder.build().apply {
@@ -42,65 +44,44 @@ internal fun buildSdkExoPlayer(
 }
 
 /**
- * Caches wrap HTTP only; [DefaultDataSource] wraps them so local files are
- * not copied into the cache.
- */
-@OptIn(UnstableApi::class)
-private fun cachingDataSourceFactory(
-    context: Context,
-    caches: List<LightMediaCache>,
-    opened: Map<String, Cache>,
-): DataSource.Factory {
-    var network: DataSource.Factory = DefaultHttpDataSource.Factory()
-    for (cache in caches.asReversed()) {
-        val factory = CacheDataSource.Factory()
-            .setCache(requireNotNull(opened[cache.name]))
-            .setUpstreamDataSourceFactory(network)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        if (cache.eviction is LightCacheEviction.Never) {
-            factory.setCacheWriteDataSinkFactory(null)
-        }
-        network = factory
-    }
-    return DefaultDataSource.Factory(context, network)
-}
-
-/**
  * One [SimpleCache] per directory per process. Opening is atomic because an
  * attached player and [LightAudioService] can reach for the same cache at once.
  */
 @OptIn(UnstableApi::class)
 internal class MediaCacheStore {
-    private val cachesByPath = ConcurrentHashMap<String, Cache>()
+    private val cachesByPath = ConcurrentHashMap<String, OpenedCache>()
     private val databaseProviders = ConcurrentHashMap<Context, DatabaseProvider>()
 
     fun open(context: Context, spec: LightMediaCache): Cache {
         val appContext = context.applicationContext
         val directory = spec.directoryIn(appContext)
-        return cachesByPath.computeIfAbsent(directory.canonicalPath) {
-            SimpleCache(directory, spec.eviction.toEvictor(), databaseProvider(appContext))
+        val opened = cachesByPath.computeIfAbsent(directory.canonicalPath) {
+            OpenedCache(
+                SimpleCache(directory, LeastRecentlyUsedCacheEvictor(spec.sizeBytes), databaseProvider(appContext)),
+                spec.sizeBytes,
+            )
         }
+        requireSameCacheSize(spec, opened.sizeBytes)
+        return opened.cache
     }
 
     private fun databaseProvider(appContext: Context): DatabaseProvider =
         databaseProviders.computeIfAbsent(appContext) { StandaloneDatabaseProvider(it) }
 }
 
+private class OpenedCache(val cache: Cache, val sizeBytes: Long)
+
+/** A cache's size is fixed by its first opening in the process. */
+internal fun requireSameCacheSize(requested: LightMediaCache, openedSizeBytes: Long) {
+    require(requested.sizeBytes == openedSizeBytes) {
+        "Cache '${requested.name}' is already open with $openedSizeBytes bytes; " +
+            "requested ${requested.sizeBytes}"
+    }
+}
+
 internal val mediaCacheStore = MediaCacheStore()
 
-/** LRU caches live in `cacheDir`; never-evict caches live in `filesDir`. */
-private fun LightMediaCache.directoryIn(context: Context): File {
-    val root = when (eviction) {
-        is LightCacheEviction.LeastRecentlyUsed -> context.cacheDir
-        LightCacheEviction.Never -> context.filesDir
-    }
-    return File(File(root, CACHE_ROOT_DIR), name).apply { mkdirs() }
-}
-
-@OptIn(UnstableApi::class)
-private fun LightCacheEviction.toEvictor() = when (this) {
-    is LightCacheEviction.LeastRecentlyUsed -> LeastRecentlyUsedCacheEvictor(maxBytes)
-    LightCacheEviction.Never -> NoOpCacheEvictor()
-}
+private fun LightMediaCache.directoryIn(context: Context): File =
+    File(File(context.cacheDir, CACHE_ROOT_DIR), name).apply { mkdirs() }
 
 private const val CACHE_ROOT_DIR = "light-media-cache"
