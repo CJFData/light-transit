@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -47,7 +46,7 @@ internal class LightAudioService : MediaSessionService() {
             })
         }
         detachedSessionState.adoptSpec(spec)
-        session = MediaSession.Builder(this, PreparingPlayer(player))
+        session = MediaSession.Builder(this, player)
             .setId(packageName)
             .setCallback(SessionCallback())
             .build()
@@ -144,14 +143,6 @@ internal class LightAudioService : MediaSessionService() {
                 "but is in '$process'. Remove android:process from its manifest entry — " +
                 "detached playback state is shared with the tool as process-local state."
         }
-    }
-}
-
-@OptIn(UnstableApi::class)
-internal class PreparingPlayer(player: Player) : ForwardingPlayer(player) {
-    override fun play() {
-        if (playbackState == Player.STATE_IDLE) prepare()
-        super.play()
     }
 }
 

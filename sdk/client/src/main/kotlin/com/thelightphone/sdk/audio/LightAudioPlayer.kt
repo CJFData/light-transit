@@ -12,6 +12,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import java.io.File
@@ -303,15 +304,13 @@ class LightAudioPlayer internal constructor(
     }
 
     /**
-     * Start or resume playback if audio focus is available.
+     * Start or resume playback if audio focus is available. An idle player is
+     * prepared first, and an ended one restarts its current item.
      *
      * Observe [isPlaying] for the actual playback state.
      */
     fun play() {
-        commands.dispatch { player ->
-            if (player.playbackState == Player.STATE_IDLE) player.prepare()
-            player.play()
-        }
+        commands.dispatch(::startPlayback)
     }
 
     /** Pauses playback. */
@@ -422,6 +421,10 @@ class LightAudioPlayer internal constructor(
  */
 internal fun isEstablishedDisconnect(connected: Player?, controller: Player): Boolean =
     connected === controller
+
+internal fun startPlayback(player: Player) {
+    Util.handlePlayButtonAction(player)
+}
 
 internal suspend fun awaitPlayerReady(
     availability: StateFlow<LightAudioPlayerAvailability>,
