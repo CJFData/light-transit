@@ -138,12 +138,43 @@ class LightAudioPlayerTest {
     @Test
     fun refusedConnectionIsTerminalAndDistinctFromRelease() {
         val commands = PendingPlayerCommands()
-        commands.refuse()
+        commands.terminate(LightAudioPlayerAvailability.Refused)
         commands.release()
 
         assertEquals(LightAudioPlayerAvailability.Refused, commands.availability.value)
         assertEquals(false, runBlocking { awaitPlayerReady(commands.availability) })
         assertFailsWith<IllegalStateException> { commands.dispatch { } }
+    }
+
+    @Test
+    fun droppedConnectionIsTerminalAndDistinctFromRelease() {
+        val commands = PendingPlayerCommands()
+        commands.ready(player)
+        commands.terminate(LightAudioPlayerAvailability.Disconnected)
+        commands.release()
+
+        assertEquals(LightAudioPlayerAvailability.Disconnected, commands.availability.value)
+        assertFailsWith<IllegalStateException> { commands.dispatch { } }
+    }
+
+    @Test
+    fun onlyAConnectedControllerReportsADisconnect() {
+        val controller = player
+        val other = Proxy.newProxyInstance(
+            Player::class.java.classLoader,
+            arrayOf(Player::class.java),
+        ) { _, _, _ -> null } as Player
+
+        assertEquals(false, isEstablishedDisconnect(connected = null, controller))
+        assertEquals(false, isEstablishedDisconnect(connected = other, controller))
+        assertEquals(true, isEstablishedDisconnect(connected = controller, controller))
+    }
+
+    @Test
+    fun onlyFailuresTerminate() {
+        assertFailsWith<IllegalArgumentException> {
+            PendingPlayerCommands().terminate(LightAudioPlayerAvailability.Released)
+        }
     }
 
     @Test
