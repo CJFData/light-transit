@@ -6,7 +6,6 @@ import java.time.Instant
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -23,26 +22,6 @@ class AudioLibraryRepositoryTest {
         assertTrue(clips.any { it.formatLabel == "OGG" })
         assertTrue(clips.any { it.formatLabel == "STREAM" && it.durationMs == 0L })
         assertTrue(clips.any { it.formatLabel == "DASH" && it.id == "shaka-dig-the-uke" })
-    }
-
-    @Test
-    fun playbackSelectionQueuesWholeLibraryAtSelectedClip() {
-        val clips = SampleAudioCatalog.clips
-        val selected = clips[3]
-
-        val selection = playbackSelectionFor(selected, clips)
-
-        assertEquals(clips, selection.queue)
-        assertEquals(3, selection.startIndex)
-    }
-
-    @Test
-    fun playbackSelectionRejectsClipOutsideLibrary() {
-        val missing = SampleAudioCatalog.clips.first().copy(displayName = "Missing")
-
-        assertFailsWith<IllegalArgumentException> {
-            playbackSelectionFor(missing, SampleAudioCatalog.clips)
-        }
     }
 
     @Test

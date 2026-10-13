@@ -158,21 +158,14 @@ class PlayerViewModel(
         val persistedPlayback = mode.load()
         if (persistedPlayback != initialPlayback) {
             replacePlayer(persistedPlayback)
+        } else {
+            seedQueue(currentPlayer)
         }
     }
 
-    fun play(clip: AudioClip) {
-        val selectedPlayer = currentPlayer
-        viewModelScope.launch {
-            if (!selectedPlayer.awaitReady() || selectedPlayer !== currentPlayer) return@launch
-            val selection = playbackSelectionFor(clip, clips)
-            selectedPlayer.speed = speed.value
-            selectedPlayer.setMediaQueue(
-                selection.queue.map(AudioClip::toLightAudioItem),
-                selection.startIndex,
-            )
-            selectedPlayer.play()
-        }
+    private suspend fun seedQueue(player: LightAudioPlayer) {
+        if (!player.awaitReady() || player !== currentPlayer || player.queue.value.isNotEmpty()) return
+        player.setMediaQueue(clips.map(AudioClip::toLightAudioItem))
     }
 
     fun togglePlayPause() {
@@ -185,8 +178,10 @@ class PlayerViewModel(
     fun skipToPrevious() { if (canCommand()) currentPlayer.skipToPrevious() }
     fun skipToNext() { if (canCommand()) currentPlayer.skipToNext() }
 
-    fun addToQueue(clip: AudioClip) {
-        if (canCommand()) currentPlayer.addMediaItem(clip.toLightAudioItem())
+    fun playFromQueue(index: Int) {
+        if (!canCommand()) return
+        currentPlayer.seekToDefaultPosition(index)
+        currentPlayer.play()
     }
 
     fun moveUp(index: Int) {
@@ -195,10 +190,6 @@ class PlayerViewModel(
 
     fun moveDown(index: Int) {
         if (canCommand() && index < queue.value.lastIndex) currentPlayer.moveMediaItem(index, index + 1)
-    }
-
-    fun removeFromQueue(index: Int) {
-        if (canCommand()) currentPlayer.removeMediaItem(index)
     }
 
     fun repairFailedSource() {
@@ -239,6 +230,7 @@ class PlayerViewModel(
             speed = this@PlayerViewModel.speed.value
         }
         playerFlow.value = nextPlayer
+        viewModelScope.launch { seedQueue(nextPlayer) }
     }
 
     override fun onCleared() {
@@ -284,21 +276,6 @@ private fun AudioClip.toLightMediaMetadata() = LightMediaMetadata(
     durationMs = durationMs.takeIf { it > 0L },
 )
 
-internal data class PlaybackSelection(
-    val queue: List<AudioClip>,
-    val startIndex: Int,
-)
-
-/** The whole library is one playlist. */
-internal fun playbackSelectionFor(
-    selected: AudioClip,
-    clips: List<AudioClip>,
-): PlaybackSelection {
-    val startIndex = clips.indexOf(selected)
-    require(startIndex >= 0) { "Selected clip must be present in the playlist" }
-    return PlaybackSelection(clips, startIndex)
-}
-
 class PlayerScreen(private val sealedActivity: SealedLightActivity) :
     LightScreen<Unit, PlayerViewModel>(sealedActivity) {
     override val viewModelClass = PlayerViewModel::class.java
@@ -336,32 +313,24 @@ class PlayerScreen(private val sealedActivity: SealedLightActivity) :
                         .weight(1f)
                         .padding(horizontal = 1f.gridUnitsAsDp()),
                 ) {
-                    LightText(text = "LIBRARY · TAP TO PLAY, ADD TO QUEUE", variant = LightTextVariant.Superfine)
-                    viewModel.clips.forEachIndexed { index, clip ->
-                        AudioClipRow(
-                            index + 1,
-                            clip,
-                            selected = clip.displayName == current?.metadata?.title,
-                            onPlay = { viewModel.play(clip) },
-                            onAdd = { viewModel.addToQueue(clip) },
-                        )
-                    }
-                    LightText(
-                        text = "QUEUE · ${queue.size} ITEMS",
-                        variant = LightTextVariant.Superfine,
-                        modifier = Modifier.padding(top = 1f.gridUnitsAsDp()),
-                    )
                     queue.forEachIndexed { index, item ->
                         QueueItemRow(
                             index = index,
                             item = item,
                             selected = index == currentIndex,
+                            onSelect = { viewModel.playFromQueue(index) },
                             onUp = { viewModel.moveUp(index) },
                             onDown = { viewModel.moveDown(index) },
-                            onRemove = { viewModel.removeFromQueue(index) },
                         )
                     }
                 }
+                LightText(
+                    text = current?.metadata?.title ?: "Nothing playing",
+                    variant = LightTextVariant.Copy,
+                    align = TextAlign.Center,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 LightText(
                     text = "${formatDuration(position)}  /  ${durationDisplay.totalTime}",
                     variant = LightTextVariant.Fine,
@@ -452,55 +421,20 @@ internal fun playbackErrorMessage(error: LightAudioError): String =
     "${error.kind}: ${error.diagnostic}. Select another item to continue."
 
 @Composable
-private fun AudioClipRow(
-    number: Int,
-    clip: AudioClip,
-    selected: Boolean,
-    onPlay: () -> Unit,
-    onAdd: () -> Unit,
-) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 0.5f.gridUnitsAsDp()),
-    ) {
-        Row(Modifier.fillMaxWidth()) {
-            LightText(
-                text = if (selected) "> $number. ${clip.displayName}" else "$number. ${clip.displayName}",
-                variant = LightTextVariant.Copy,
-                maxLines = 1,
-                modifier = Modifier.weight(1f).lightClickable(onClick = onPlay),
-            )
-            LightText(
-                text = "ADD",
-                variant = LightTextVariant.Fine,
-                modifier = Modifier
-                    .lightClickable(onClick = onAdd)
-                    .padding(horizontal = 0.5f.gridUnitsAsDp()),
-            )
-        }
-        LightText(
-            text = "${clip.kind.name.uppercase()}  ${clip.formatLabel}",
-            variant = LightTextVariant.Fine,
-            lighten = true,
-        )
-    }
-}
-
-@Composable
 private fun QueueItemRow(
     index: Int,
     item: LightQueueItem,
     selected: Boolean,
+    onSelect: () -> Unit,
     onUp: () -> Unit,
     onDown: () -> Unit,
-    onRemove: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 0.5f.gridUnitsAsDp())) {
         LightText(
             text = "${if (selected) ">" else " "} ${index + 1}. ${item.metadata.title}",
             variant = LightTextVariant.Copy,
             maxLines = 1,
+            modifier = Modifier.lightClickable(onClick = onSelect),
         )
         Row(Modifier.fillMaxWidth()) {
             LightText(
@@ -508,9 +442,8 @@ private fun QueueItemRow(
                 variant = LightTextVariant.Superfine,
                 modifier = Modifier.weight(1f),
             )
-            QueueAction("UP", onUp)
-            QueueAction("DN", onDown)
-            QueueAction("DEL", onRemove)
+            QueueAction("↑", onUp)
+            QueueAction("↓", onDown)
         }
     }
 }
