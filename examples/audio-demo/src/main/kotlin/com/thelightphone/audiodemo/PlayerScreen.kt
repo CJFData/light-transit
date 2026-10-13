@@ -173,10 +173,16 @@ class PlayerViewModel(
         if (isPlaying.value) currentPlayer.pause() else currentPlayer.play()
     }
 
-    fun skipBack() { if (canCommand()) currentPlayer.skipBack() }
-    fun skipForward() { if (canCommand()) currentPlayer.skipForward() }
+    fun skipBack() = seekBy(-SKIP_INTERVAL_MS)
+    fun skipForward() = seekBy(SKIP_INTERVAL_MS)
     fun skipToPrevious() { if (canCommand()) currentPlayer.skipToPrevious() }
     fun skipToNext() { if (canCommand()) currentPlayer.skipToNext() }
+
+    private fun seekBy(deltaMs: Long) {
+        if (!canCommand()) return
+        val player = currentPlayer
+        player.seekTo(skipPosition(player.positionMs.value, player.durationMs.value, deltaMs))
+    }
 
     fun playFromQueue(index: Int) {
         if (!canCommand()) return
@@ -240,6 +246,7 @@ class PlayerViewModel(
 
     companion object {
         private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+        private const val SKIP_INTERVAL_MS = 15_000L
     }
 }
 
@@ -249,6 +256,9 @@ private fun playerSpec(playback: LightAudioPlayback) = LightPlayerSpec(
 )
 
 internal fun queueItemAt(queue: List<LightQueueItem>, index: Int): LightQueueItem? = queue.getOrNull(index)
+
+internal fun skipPosition(positionMs: Long, durationMs: Long, deltaMs: Long): Long =
+    (positionMs + deltaMs).coerceIn(0L, durationMs.coerceAtLeast(0L))
 
 internal fun repairIndex(error: LightAudioError?, queue: List<LightQueueItem>): Int? =
     error?.takeIf { it.kind == LightAudioErrorKind.Source }

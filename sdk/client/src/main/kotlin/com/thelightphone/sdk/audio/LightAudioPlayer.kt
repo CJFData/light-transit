@@ -323,16 +323,6 @@ class LightAudioPlayer internal constructor(
         }
     }
 
-    /** Seeks backward 15 seconds, clamped to the item bounds. */
-    fun skipBack() {
-        seekTo(skipPosition(positionMs.value, durationMs.value, -SKIP_INTERVAL_MS))
-    }
-
-    /** Seeks forward 15 seconds, clamped to the item bounds. */
-    fun skipForward() {
-        seekTo(skipPosition(positionMs.value, durationMs.value, SKIP_INTERVAL_MS))
-    }
-
     /** Selects the next queue item when one exists. */
     fun skipToNext() {
         commands.dispatch(Player::seekToNextMediaItem)
@@ -443,10 +433,6 @@ private fun LightMediaMetadata.toMedia3Metadata(): MediaMetadata {
         .build()
 }
 
-internal fun skipPosition(positionMs: Long, durationMs: Long, deltaMs: Long): Long {
-    return (positionMs + deltaMs).coerceIn(0L, durationMs.validDuration())
-}
-
 internal data class ConnectedPlayerState(
     val currentMediaItemIndex: Int,
     val queue: List<LightQueueItem>,
@@ -477,7 +463,6 @@ internal fun MediaItem.toLightQueueItem(): LightQueueItem = LightQueueItem(
 
 private fun Long.validDuration(): Long = takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
 
-private const val SKIP_INTERVAL_MS = 15_000L
 private const val POSITION_POLL_MS = 250L
 private const val MIN_SPEED = 0.1f
 /** Queue index reported when a player has no media item. */

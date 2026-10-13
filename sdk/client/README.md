@@ -127,8 +127,7 @@ player.setMediaQueue(
 player.play()
 ```
 
-- Use `pause`, `stop`, and `seekTo` for transport controls.
-- `skipBack()` and `skipForward()` seek 15 seconds within the current item; `skipToPrevious()` and `skipToNext()` move through the queue.
+- Use `pause` and `stop` for transport; `seekTo` jumps within an item, `seekToDefaultPosition(index)` selects a queue item, and `skipToPrevious()` or `skipToNext()` selects an adjacent item.
 - Edit the queue in place with `addMediaItem`, `removeMediaItem`, `moveMediaItem`, and `replaceMediaItem`. `queue.value` exposes item IDs and metadata; `queue.value.size` reports its length.
 - Set `speed` to change playback rate; values at or below zero clamp to the minimum supported rate.
 - Use `setSource(File)` as a convenience for a one-item local-file queue.

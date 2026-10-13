@@ -12,6 +12,14 @@ import kotlinx.coroutines.runBlocking
 
 class PlayerScreenTest {
     @Test
+    fun skipPositionClampsToStartAndDuration() {
+        assertEquals(0L, skipPosition(positionMs = 5_000L, durationMs = 60_000L, deltaMs = -15_000L))
+        assertEquals(20_000L, skipPosition(positionMs = 5_000L, durationMs = 60_000L, deltaMs = 15_000L))
+        assertEquals(60_000L, skipPosition(positionMs = 55_000L, durationMs = 60_000L, deltaMs = 15_000L))
+        assertEquals(0L, skipPosition(positionMs = 5_000L, durationMs = 0L, deltaMs = 15_000L))
+    }
+
+    @Test
     fun currentItemFollowsReorderedQueue() {
         val first = LightQueueItem("first", LightMediaMetadata("First"))
         val second = LightQueueItem("second", LightMediaMetadata("Second"))
