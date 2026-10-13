@@ -55,7 +55,7 @@ class DetachedSessionCacheTest {
     }
 
     @Test
-    fun stagedSpecSurvivesServiceAdoptionAndClearsWithSession() {
+    fun stagedSpecOutlivesTheSessionItStarted() {
         val state = DetachedSessionState()
         state.stageSpec(detachedSpec)
         assertEquals(detachedSpec, state.stagedSpec())
@@ -63,6 +63,7 @@ class DetachedSessionCacheTest {
         assertEquals(detachedSpec, state.activeSpec())
         state.clearSession()
         assertNull(state.activeSpec())
+        assertEquals(detachedSpec, state.stagedSpec())
     }
 }
 

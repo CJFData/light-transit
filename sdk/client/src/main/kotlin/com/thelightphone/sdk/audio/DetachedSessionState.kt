@@ -63,11 +63,14 @@ internal class DetachedSessionState {
         sessionSpec = spec
     }
 
-    /** Service side: the session is gone, so the next handle starts fresh. */
+    /**
+     * Service side: the session is gone, so the next handle starts fresh. The
+     * staged spec stays: a handle may have staged it for the next service
+     * already, and every `newPlayer` overwrites it anyway.
+     */
     @Synchronized
     fun clearSession() {
         sessionSpec = null
-        stagedSpec = LightPlayerSpec(playback = LightAudioPlayback.Detached)
     }
 
     @Synchronized
