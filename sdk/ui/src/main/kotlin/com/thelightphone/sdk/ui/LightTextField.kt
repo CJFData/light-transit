@@ -24,7 +24,7 @@ private const val VALUE_TO_UNDERLINE_GAP_GRID_UNITS = 0.5f
  * Properties left `null` will fall back to default SDK values.
  */
 @Immutable
-data class LightUnderlineStyle(
+data class LightTextFieldUnderlineStyle(
     val widthFraction: Float? = null,
     val thickness: Dp? = null,
     val color: Color? = null,
@@ -42,7 +42,7 @@ fun LightTextField(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     labelModifier: Modifier? = null,
-    underlineStyle: LightUnderlineStyle = LightUnderlineStyle(),
+    underlineStyle: LightTextFieldUnderlineStyle = LightTextFieldUnderlineStyle(),
 ) {
     val colors = LightThemeTokens.colors
 
