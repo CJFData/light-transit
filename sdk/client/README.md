@@ -140,7 +140,7 @@ player.play()
 
 A negative index is a mistake and throws. An index past the end is not: a queue can change underneath a tool, so `addMediaItem` appends, `moveMediaItem` clamps its destination to the end, and everything else does nothing.
 
-`replaceMediaItem` swaps an item's source while the queue keeps playing, which is how to hand the player a re-resolved URL for audio that is already loaded. Give both items the same `LightAudioItem.id` so they name the same audio:
+`replaceMediaItem` replaces an item's source, which is how to hand the player a re-resolved URL. Replacing the current item can restart it from the beginning; save its position and seek afterward if you need to resume there. Give both items the same `LightAudioItem.id` so they name the same audio:
 
 ```kotlin
 val track = LightAudioItem(
@@ -168,6 +168,8 @@ The cache is consulted before the network, and newly streamed bytes are written 
 Cached bytes are filed under `LightAudioItem.id`, so an item whose URL is re-resolved still finds what it already cached. Files and bundled assets bypass caching, since they are already on the device. DASH segments are filed under their own URLs, so re-resolved DASH URLs do not reuse what the old ones cached.
 
 A detached session's cache is fixed when its player is built. Reconnecting with a different cache throws `LightAudioPlayerException`, the same way a conflicting `LightAudioUsage` does.
+Reusing a cache name with a different `sizeBytes` in the same process throws
+`IllegalArgumentException` when creating a player, regardless of playback mode.
 
 ##### Streaming DASH
 
@@ -233,7 +235,7 @@ The player `availability` field exposes the connection lifecycle:
 - `Refused` — the detached controller connection was rejected or failed.
 - `Released` — the handle is closed and cannot accept commands.
 
-`awaitReady()` suspends through initialization and returns `true` only when the player reaches `Ready`. Returns `false` if the player is released first.
+`awaitReady()` suspends through initialization and returns `true` only when the player reaches `Ready`. It returns `false` if the connection is refused or the player is released first.
 
 A non-empty queue belongs to the surviving service. Reuse it instead of setting the queue again, which would replace live playback. Position, duration, playing state, queue, queue index, and playback error are populated when the controller connects.
 Once the service stops, the next player is fresh and restoring its queue and position is the tool's responsibility.
