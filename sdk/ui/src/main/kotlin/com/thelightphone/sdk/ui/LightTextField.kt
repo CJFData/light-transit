@@ -42,14 +42,13 @@ fun LightTextField(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     labelModifier: Modifier? = null,
-    underlineStyle: LightTextFieldUnderlineStyle = LightTextFieldUnderlineStyle(),
+    underlineStyleOverrides: LightTextFieldUnderlineStyle? = null,
 ) {
     val colors = LightThemeTokens.colors
 
-    // Resolve underline properties with fallbacks
-    val finalUnderlineFraction = underlineStyle.widthFraction ?: UNDERLINE_WIDTH_FRACTION
-    val finalUnderlineThickness = underlineStyle.thickness ?: UNDERLINE_THICKNESS_PX.designVerticalPxToDp()
-    val finalUnderlineColor = underlineStyle.color ?: colors.content
+    val finalUnderlineFraction = underlineStyleOverrides?.widthFraction ?: UNDERLINE_WIDTH_FRACTION
+    val finalUnderlineThickness = underlineStyleOverrides?.thickness ?: UNDERLINE_THICKNESS_PX.designVerticalPxToDp()
+    val finalUnderlineColor = underlineStyleOverrides?.color ?: colors.content
 
     Column(modifier = modifier.fillMaxWidth()) {
         LightText(
