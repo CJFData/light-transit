@@ -31,16 +31,40 @@ class PlayerScreenTest {
 
     @Test
     fun repairTargetsTheFailedExpiredItem() {
+        val id = freshExpiredDawnId()
         val expired = SampleAudioCatalog.clips.first { it.id == SampleAudioCatalog.EXPIRED_DAWN_ID }
+            .copy(id = id)
         val error = LightAudioError(LightAudioErrorKind.Source, "ERROR_CODE_IO_UNSPECIFIED", 1, expired.id)
 
-        assertEquals(1, repairIndex(error))
+        assertEquals(true, isExpiredDawnId(id))
+        assertEquals(1, repairIndex(error, id))
         val repaired = expired.repairedDawnItem()
         assertEquals(expired.id, repaired.id)
         assertEquals(LightAudioSource.UrlSource(SampleAudioCatalog.DAWN_URL), repaired.source)
-        assertEquals(null, repairIndex(error.copy(itemId = "other")))
-        assertEquals(null, repairIndex(error.copy(itemIndex = NO_MEDIA_ITEM)))
-        assertEquals(null, repairIndex(error.copy(kind = LightAudioErrorKind.Unsupported)))
+        assertEquals(null, repairIndex(error, freshExpiredDawnId()))
+        assertEquals(null, repairIndex(error.copy(itemId = "other"), id))
+        assertEquals(null, repairIndex(error.copy(itemIndex = NO_MEDIA_ITEM), id))
+        assertEquals(null, repairIndex(error.copy(kind = LightAudioErrorKind.Unsupported), id))
+    }
+
+    @Test
+    fun screenEntryRotatesOnlyTheBrokenDawnIdAndFindsItInAReorderedQueue() {
+        val firstId = freshExpiredDawnId()
+        val secondId = freshExpiredDawnId()
+        val clips = SampleAudioCatalog.clips.withExpiredDawnId(firstId)
+        val refreshed = clips.withExpiredDawnId(secondId)
+        val expired = refreshed.single { it.id == secondId }
+
+        assertEquals(firstId, clips.single { isExpiredDawnId(it.id) }.id)
+        assertEquals(secondId, expired.id)
+        assertEquals(clips.filterNot { isExpiredDawnId(it.id) }, refreshed.filterNot { isExpiredDawnId(it.id) })
+        assertEquals(
+            1,
+            listOf(
+                LightQueueItem("other", LightMediaMetadata("Other")),
+                LightQueueItem(firstId, LightMediaMetadata("Broken Dawn")),
+            ).staleExpiredDawnIndex(secondId),
+        )
     }
 
     @Test
