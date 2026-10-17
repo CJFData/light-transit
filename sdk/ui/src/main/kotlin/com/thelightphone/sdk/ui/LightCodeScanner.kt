@@ -47,7 +47,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Barcode format constants for [LightQrCodeScanner]'s `formats` parameter.
+ * Barcode format constants for [LightCodeScanner]'s `formats` parameter.
  * Mirrors ML Kit's `Barcode.FORMAT_*` values (stable public constants, inlined
  * at compile time) so callers can name formats without the ML Kit artifact on
  * their compile classpath.
@@ -67,7 +67,7 @@ object LightBarcodeFormats {
     const val PDF417 = Barcode.FORMAT_PDF417
     const val AZTEC = Barcode.FORMAT_AZTEC
 
-    /** QR only — [LightQrCodeScanner]'s default. */
+    /** QR only — the default for the QR-specific client wrapper. */
     val QR_ONLY: List<Int> = listOf(QR)
 
     /** The symbologies a code-wallet/ticketing flow scans. */
@@ -78,69 +78,50 @@ object LightBarcodeFormats {
 }
 
 /**
- * A barcode decoded by the scanner: the decoded text value, the format as a
- * lowercase name (e.g. "qr", "aztec", "pdf417", "code128"), and the raw
- * payload bytes (present when the payload is binary rather than text, e.g.
- * an Aztec ticketing code).
+ * A barcode decoded by the scanner: the decoded text value, the format as an
+ * ML Kit `Barcode.FORMAT_*` constant (compare against [LightBarcodeFormats]),
+ * and the raw payload bytes (present when the payload is binary rather than
+ * text, e.g. an Aztec ticketing code).
  */
 data class LightScannedBarcode(
     val value: String,
-    val formatName: String,
+    val format: Int,
     val rawBytes: ByteArray? = null,
 ) {
     // ByteArray in a data class: compare by content.
     override fun equals(other: Any?): Boolean =
         other is LightScannedBarcode &&
             value == other.value &&
-            formatName == other.formatName &&
+            format == other.format &&
             rawBytes.contentEquals(other.rawBytes)
 
     override fun hashCode(): Int =
-        31 * (31 * value.hashCode() + formatName.hashCode()) + rawBytes.contentHashCode()
-}
-
-/** ML Kit format constant → the lowercase format name used by [LightScannedBarcode]. */
-private fun Int.barcodeFormatName(): String = when (this) {
-    Barcode.FORMAT_QR_CODE -> "qr"
-    Barcode.FORMAT_AZTEC -> "aztec"
-    Barcode.FORMAT_PDF417 -> "pdf417"
-    Barcode.FORMAT_DATA_MATRIX -> "datamatrix"
-    Barcode.FORMAT_CODE_128 -> "code128"
-    Barcode.FORMAT_CODE_39 -> "code39"
-    Barcode.FORMAT_CODE_93 -> "code93"
-    Barcode.FORMAT_CODABAR -> "codabar"
-    Barcode.FORMAT_EAN_13 -> "ean13"
-    Barcode.FORMAT_EAN_8 -> "ean8"
-    Barcode.FORMAT_UPC_A -> "upc_a"
-    Barcode.FORMAT_UPC_E -> "upc_e"
-    Barcode.FORMAT_ITF -> "itf14"
-    else -> "unknown"
+        31 * (31 * value.hashCode() + format) + rawBytes.contentHashCode()
 }
 
 /**
- * Full-screen QR scanner: live camera preview, dimmed overlay with viewfinder,
- * top-bar back, and [onScanned] with the decoded string.
+ * Full-screen code scanner: live camera preview, dimmed overlay with viewfinder,
+ * top-bar back, and [onScannedBarcode] with the decoded result (format +
+ * raw payload bytes). The client library's `LightQrCodeScanner` is a
+ * QR-specific wrapper around this that handles the camera permission RPC.
  *
- * The decoder defaults to QR codes only. Pass [LightBarcodeFormats] constants
- * in [formats] to decode other symbologies, and [onScannedBarcode]
- * to receive the full result (format name + raw payload bytes); when it is
- * set, it is called instead of [onScanned].
+ * The decoder scans the symbologies listed in [formats] (e.g. [LightBarcodeFormats].
+ * constants).
  *
  * Host apps must declare [Manifest.permission.CAMERA].
  *
- * When handling [onScanned], defer navigation to a [LaunchedEffect] (or similar)
+ * When handling [onScannedBarcode], defer navigation to a [LaunchedEffect] (or similar)
  * and pop the scanner before pushing the next screen, e.g. `goBack()` then `navigateTo(...)`.
  */
 @Composable
-fun LightQrCodeScanner(
-    onScanned: (String) -> Unit,
+fun LightCodeScanner(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    title: String = "Scan QR Code",
+    title: String,
     checkCameraPermission: suspend () -> Result<Boolean>,
     launchCameraPermissionRequest: suspend () -> Unit,
-    formats: List<Int> = LightBarcodeFormats.QR_ONLY,
-    onScannedBarcode: ((LightScannedBarcode) -> Unit)? = null,
+    formats: List<Int>,
+    onScannedBarcode: (LightScannedBarcode) -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val colors = LightThemeTokens.colors
@@ -166,7 +147,6 @@ fun LightQrCodeScanner(
     }
 
     val scannedOnce = remember { AtomicBoolean(false) }
-    val onScannedState = rememberUpdatedState(onScanned)
     val onScannedBarcodeState = rememberUpdatedState(onScannedBarcode)
     val onBackState = rememberUpdatedState(onBack)
 
@@ -180,12 +160,7 @@ fun LightQrCodeScanner(
                 formats = formats,
                 onBarcode = { scanned ->
                     if (scannedOnce.compareAndSet(false, true)) {
-                        val rich = onScannedBarcodeState.value
-                        if (rich != null) {
-                            rich(scanned)
-                        } else {
-                            onScannedState.value(scanned.value)
-                        }
+                        onScannedBarcodeState.value(scanned)
                     }
                 },
                 lifecycleOwner = lifecycleOwner,
@@ -284,16 +259,13 @@ private fun QrCameraPreview(
                 return@MlKitAnalyzer
             }
 
-            val scanned = barcodes
-                .asSequence()
-                .filter { !(it.rawValue ?: it.displayValue).isNullOrBlank() }
-                .firstOrNull()
+            val scanned = barcodes.firstOrNull { !(it.rawValue ?: it.displayValue).isNullOrBlank() }
 
             if (scanned != null) {
                 onBarcodeState.value(
                     LightScannedBarcode(
                         value = scanned.rawValue ?: scanned.displayValue!!,
-                        formatName = scanned.format.barcodeFormatName(),
+                        format = scanned.format,
                         rawBytes = scanned.rawBytes,
                     ),
                 )

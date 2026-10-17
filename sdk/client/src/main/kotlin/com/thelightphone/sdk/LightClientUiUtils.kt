@@ -22,10 +22,10 @@ import com.thelightphone.sdk.nfc.LightNfcTap
 import com.thelightphone.sdk.nfc.LightNfcUnavailableException
 import com.thelightphone.sdk.shared.LightServiceMethod
 import com.thelightphone.sdk.shared.asKotlinResult
+import com.thelightphone.sdk.ui.LightBarcodeFormats
+import com.thelightphone.sdk.ui.LightCodeScanner
 import com.thelightphone.sdk.ui.LightNfcTapReader
 import com.thelightphone.sdk.ui.LightNfcTapState
-import com.thelightphone.sdk.ui.LightBarcodeFormats
-import com.thelightphone.sdk.ui.LightQrCodeScanner
 import com.thelightphone.sdk.ui.LightScannedBarcode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
@@ -33,12 +33,14 @@ import kotlinx.coroutines.flow.retryWhen
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
- * Wrapper for the UI library's LightQrCodeScanner that include the client library's functions for
- * checking and requesting the camera permission for the SDK server.
+ * QR-specific wrapper around the UI library's [LightCodeScanner] that includes
+ * the client library's functions for checking and requesting the camera
+ * permission for the SDK server.
  *
  * Defaults to QR-only. Pass [LightBarcodeFormats] constants in [formats] to
  * decode other symbologies, and [onScannedBarcode] to receive the full result
- * (format name + raw payload bytes) instead of the plain string.
+ * (format + raw payload bytes) for every scan instead of the QR-filtered
+ * plain string.
  */
 @Composable
 fun LightQrCodeScanner(
@@ -50,20 +52,26 @@ fun LightQrCodeScanner(
     onScannedBarcode: ((LightScannedBarcode) -> Unit)? = null,
 ) {
     val permissionLauncher = rememberPermissionRequestLauncher(Manifest.permission.CAMERA)
-    LightQrCodeScanner(
-        title = title,
-        onScanned = onScanned,
+    LightCodeScanner(
         onBack = onBack,
         modifier = modifier,
+        title = title,
         formats = formats,
-        onScannedBarcode = onScannedBarcode,
         checkCameraPermission = {
             checkPermission(Manifest.permission.CAMERA).asKotlinResult
                 .map { it.permissionResult == LightServiceMethod.GetPermission.Result.Granted }
         },
         launchCameraPermissionRequest = {
             permissionLauncher?.launch()
-        }
+        },
+        onScannedBarcode = { scanned ->
+            val rich = onScannedBarcode
+            if (rich != null) {
+                rich(scanned)
+            } else if (scanned.format == LightBarcodeFormats.QR) {
+                onScanned(scanned.value)
+            }
+        },
     )
 }
 
