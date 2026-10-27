@@ -363,7 +363,13 @@ class AlertModal(private val alerts: List<Alert>, private val screenAlerts: Scre
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
         LightTheme(colors = themeColors) {
-            Column(modifier = Modifier.fillMaxSize().background(LightThemeTokens.colors.background)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(LightThemeTokens.colors.background)
+                    // Keeps taps from reaching the screen underneath, like its Home button.
+                    .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } },
+            ) {
                 LightTopBar(center = LightTopBarCenter.Text("Service Alert"))
                 var page by remember { mutableIntStateOf(0) }
                 Column(
