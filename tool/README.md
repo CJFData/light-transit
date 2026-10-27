@@ -10,6 +10,10 @@ Use it on its own or alongside the Light Phone's Directions tool. It's built on 
 
 ## 🔄 Recent updates
 
+**v1.0.2**
+- 🐛 **Closing a service alert keeps you where you were**: a tap just missing the alert's close button no longer sends you back to the home screen.
+- 🔧 **Light SDK update**: brought up to date with `light-sdk` 0.2.2.
+
 **v1.0.1**
 - 🗂️ **Simpler Settings and About**: both are now short menus that open focused pages (Agency and downloads, Service alerts, Explore and location, Map and gestures, and more). Redesigned by Jose Briones.
 - 🙏 **Thanks in About**: About → Credits now thanks Light's development team and Jose Briones.
